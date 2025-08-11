@@ -1,21 +1,30 @@
-import logging
 import itertools
+import logging
+from typing import Iterable
+
 import fingerprints
-from pprint import pprint, pformat  # noqa
 from banal import ensure_list, first
+from elasticsearch.helpers import scan
 from followthemoney import model
 from followthemoney.proxy import EntityProxy
 from followthemoney.types import registry
-from elasticsearch.helpers import scan
 
-from aleph.core import es, cache
-from aleph.model import Entity
-from aleph.index.indexes import entities_write_index, entities_read_index
-from aleph.index.util import unpack_result, delete_safe
-from aleph.index.util import authz_query, bulk_actions
-from aleph.index.util import MAX_PAGE, NUMERIC_TYPES
-from aleph.index.util import MAX_REQUEST_TIMEOUT, MAX_TIMEOUT
-
+from openaleph_search import __version__
+from openaleph_search.core import get_es
+from openaleph_search.index.indexes import (
+    entities_read_index,
+    entities_write_index,
+)
+from openaleph_search.index.util import (
+    MAX_PAGE,
+    MAX_REQUEST_TIMEOUT,
+    MAX_TIMEOUT,
+    NUMERIC_TYPES,
+    authz_query,
+    bulk_actions,
+    delete_safe,
+    unpack_result,
+)
 
 log = logging.getLogger(__name__)
 PROXY_INCLUDES = [
@@ -79,6 +88,7 @@ def iter_entities(
         query["sort"] = ensure_list(sort)
         preserve_order = True
     index = entities_read_index(schema=schemata)
+    es = get_es()
     for res in scan(
         es,
         index=index,
@@ -119,31 +129,24 @@ def entities_by_ids(
     ids = ensure_list(ids)
     if not len(ids):
         return
-    cached = cached and excludes is None and includes == PROXY_INCLUDES
     entities = {}
     if cached:
-        keys = [cache.object_key(Entity, i) for i in ids]
-        for _, entity in cache.get_many_complex(keys):
-            if entity is not None:
-                entities[entity.get("id")] = entity
+        raise RuntimeError("Caching not implemented")
 
-    missing = [i for i in ids if entities.get(id) is None]
     index = entities_read_index(schema=schemata)
 
     query = {
-        "query": {"ids": {"values": missing}},
+        "query": {"ids": {"values": ids}},
         "_source": _source_spec(includes, excludes),
         "size": MAX_PAGE,
     }
+    es = get_es()
     result = es.search(index=index, body=query)
     for doc in result.get("hits", {}).get("hits", []):
         entity = unpack_result(doc)
         if entity is not None:
             entity_id = entity.get("id")
             entities[entity_id] = entity
-            if cached:
-                key = cache.object_key(Entity, entity_id)
-                cache.set_complex(key, entity, expires=60 * 60 * 2)
 
     for i in ids:
         entity = entities.get(i)
@@ -162,16 +165,16 @@ def index_entity(entity, sync=False):
     return index_proxy(entity.collection, entity.to_proxy(), sync=sync)
 
 
-def index_proxy(collection, proxy, sync=False):
+def index_proxy(dataset: str, proxy: EntityProxy, sync=False):
     delete_entity(proxy.id, exclude=proxy.schema, sync=False)
-    return index_bulk(collection, [proxy], sync=sync)
+    return index_bulk(dataset, [proxy], sync=sync)
 
 
-def index_bulk(collection, entities, sync=False):
+def index_bulk(dataset: str, entities: Iterable[EntityProxy], sync=False):
     """Index a set of entities."""
-    entities = (format_proxy(p, collection) for p in entities)
-    entities = (e for e in entities if e is not None)
-    bulk_actions(entities, sync=sync)
+    _entities = (format_proxy(p, dataset) for p in entities)
+    _entities = (e for e in _entities if e is not None)
+    bulk_actions(_entities, sync=sync)
 
 
 def _numeric_values(type_, values):
@@ -189,7 +192,7 @@ def get_geopoints(proxy: EntityProxy) -> list[dict[str, str]]:
     return points
 
 
-def format_proxy(proxy, collection):
+def format_proxy(proxy: EntityProxy, dataset: str):
     """Apply final denormalisations to the index."""
     # Abstract entities can appear when profile fragments for a missing entity
     # are present.
@@ -231,11 +234,13 @@ def format_proxy(proxy, collection):
     if proxy.schema.is_a("Address"):
         data["geo_point"] = get_geopoints(proxy)
 
+    data["dataset"] = dataset
+
     # Context data - from aleph system, not followthemoney.
-    data["collection_id"] = collection.id
+    data["collection_id"] = first(data.get("collection_id"))
     data["role_id"] = first(data.get("role_id"))
     data["profile_id"] = first(data.get("profile_id"))
-    data["mutable"] = max(ensure_list(data.get("mutable")), default=False)
+    data["mutable"] = False  # deprecated
     data["origin"] = ensure_list(data.get("origin"))
     # Logical simplifications of dates:
     created_at = ensure_list(data.get("created_at"))
@@ -244,6 +249,8 @@ def format_proxy(proxy, collection):
     updated_at = ensure_list(data.get("updated_at")) or created_at
     if len(updated_at) > 0:
         data["updated_at"] = max(updated_at)
+
+    data["index_version"] = __version__
 
     # log.info("%s", pformat(data))
     entity_id = data.pop("id")
@@ -274,6 +281,7 @@ def checksums_count(checksums):
         body.append({"index": index})
         query = {"term": {registry.checksum.group: checksum}}
         body.append({"size": 0, "query": query})
+    es = get_es()
     results = es.msearch(body=body)
     for checksum, result in zip(checksums, results.get("responses", [])):
         total = result.get("hits", {}).get("total", {}).get("value", 0)

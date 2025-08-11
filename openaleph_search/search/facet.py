@@ -3,9 +3,6 @@ import logging
 from followthemoney import model
 from followthemoney.types import registry
 
-from aleph.model import Collection, Events, Entity
-from aleph.logic import resolver
-
 log = logging.getLogger(__name__)
 
 
@@ -78,9 +75,10 @@ class Facet(object):
 
 class SchemaFacet(Facet):
     def update(self, result, key):
-        try:
-            result["label"] = model.get(key).plural
-        except AttributeError:
+        schema = model.get(key)
+        if schema is not None:
+            result["label"] = schema.plural
+        else:
             result["label"] = key
 
 
@@ -89,23 +87,18 @@ class CountryFacet(Facet):
         result["label"] = registry.country.names.get(key, key)
 
 
-class EventFacet(Facet):
-    def update(self, result, key):
-        event = Events.get(key)
-        result["label"] = key if event is None else event.title
-
-
 class EntityFacet(Facet):
-    def expand(self, keys):
-        for key in keys:
-            resolver.queue(self.parser, Entity, key)
-        resolver.resolve(self.parser)
+    pass
+    # def expand(self, keys):
+    #     for key in keys:
+    #         resolver.queue(self.parser, Entity, key)
+    #     resolver.resolve(self.parser)
 
-    def update(self, result, key):
-        entity = resolver.get(self.parser, Entity, key)
-        if entity is not None:
-            proxy = model.get_proxy(entity)
-            result["label"] = proxy.caption
+    # def update(self, result, key):
+    #     entity = resolver.get(self.parser, Entity, key)
+    #     if entity is not None:
+    #         proxy = model.get_proxy(entity)
+    #         result["label"] = proxy.caption
 
 
 class LanguageFacet(Facet):
@@ -115,18 +108,19 @@ class LanguageFacet(Facet):
 
 class CategoryFacet(Facet):
     def update(self, result, key):
-        result["label"] = Collection.CATEGORIES.get(key, key)
+        result["label"] = key  # Collection.CATEGORIES.get(key, key)
 
 
 class CollectionFacet(Facet):
-    def expand(self, keys):
-        for key in keys:
-            if self.parser.authz.can(key, self.parser.authz.READ):
-                resolver.queue(self.parser, Collection, key)
-        resolver.resolve(self.parser)
+    pass
+    # def expand(self, keys):
+    #     for key in keys:
+    #         if self.parser.authz.can(key, self.parser.authz.READ):
+    #             resolver.queue(self.parser, Collection, key)
+    #     resolver.resolve(self.parser)
 
-    def update(self, result, key):
-        collection = resolver.get(self.parser, Collection, key)
-        if collection is not None:
-            result["label"] = collection.get("label")
-            result["category"] = collection.get("category")
+    # def update(self, result, key):
+    #     collection = resolver.get(self.parser, Collection, key)
+    #     if collection is not None:
+    #         result["label"] = collection.get("label")
+    #         result["category"] = collection.get("category")

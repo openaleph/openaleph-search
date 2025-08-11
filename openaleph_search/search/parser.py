@@ -1,12 +1,13 @@
-import logging
+from anystore.logging import get_logger
 from banal import as_bool
 from followthemoney.util import sanitize_text
 from werkzeug.datastructures import MultiDict, OrderedMultiDict
 
-from aleph.settings import SETTINGS
-from aleph.index.util import MAX_PAGE
+from openaleph_search.index.util import MAX_PAGE
+from openaleph_search.settings import Settings
 
-log = logging.getLogger(__name__)
+settings = Settings()
+log = get_logger(__name__)
 
 
 class QueryParser(object):
@@ -17,21 +18,27 @@ class QueryParser(object):
     SORT_DEFAULT = SORT_ASC
     SORTS = [SORT_ASC, SORT_DESC]
 
-    def __init__(self, args, authz, limit=None, max_limit=MAX_PAGE):
+    def __init__(
+        self,
+        args,
+        authenticated: bool | None = False,
+        limit: int | None = None,
+        max_limit: int | None = MAX_PAGE,
+    ):
         if not isinstance(args, MultiDict):
             args = OrderedMultiDict(args)
         self.args = args
-        self.authz = authz
+        self.authenticated = authenticated
         self.offset = max(0, self.getint("offset", 0))
         if limit is None:
-            limit = min(max_limit, max(0, self.getint("limit", 20)))
+            limit = min(max_limit or MAX_PAGE, max(0, self.getint("limit", 20)))
         self.limit = limit
         self.next_limit = self.getint("next_limit", limit)
         self.text = sanitize_text(self.get("q"))
         self.prefix = sanitize_text(self.get("prefix"))
 
         # Disable or enable query caching
-        self.cache = self.getbool("cache", SETTINGS.CACHE)
+        self.cache = False  # self.getbool("cache", SETTINGS.CACHE)
         self.filters = self.prefixed_items("filter:")
         self.excludes = self.prefixed_items("exclude:")
         self.empties = self.prefixed_items("empty:")
@@ -121,8 +128,8 @@ class SearchQueryParser(QueryParser):
     # Facets with known, limited cardinality:
     SMALL_FACETS = ("schema", "schemata", "collection_id", "countries", "languages")
 
-    def __init__(self, args, authz, limit=None):
-        super(SearchQueryParser, self).__init__(args, authz, limit=limit)
+    def __init__(self, *args, **kwargs):
+        super(SearchQueryParser, self).__init__(*args, **kwargs)
         self.offset = min(MAX_PAGE, self.offset)
         if (self.limit + self.offset) > MAX_PAGE:
             self.limit = max(0, MAX_PAGE - self.offset)
@@ -136,7 +143,6 @@ class SearchQueryParser(QueryParser):
         self.highlight_text = self.get("highlight_text", self.text)
         # Include highlighted fragments of matching text in the result.
         self.highlight = self.getbool("highlight", False)
-        self.highlight = self.highlight and SETTINGS.RESULT_HIGHLIGHT
         self.highlight = self.highlight and self.highlight_text
         # Length of each snippet in characters
         self.highlight_length = self.getint("highlight_length", 120)
@@ -158,13 +164,13 @@ class SearchQueryParser(QueryParser):
         """Number of distinct values to be included (i.e. top N)."""
         facet_size = self.getint("facet_size:%s" % name, 20)
         # Added to mitigate a DDoS by scripted facet bots (2020-11-24):
-        if not self.authz.logged_in and name not in self.SMALL_FACETS:
+        if not self.authenticated and name not in self.SMALL_FACETS:
             facet_size = min(50, facet_size)
         return facet_size
 
     def get_facet_total(self, name):
         """Flag to perform a count of the total number of distinct values."""
-        if not self.authz.logged_in and name not in self.SMALL_FACETS:
+        if not self.authenticated and name not in self.SMALL_FACETS:
             return False
         return self.getbool("facet_total:%s" % name, False)
 
@@ -181,7 +187,7 @@ class SearchQueryParser(QueryParser):
     def get_facet_interval(self, name):
         """Interval to facet on when faceting on date properties
 
-        See https://www.elastic.co/guide/en/elasticsearch/reference/current/search-aggregations-bucket-datehistogram-aggregation.html#calendar_intervals   # noqa
+        See https://www.elastic.co/guide/en/elasticsearch/reference/current/search-aggregations-bucket-datehistogram-aggregation.html#calendar_intervals   # noqa: B950
         for available options for possible values
         """
         return self.get("facet_interval:%s" % name)

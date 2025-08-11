@@ -1,8 +1,7 @@
 import logging
 
-from aleph.index.indexes import TYPE_MAPPINGS
-from aleph.index.util import NUMERIC_TYPES, NUMERIC, KEYWORD
-
+from openaleph_search.index.indexes import TYPE_MAPPINGS
+from openaleph_search.index.util import KEYWORD, NUMERIC, NUMERIC_TYPES
 
 log = logging.getLogger(__name__)
 

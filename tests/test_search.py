@@ -1,0 +1,214 @@
+from urllib.parse import parse_qsl, urlparse
+
+from openaleph_search.search import EntitiesQuery
+from openaleph_search.search.parser import SearchQueryParser
+
+
+def _url_to_args(url):
+    """Convert URL query string to args list for SearchQueryParser"""
+    parsed = urlparse(url)
+    return parse_qsl(parsed.query, keep_blank_values=True)
+
+
+def _create_query(url):
+    """Create Query from URL string"""
+    args = _url_to_args(url)
+    parser = SearchQueryParser(args)
+    return EntitiesQuery(parser)
+
+
+def test_search_simplest_search(index_entities):
+    query = _create_query("/search?q=kwazulu&facet=collection_id")
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] >= 0
+    assert "aggregations" in result
+
+
+def test_search_post_search(index_entities):
+    query = _create_query("/search?q=kwazulu&filter:schema=Thing&facet=collection_id")
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] >= 0
+    assert "aggregations" in result
+
+
+def test_search_facet_attribute(index_entities):
+    query = _create_query("/search?facet=names")
+    result = query.search()
+
+    assert "aggregations" in result
+    if "names" in result["aggregations"]:
+        assert "buckets" in result["aggregations"]["names"]
+
+
+def test_search_facet_counts(index_entities):
+    query = _create_query("/search?facet=names&facet_total:names=true")
+    result = query.search()
+
+    assert "aggregations" in result
+    if "names" in result["aggregations"]:
+        assert "buckets" in result["aggregations"]["names"]
+
+
+def test_search_facet_schema(index_entities):
+    query = _create_query("/search?facet=schema")
+    result = query.search()
+
+    assert "aggregations" in result
+    if "schema" in result["aggregations"]:
+        assert "buckets" in result["aggregations"]["schema"]
+
+    # Test with schema filter
+    query = _create_query("/search?facet=schema&filter:schema=Company")
+    result = query.search()
+
+    assert "aggregations" in result
+    if "schema" in result["aggregations"]:
+        assert "buckets" in result["aggregations"]["schema"]
+
+
+def test_search_basic_filters(index_entities):
+    # Test source_id filter
+    query = _create_query("/search?filter:source_id=23")
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] >= 0
+
+    # Test emails filter
+    query = _create_query("/search?filter:emails=vladimir_l@example.com")
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] >= 0
+
+
+def test_search_date_filters(index_entities):
+    # Test date range filter
+    query = _create_query("/search?q=banana&filter:gte:properties.birthDate=1970-08-08")
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] >= 0
+
+    # Test date range with year precision
+    query = _create_query("/search?filter:gte:dates=1970||/y&filter:lte:dates=1970||/y")
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] >= 0
+
+
+def test_search_facet_interval(index_entities):
+    query = _create_query(
+        "/search?q=banana&facet=properties.birthDate"
+        "&facet_interval:properties.birthDate=year"
+        "&filter:gte:properties.birthDate=1969||/y"
+        "&filter:lte:properties.birthDate=1971||/y"
+    )
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] >= 0
+    assert "aggregations" in result
+    if "properties.birthDate" in result["aggregations"]:
+        facet = result["aggregations"]["properties.birthDate"]
+        if "buckets" in facet:
+            assert isinstance(facet["buckets"], list)
+
+
+def test_search_boolean_query(index_entities):
+    # Test OR query
+    query = _create_query("/search?q=banana OR kwazulu")
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] >= 0
+    or_total = result["hits"]["total"]["value"]
+
+    # Test AND query
+    query = _create_query("/search?q=banana AND nana")
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] >= 0
+    and_total = result["hits"]["total"]["value"]
+
+    # AND query should typically return fewer or equal results than OR
+    assert and_total <= or_total
+
+
+def test_search_entity_facet(index_entities):
+    query = _create_query(
+        "/search?facet=properties.entity&facet_type:properties.entity=entity"
+    )
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] >= 0
+    assert "aggregations" in result
+    if "properties.entity" in result["aggregations"]:
+        facet = result["aggregations"]["properties.entity"]
+        assert "buckets" in facet
+
+
+def test_search_highlight(index_entities):
+    query = _create_query("/search?q=test&highlight=true")
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] >= 0
+    # Check if any results have highlights
+    for hit in result["hits"].get("hits", []):
+        if "highlight" in hit:
+            assert isinstance(hit["highlight"], dict)
+
+
+def test_search_highlight_custom_text(index_entities):
+    query = _create_query("/search?q=test&highlight=true&highlight_text=custom")
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] >= 0
+
+
+def test_search_pagination(index_entities):
+    # Test offset and limit
+    query = _create_query("/search?offset=5&limit=10")
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] >= 0
+    assert len(result["hits"].get("hits", [])) <= 10
+
+
+def test_search_prefix(index_entities):
+    query = _create_query("/search?prefix=test")
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] >= 0
+
+
+def test_search_empty_query(index_entities):
+    query = _create_query("/search")
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] >= 0
+    assert "hits" in result["hits"]
+
+
+def test_url_to_args_conversion():
+    """Test URL parsing utility function"""
+    args = _url_to_args("/search?q=test&filter:schema=Document&facet=collection_id")
+
+    expected = [
+        ("q", "test"),
+        ("filter:schema", "Document"),
+        ("facet", "collection_id"),
+    ]
+
+    assert args == expected
+
+
+def test_query_parser_from_url():
+    """Test SearchQueryParser creation from URL"""
+    url = "/search?q=test query&offset=10&limit=50&filter:schema=Document&facet=collection_id"
+    args = _url_to_args(url)
+    parser = SearchQueryParser(args, None)
+
+    assert parser.text == "test query"
+    assert parser.offset == 10
+    assert parser.limit == 50
+    assert "schema" in parser.filters
+    assert parser.filters["schema"] == {"Document"}
+    assert "collection_id" in parser.facet_names

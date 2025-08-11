@@ -1,18 +1,28 @@
 import logging
 from copy import deepcopy
+
 from banal import ensure_list
 from followthemoney import model
+from followthemoney.exc import InvalidData
 from followthemoney.schema import Schema
 from followthemoney.types import registry
-from followthemoney.exc import InvalidData
 
-from aleph.settings import SETTINGS
-from aleph.index.util import GEOPOINT, index_name
-from aleph.index.util import index_settings, configure_index, get_shard_weight
-from aleph.index.util import NUMERIC_TYPES, PARTIAL_DATE, KEYWORD
-from aleph.index.util import LATIN_TEXT, NUMERIC
+from openaleph_search.index.util import (
+    GEOPOINT,
+    KEYWORD,
+    LATIN_TEXT,
+    NUMERIC,
+    NUMERIC_TYPES,
+    PARTIAL_DATE,
+    configure_index,
+    get_shard_weight,
+    index_name,
+    index_settings,
+)
+from openaleph_search.settings import Settings
 
 log = logging.getLogger(__name__)
+settings = Settings()
 
 TYPE_MAPPINGS = {
     registry.text: {"type": "text", "index": False},
@@ -46,9 +56,9 @@ def schema_scope(schema, expand=True):
 
 def entities_index_list(schema=None, expand=True):
     """Combined index to run all queries against."""
-    for schema in schema_scope(schema, expand=expand):
-        for version in SETTINGS.INDEX_READ:
-            yield schema_index(schema, version)
+    for schema_ in schema_scope(schema, expand=expand):
+        for version in settings.index_read:
+            yield schema_index(schema_, version)
 
 
 def entities_read_index(schema=None, expand=True):
@@ -59,13 +69,13 @@ def entities_read_index(schema=None, expand=True):
 def entities_write_index(schema):
     """Index that us currently written by new queries."""
     schema = model.get(schema)
-    return schema_index(schema, SETTINGS.INDEX_WRITE)
+    return schema_index(schema, settings.index_write)
 
 
 def configure_entities():
     for schema in model.schemata.values():
         if not schema.abstract:
-            for version in SETTINGS.INDEX_READ:
+            for version in settings.index_read:
                 configure_schema(schema, version)
 
 
@@ -95,7 +105,6 @@ def configure_schema(schema: Schema, version):
             registry.checksum.group: KEYWORD,
             registry.ip.group: KEYWORD,
             registry.url.group: KEYWORD,
-            registry.iban.group: KEYWORD,
             registry.email.group: KEYWORD,
             registry.phone.group: KEYWORD,
             registry.mimetype.group: KEYWORD,

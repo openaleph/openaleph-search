@@ -1,16 +1,23 @@
 import logging
-from pprint import pprint  # noqa
-from random import randint
-from banal import hash_data
 from datetime import datetime
-from followthemoney.types import registry
-from elasticsearch.helpers import scan
+from random import randint
 
-from aleph.core import es
-from aleph.index.util import index_name, index_settings, configure_index
-from aleph.index.util import query_delete, bulk_actions, unpack_result
-from aleph.index.util import authz_query
-from aleph.index.util import KEYWORD, SHARDS_HEAVY
+from banal import hash_data
+from elasticsearch.helpers import scan
+from followthemoney.types import registry
+
+from openaleph_search.core import get_es
+from openaleph_search.index.util import (
+    KEYWORD,
+    SHARDS_HEAVY,
+    authz_query,
+    bulk_actions,
+    configure_index,
+    index_name,
+    index_settings,
+    query_delete,
+    unpack_result,
+)
 
 log = logging.getLogger(__name__)
 XREF_SOURCE = {"excludes": ["text", "countries", "entityset_ids"]}
@@ -89,6 +96,7 @@ def iter_matches(collection, authz):
         authz_query(authz, field="match_collection_id"),
     ]
     query = {"query": {"bool": {"filter": filters}}, "_source": XREF_SOURCE}
+    es = get_es()
     for res in scan(es, index=xref_index(), query=query):
         yield unpack_result(res)
 

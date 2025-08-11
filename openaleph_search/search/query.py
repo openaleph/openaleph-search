@@ -1,23 +1,22 @@
-from pprint import pprint, pformat  # noqa
-from followthemoney.types import registry
+from anystore.logging import get_logger
 from banal import ensure_list
-import structlog
+from followthemoney.types import registry
 
-from aleph.core import es
-from aleph.index.util import (
+from openaleph_search.core import get_es
+from openaleph_search.index.entities import get_field_type
+from openaleph_search.index.util import (
+    DATE_FORMAT,
     NUMERIC_TYPES,
     authz_query,
     field_filter_query,
-    DATE_FORMAT,
-    range_filter_query,
     filter_text,
+    range_filter_query,
 )
-from aleph.search.result import SearchQueryResult
-from aleph.search.parser import SearchQueryParser
-from aleph.index.entities import get_field_type
-from aleph.search.utils import get_index_field_type
+from openaleph_search.search.parser import SearchQueryParser
+from openaleph_search.search.result import SearchQueryResult
+from openaleph_search.search.utils import get_index_field_type
 
-log = structlog.get_logger(__name__)
+log = get_logger(__name__)
 
 
 def convert_filters(filters):
@@ -31,7 +30,8 @@ class Query(object):
     TEXT_FIELDS = ["text"]
     PREFIX_FIELD = "name"
     SKIP_FILTERS = []
-    AUTHZ_FIELD = "collection_id"
+    # AUTHZ_FIELD = "collection_id"
+    AUTHZ_FIELD = None  # FIXME
     HIGHLIGHT_FIELD = "text"
     SORT_FIELDS = {
         "label": "label.kw",
@@ -170,10 +170,10 @@ class Query(object):
                 filters = self.parser.filters
                 min_val = filters.get("gte:%s" % facet_name) or filters.get(
                     "gt:%s" % facet_name
-                )  # noqa
+                )
                 max_val = filters.get("lte:%s" % facet_name) or filters.get(
                     "lt:%s" % facet_name
-                )  # noqa
+                )
                 if min_val or max_val:
                     extended_bounds = {}
                     if min_val:
@@ -182,14 +182,14 @@ class Query(object):
                         extended_bounds["max"] = ensure_list(max_val)[0]
                     facet_aggregations[agg_name]["date_histogram"][
                         "extended_bounds"
-                    ] = extended_bounds  # noqa
+                    ] = extended_bounds
 
             if not len(facet_aggregations):
                 break
 
             # See here for an explanation of the whole post_filters and
             # aggregation filters thing:
-            # https://www.elastic.co/guide/en/elasticsearch/reference/6.2/search-request-post-filter.html  # noqa
+            # https://www.elastic.co/guide/en/elasticsearch/reference/6.2/search-request-post-filter.html  # noqa: B950
             other_filters = self.get_post_filters(exclude=facet_name)
             if len(other_filters["bool"]["filter"]):
                 agg_name = "%s.filtered" % facet_name
@@ -292,6 +292,7 @@ class Query(object):
     def search(self):
         """Execute the query as assmbled."""
         # log.info("Search index: %s", self.get_index())
+        es = get_es()
         result = es.search(index=self.get_index(), body=self.get_body())
         # log.info(
         #     f"Elasticsearch query [{self.to_text()}] took {result.get('took')}ms",

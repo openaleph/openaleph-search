@@ -1,5 +1,6 @@
 from unittest import TestCase
-from aleph.search.parser import QueryParser
+
+from openaleph_search.search.parser import QueryParser
 
 args = QueryParser(
     [

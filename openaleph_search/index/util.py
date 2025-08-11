@@ -1,18 +1,17 @@
-import logging
-from pprint import pprint  # noqa
+from anystore.decorators import error_handler
+from anystore.logging import get_logger
 from banal import ensure_list, is_mapping
-from elasticsearch import TransportError
 from elasticsearch.helpers import streaming_bulk
 from followthemoney.types import registry
-from servicelayer.util import backoff, service_retries
 
-from aleph.core import es
-from aleph.settings import SETTINGS
+from openaleph_search.core import get_es
+from openaleph_search.settings import Settings
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
+settings = Settings()
 
 BULK_PAGE = 500
-# cf. https://www.elastic.co/guide/en/elasticsearch/reference/current/search-request-from-size.html  # noqa
+# cf. https://www.elastic.co/guide/en/elasticsearch/reference/current/search-request-from-size.html  # noqa: B950
 MAX_PAGE = 9999
 NUMERIC_TYPES = (
     registry.number,
@@ -58,19 +57,19 @@ SHARD_WEIGHTS = {
 
 
 def get_shard_weight(schema):
-    if SETTINGS.TESTING:
+    if settings.testing:
         return 1
     return SHARD_WEIGHTS.get(schema.name, SHARDS_DEFAULT)
 
 
 def refresh_sync(sync):
-    if SETTINGS.TESTING:
+    if settings.testing:
         return True
     return True if sync else False
 
 
 def index_name(name, version):
-    return "-".join((SETTINGS.INDEX_PREFIX, name, version))
+    return "-".join((settings.index_prefix, name, version))
 
 
 def unpack_result(res):
@@ -90,7 +89,7 @@ def unpack_result(res):
 
     if "highlight" in res:
         data["highlight"] = []
-        for key, value in res.get("highlight", {}).items():
+        for _, value in res.get("highlight", {}).items():
             data["highlight"].extend(value)
 
     data["_sort"] = ensure_list(res.get("sort"))
@@ -168,34 +167,30 @@ def filter_text(spec, invert=False):
             return "%s:*" % field
 
 
+@error_handler(logger=log, max_retries=settings.elasticsearch_max_retries)
 def query_delete(index, query, sync=False, **kwargs):
     "Delete all documents matching the given query inside the index."
-    for attempt in service_retries():
-        try:
-            es.delete_by_query(
-                index=index,
-                body={"query": query},
-                _source=False,
-                slices="auto",
-                conflicts="proceed",
-                wait_for_completion=sync,
-                refresh=refresh_sync(sync),
-                request_timeout=MAX_REQUEST_TIMEOUT,
-                timeout=MAX_TIMEOUT,
-                scroll_size=SETTINGS.INDEX_DELETE_BY_QUERY_BATCHSIZE,
-                **kwargs,
-            )
-            return
-        except TransportError as exc:
-            if exc.status_code in ("400", "403"):
-                raise
-            log.warning("Query delete failed: %s", exc)
-            backoff(failures=attempt)
+    es = get_es()
+    return es.delete_by_query(
+        index=index,
+        body={"query": query},
+        _source=False,
+        slices="auto",
+        conflicts="proceed",
+        wait_for_completion=sync,
+        refresh=refresh_sync(sync),
+        request_timeout=MAX_REQUEST_TIMEOUT,
+        timeout=MAX_TIMEOUT,
+        scroll_size=settings.index_delete_by_query_batchsize,
+        **kwargs,
+    )
 
 
+@error_handler(logger=log, max_retries=settings.elasticsearch_max_retries)
 def bulk_actions(actions, chunk_size=BULK_PAGE, sync=False):
     """Bulk indexing with timeouts, bells and whistles."""
     # start_time = time()
+    es = get_es()
     stream = streaming_bulk(
         es,
         actions,
@@ -215,23 +210,20 @@ def bulk_actions(actions, chunk_size=BULK_PAGE, sync=False):
     # log.debug("Bulk write: %.4fs", duration)
 
 
+@error_handler(logger=log, max_retries=settings.elasticsearch_max_retries)
 def index_safe(index, id, body, sync=False, **kwargs):
     """Index a single document and retry until it has been stored."""
-    for attempt in service_retries():
-        try:
-            refresh = refresh_sync(sync)
-            es.index(index=index, id=id, body=body, refresh=refresh, **kwargs)
-            body["id"] = str(id)
-            body.pop("text", None)
-            return body
-        except TransportError as exc:
-            if exc.status_code in ("400", "403"):
-                raise
-            log.warning("Index error [%s:%s]: %s", index, id, exc)
-            backoff(failures=attempt)
+    es = get_es()
+    refresh = refresh_sync(sync)
+    es.index(index=index, id=id, body=body, refresh=refresh, **kwargs)
+    body["id"] = str(id)
+    body.pop("text", None)
+    return body
 
 
+@error_handler(logger=log, max_retries=settings.elasticsearch_max_retries)
 def delete_safe(index, id, sync=False):
+    es = get_es()
     es.delete(index=index, id=str(id), ignore=[404], refresh=refresh_sync(sync))
 
 
@@ -244,6 +236,7 @@ def _check_response(index, res):
     return True
 
 
+@error_handler(logger=log, max_retries=settings.elasticsearch_max_retries)
 def rewrite_mapping_safe(pending, existing):
     """This re-writes mappings for ElasticSearch in such a way that
     immutable values are kept to their existing setting, while other
@@ -277,11 +270,13 @@ def check_settings_changed(updated, existing):
     return False
 
 
+@error_handler(logger=log, max_retries=settings.elasticsearch_max_retries)
 def configure_index(index, mapping, settings):
     """Create or update a search index with the given mapping and
     SETTINGS. This will try to make a new index, or update an
     existing mapping with new properties.
     """
+    es = get_es()
     if es.indices.exists(index=index):
         log.info("Configuring index: %s...", index)
         options = {
@@ -311,9 +306,10 @@ def configure_index(index, mapping, settings):
         return True
 
 
-def index_settings(shards=5, replicas=SETTINGS.INDEX_REPLICAS):
+@error_handler(logger=log, max_retries=settings.elasticsearch_max_retries)
+def index_settings(shards=5, replicas=settings.index_replicas):
     """Configure an index in ES with support for text transliteration."""
-    if SETTINGS.TESTING:
+    if settings.testing:
         shards = 1
         replicas = 0
     return {
@@ -336,7 +332,7 @@ def index_settings(shards=5, replicas=SETTINGS.INDEX_REPLICAS):
                 "filter": {
                     "latinize": {
                         "type": "icu_transform",
-                        "id": "Any-Latin; NFKD; Lower(); [:Nonspacing Mark:] Remove; NFKC",  # noqa
+                        "id": "Any-Latin; NFKD; Lower(); [:Nonspacing Mark:] Remove; NFKC",  # noqa: B950
                     },
                     "synonames": {
                         "type": "synonym",

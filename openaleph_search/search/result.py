@@ -1,22 +1,21 @@
 import math
-import logging
-from pprint import pprint, pformat  # noqa
+from urllib.parse import urlencode
 
-from aleph.core import url_external
-from aleph.index.util import unpack_result
-from aleph.search.parser import QueryParser
-from aleph.search.facet import (
+from anystore.logging import get_logger
+
+from openaleph_search.index.util import unpack_result
+from openaleph_search.search.facet import (
     CategoryFacet,
     CollectionFacet,
     CountryFacet,
+    EntityFacet,
+    Facet,
     LanguageFacet,
     SchemaFacet,
-    EventFacet,
-    Facet,
-    EntityFacet,
 )
+from openaleph_search.search.parser import QueryParser
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 
 class QueryResult(object):
@@ -36,7 +35,7 @@ class QueryResult(object):
     def make_url(self, offset):
         args = [("offset", str(offset)), ("limit", str(self.parser.next_limit))]
         args.extend(self.parser.items)
-        return url_external(self.request.path, args)
+        return "%s?%s" % (self.request.path, urlencode(args))
 
     @property
     def next_url(self):
@@ -91,7 +90,6 @@ class SearchQueryResult(QueryResult):
         "category": CategoryFacet,
         "schema": SchemaFacet,
         "schemata": SchemaFacet,
-        "event": EventFacet,
         "entity": EntityFacet,
     }
 
