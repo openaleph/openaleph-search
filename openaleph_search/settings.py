@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     elasticsearch_max_retries: int = 3
     elasticsearch_retry_on_timeout: bool = True
 
+    index_shards: int = 5
     index_replicas: int = 0
     index_prefix: str = "openaleph"
     index_write: str = "v1"

@@ -33,34 +33,6 @@ KEYWORD_COPY = {"type": "keyword", "copy_to": "text"}
 NUMERIC = {"type": "double"}
 GEOPOINT = {"type": "geo_point"}
 
-SHARDS_LIGHT = 1
-SHARDS_DEFAULT = 5
-SHARDS_HEAVY = 10
-
-SHARD_WEIGHTS = {
-    "Folder": SHARDS_LIGHT,
-    "Package": SHARDS_LIGHT,
-    "Workbook": SHARDS_LIGHT,
-    "Video": SHARDS_LIGHT,
-    "Audio": SHARDS_LIGHT,
-    "Airplane": SHARDS_LIGHT,
-    "Associate": SHARDS_LIGHT,
-    "Family": SHARDS_LIGHT,
-    "Passport": SHARDS_LIGHT,
-    "Document": SHARDS_LIGHT,
-    "Page": SHARDS_HEAVY,
-    "Email": SHARDS_HEAVY,
-    "PlainText": SHARDS_HEAVY,
-    "Pages": SHARDS_HEAVY,
-    "Table": SHARDS_HEAVY,
-}
-
-
-def get_shard_weight(schema):
-    if settings.testing:
-        return 1
-    return SHARD_WEIGHTS.get(schema.name, SHARDS_DEFAULT)
-
 
 def refresh_sync(sync):
     if settings.testing:
@@ -68,7 +40,7 @@ def refresh_sync(sync):
     return True if sync else False
 
 
-def index_name(name, version):
+def index_name(name: str, version: str) -> str:
     return "-".join((settings.index_prefix, name, version))
 
 
@@ -307,7 +279,10 @@ def configure_index(index, mapping, settings):
 
 
 @error_handler(logger=log, max_retries=settings.elasticsearch_max_retries)
-def index_settings(shards=5, replicas=settings.index_replicas):
+def index_settings(
+    shards: int | None = settings.index_shards,
+    replicas: int | None = settings.index_replicas,
+):
     """Configure an index in ES with support for text transliteration."""
     if settings.testing:
         shards = 1

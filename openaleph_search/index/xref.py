@@ -9,7 +9,6 @@ from followthemoney.types import registry
 from openaleph_search.core import get_es
 from openaleph_search.index.util import (
     KEYWORD,
-    SHARDS_HEAVY,
     authz_query,
     bulk_actions,
     configure_index,
@@ -50,7 +49,7 @@ def configure_xref():
             "created_at": {"type": "date"},
         },
     }
-    settings = index_settings(shards=SHARDS_HEAVY)
+    settings = index_settings()
     return configure_index(xref_index(), mapping, settings)
 
 

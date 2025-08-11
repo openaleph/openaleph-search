@@ -87,7 +87,10 @@ class Query(object):
 
     def get_filters(self):
         """Apply query filters from the user interface."""
-        skip = [*self.SKIP_FILTERS, *self.parser.facet_names]
+        skip = {*self.SKIP_FILTERS, *self.parser.facet_names}
+        # important as we don't have schema indexes anymore:
+        skip.discard("schema")
+
         filters = self.get_filters_list(skip)
 
         if self.AUTHZ_FIELD is not None:

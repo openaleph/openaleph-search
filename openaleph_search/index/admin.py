@@ -1,4 +1,4 @@
-import logging
+from anystore.logging import get_logger
 
 from openaleph_search.core import get_es
 from openaleph_search.index.indexes import (
@@ -7,7 +7,7 @@ from openaleph_search.index.indexes import (
 )
 from openaleph_search.index.xref import configure_xref, xref_index
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 
 
 def upgrade_search():
@@ -22,7 +22,7 @@ def all_indexes():
 
 def delete_index():
     es = get_es()
-    log.warning("🔥 Deleting all indices")
+    log.warning("🔥 Deleting all indices 🔥")
     es.indices.delete(index=all_indexes(), ignore=[404, 400])
 
 

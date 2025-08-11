@@ -1,5 +1,7 @@
 import logging
 from copy import deepcopy
+from functools import cache
+from typing import Any, Literal, TypeAlias
 
 from banal import ensure_list
 from followthemoney import model
@@ -15,7 +17,6 @@ from openaleph_search.index.util import (
     NUMERIC_TYPES,
     PARTIAL_DATE,
     configure_index,
-    get_shard_weight,
     index_name,
     index_settings,
 )
@@ -31,65 +32,128 @@ TYPE_MAPPINGS = {
     registry.date: PARTIAL_DATE,
 }
 
+BUCKETS = ("things", "intervals", "documents", "pages")
+INDEX_BUCKET = Literal["things", "intervals", "documents", "pages"]
+PAGES = ("Page", "Pages")
 
-def schema_index(schema, version):
-    """Convert a schema object to an index name."""
-    if schema.abstract:
-        raise InvalidData("Cannot index abstract schema: %s" % schema)
-    name = "entity-%s" % schema.name.lower()
+SchemaType: TypeAlias = Schema | str
+
+
+@cache
+def ensure_schema(schema: SchemaType) -> Schema:
+    schema_ = model.get(schema)
+    if schema_ is not None:
+        return schema_
+    raise ValueError(f"Invalid schema: `{schema}`")
+
+
+@cache
+def schema_bucket(schema: SchemaType) -> INDEX_BUCKET:
+    """Convert a schema to its index bucket"""
+    schema = ensure_schema(schema)
+    if schema.name in PAGES:
+        return "pages"
+    if schema.is_a("Document"):
+        return "documents"
+    if schema.is_a("Thing"):  # catch "Event"
+        return "things"
+    if schema.is_a("Interval"):
+        return "intervals"
+    return "things"  # FIXME e.g. Mentions
+
+
+@cache
+def bucket_index(bucket: INDEX_BUCKET, version: str):
+    """Convert a bucket str to an index name."""
+    name = "entity-%s" % bucket
     return index_name(name, version=version)
 
 
-def schema_scope(schema, expand=True):
-    schemata = set()
+@cache
+def schema_index(schema: SchemaType, version: str):
+    """Convert a schema object to an index name."""
+    schema = ensure_schema(schema)
+    if schema.abstract:
+        raise InvalidData("Cannot index abstract schema: %s" % schema)
+    return bucket_index(schema_bucket(schema), version)
+
+
+def schema_scope(
+    schema: SchemaType | list[SchemaType] | None = None, expand: bool | None = True
+):
+    schemata: set[Schema] = set()
     names = ensure_list(schema) or model.schemata.values()
-    for schema in names:
-        schema = model.get(schema)
-        if schema is not None:
-            schemata.add(schema)
+    for schema_ in names:
+        if schema_:
+            schema_ = ensure_schema(schema_)
+            schemata.add(schema_)
             if expand:
-                schemata.update(schema.descendants)
+                schemata.update(schema_.descendants)
     for schema in schemata:
         if not schema.abstract:
             yield schema
 
 
-def entities_index_list(schema=None, expand=True):
+def entities_index_list(
+    schema: SchemaType | list[SchemaType] | None = None, expand: bool | None = True
+) -> set[str]:
     """Combined index to run all queries against."""
+    indexes: set[str] = set()
     for schema_ in schema_scope(schema, expand=expand):
         for version in settings.index_read:
-            yield schema_index(schema_, version)
+            indexes.add(schema_index(schema_, version))
+    return indexes
 
 
-def entities_read_index(schema=None, expand=True):
+def entities_read_index(
+    schema: SchemaType | list[SchemaType] | None = None, expand: bool | None = True
+) -> str:
+    """Current configured read indexes"""
     indexes = entities_index_list(schema=schema, expand=expand)
     return ",".join(indexes)
 
 
 def entities_write_index(schema):
-    """Index that us currently written by new queries."""
-    schema = model.get(schema)
+    """Index that is currently written by new queries."""
     return schema_index(schema, settings.index_write)
 
 
-def configure_entities():
+@cache
+def get_schema_bucket_mapping(bucket: INDEX_BUCKET) -> dict[str, Any]:
+    """Configure the property mapping for the given schema bucket"""
+    mapping = {}
     for schema in model.schemata.values():
-        if not schema.abstract:
-            for version in settings.index_read:
-                configure_schema(schema, version)
+        if schema_bucket(schema) == bucket:
+            for prop in schema.properties.values():
+                config = deepcopy(TYPE_MAPPINGS.get(prop.type, KEYWORD))
+                config["copy_to"] = ["text"]
+                mapping[prop.name] = config
+    return mapping
 
 
-def configure_schema(schema: Schema, version):
-    # Generate relevant type mappings for entity properties so that
-    # we can do correct searches on each.
-    schema_mapping = {}
-    numeric_mapping = {registry.date.group: NUMERIC}
-    for prop in schema.properties.values():
-        config = deepcopy(TYPE_MAPPINGS.get(prop.type, KEYWORD))
-        config["copy_to"] = ["text"]
-        schema_mapping[prop.name] = config
+@cache
+def get_numeric_mapping() -> dict[str, Any]:
+    mapping = {}
+    for prop in model.properties:
         if prop.type in NUMERIC_TYPES:
-            numeric_mapping[prop.name] = deepcopy(NUMERIC)
+            mapping[prop.name] = NUMERIC
+    return mapping
+
+
+def configure_entities():
+    """Configure all the entity indexes"""
+    for bucket in BUCKETS:
+        for version in settings.index_read:
+            configure_schema_bucket(bucket, version)
+
+
+def configure_schema_bucket(bucket: INDEX_BUCKET, version: str):
+    """
+    Generate relevant type mappings for entity properties so that
+    we can do correct searches on each.
+    """
+    schema_mapping = get_schema_bucket_mapping(bucket)
+    numeric_mapping = get_numeric_mapping()
 
     mapping = {
         "date_detection": False,
@@ -127,8 +191,10 @@ def configure_schema(schema: Schema, version):
             },
             "properties": {"type": "object", "properties": schema_mapping},
             "numeric": {"type": "object", "properties": numeric_mapping},
+            "geo_point": GEOPOINT,
             "role_id": KEYWORD,
             "profile_id": KEYWORD,
+            "dataset": KEYWORD,
             "collection_id": KEYWORD,
             "origin": KEYWORD,
             "created_at": {"type": "date"},
@@ -136,10 +202,6 @@ def configure_schema(schema: Schema, version):
         },
     }
 
-    # Add geopoint field for Address or RealEstate schema
-    if "longitude" in schema.properties:
-        mapping["properties"]["geo_point"] = GEOPOINT
-
-    index = schema_index(model.get(schema), version)
-    settings = index_settings(shards=get_shard_weight(schema))
+    index = bucket_index(bucket, version)
+    settings = index_settings()
     return configure_index(index, mapping, settings)

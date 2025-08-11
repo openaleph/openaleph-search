@@ -68,12 +68,13 @@ def test_search_facet_schema(index_entities):
     result = query.search()
 
     assert result["hits"]["total"]["value"] > 0
-    assert len(result["aggregations"]["schema.values"]["buckets"]) == 12
+    assert len(result["aggregations"]["schema.values"]["buckets"]) == 13
     assert result["aggregations"]["schema.values"]["buckets"] == [
         {"key": "Person", "doc_count": 5},
         {"key": "Table", "doc_count": 5},
         {"key": "Document", "doc_count": 3},
         {"key": "PlainText", "doc_count": 3},
+        {"key": "Page", "doc_count": 2},
         {"key": "Company", "doc_count": 1},
         {"key": "Email", "doc_count": 1},
         {"key": "Folder", "doc_count": 1},

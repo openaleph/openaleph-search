@@ -149,3 +149,7 @@ class QueryTestCase(TestCase):
             highlight["fields"]["text"]["highlight_query"]["query_string"]["query"],
             "bar",
         )
+
+    def test_schema_filter(self):
+        q = query([("filter:schema", "Person")])
+        assert q.get_filters() == [{"term": {"schema": "Person"}}]
