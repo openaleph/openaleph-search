@@ -25,6 +25,7 @@ from openaleph_search.index.util import (
     delete_safe,
     unpack_result,
 )
+from openaleph_search.transform import make_symbols
 
 log = logging.getLogger(__name__)
 PROXY_INCLUDES = [
@@ -210,6 +211,7 @@ def format_proxy(proxy: EntityProxy, dataset: str):
     data["schemata"] = list(proxy.schema.names)
     data["caption"] = proxy.caption
     data["fingerprints"] = list(entity_fingerprints(proxy))
+    data["symbols"] = list(make_symbols(proxy))
 
     # Slight hack: a magic property in followthemoney that gets taken out
     # of the properties and added straight to the index text.

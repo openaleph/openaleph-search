@@ -12,6 +12,9 @@ MAX_CLAUSES = 500
 REQUIRED = [registry.name, registry.identifier]
 
 
+# FIXME fingerprints = KEYWORD and add symbols!
+
+
 def _make_queries(type_, value):
     if type_ == registry.name:
         yield {

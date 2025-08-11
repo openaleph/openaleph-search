@@ -230,3 +230,25 @@ def test_search_query_parser_from_url():
     assert "schema" in parser.filters
     assert parser.filters["schema"] == {"Document"}
     assert "collection_id" in parser.facet_names
+
+
+def test_search_symbols():
+    symbol = "47200243"  # vladimir
+    query = _create_query(f"/search?filter:symbols={symbol}")
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] == 1
+    assert (
+        result["hits"]["hits"][0]["_id"] == "6cb6066ec282d5f8ddf9ca28a0d20c1713ac0a5b"
+    )
+
+
+def test_search_fingerprints():
+    fp = "l vladimir"
+    query = _create_query(f"/search?filter:fingerprints={fp}")
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] == 1
+    assert (
+        result["hits"]["hits"][0]["_id"] == "6cb6066ec282d5f8ddf9ca28a0d20c1713ac0a5b"
+    )
