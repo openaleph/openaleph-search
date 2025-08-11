@@ -1,7 +1,11 @@
+from openaleph_search.index.admin import clear_index
 from openaleph_search.index.entities import index_bulk, iter_entities
 
 
 def test_indexer(entities):
+    # clear
+    clear_index()
+
     index_bulk("test_dataset", entities)
     assert len(list(iter_entities())) == 21
 

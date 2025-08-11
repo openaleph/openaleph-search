@@ -237,7 +237,7 @@ def format_proxy(proxy: EntityProxy, dataset: str):
     data["dataset"] = dataset
 
     # Context data - from aleph system, not followthemoney.
-    data["collection_id"] = first(data.get("collection_id"))
+    data["collection_id"] = first(data.get("collection_id")) or dataset  # FIXME
     data["role_id"] = first(data.get("role_id"))
     data["profile_id"] = first(data.get("profile_id"))
     data["mutable"] = False  # deprecated

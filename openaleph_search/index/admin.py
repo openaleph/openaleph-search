@@ -22,6 +22,7 @@ def all_indexes():
 
 def delete_index():
     es = get_es()
+    log.warning("🔥 Deleting all indices")
     es.indices.delete(index=all_indexes(), ignore=[404, 400])
 
 
