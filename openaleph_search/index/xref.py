@@ -9,6 +9,7 @@ from followthemoney.types import registry
 from openaleph_search.core import get_es
 from openaleph_search.index.util import (
     KEYWORD,
+    TEXT,
     authz_query,
     bulk_actions,
     configure_index,
@@ -45,7 +46,7 @@ def configure_xref():
             "match_collection_id": KEYWORD,
             registry.country.group: KEYWORD,
             "schema": KEYWORD,
-            "text": {"type": "text", "analyzer": "latin_index"},
+            "text": TEXT,
             "created_at": {"type": "date"},
         },
     }

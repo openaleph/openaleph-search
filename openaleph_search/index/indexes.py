@@ -179,9 +179,6 @@ def configure_schema_bucket(bucket: INDEX_BUCKET, version: str):
             "fingerprints": KEYWORD,
             "text": {
                 "type": "text",
-                "analyzer": "latin_index",
-                "search_analyzer": "latin_query",
-                "search_quote_analyzer": "latin_index",
                 "term_vector": "with_positions_offsets",
             },
             "properties": {"type": "object", "properties": schema_mapping},
