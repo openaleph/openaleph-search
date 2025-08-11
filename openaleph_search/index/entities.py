@@ -2,12 +2,12 @@ import itertools
 import logging
 from typing import Iterable
 
-import fingerprints
 from banal import ensure_list, first
 from elasticsearch.helpers import scan
 from followthemoney import model
 from followthemoney.proxy import EntityProxy
 from followthemoney.types import registry
+from ftmq.util import entity_fingerprints
 
 from openaleph_search import __version__
 from openaleph_search.core import get_es
@@ -209,11 +209,7 @@ def format_proxy(proxy: EntityProxy, dataset: str):
     data = proxy.to_full_dict(matchable=True)
     data["schemata"] = list(proxy.schema.names)
     data["caption"] = proxy.caption
-
-    names = data.get("names", [])
-    fps = set([fingerprints.generate(name) for name in names])
-    fps.update(names)
-    data["fingerprints"] = [fp for fp in fps if fp is not None]
+    data["fingerprints"] = list(entity_fingerprints(proxy))
 
     # Slight hack: a magic property in followthemoney that gets taken out
     # of the properties and added straight to the index text.

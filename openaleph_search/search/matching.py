@@ -1,8 +1,8 @@
 import logging
 
-import fingerprints
 from banal import ensure_list
 from followthemoney.types import registry
+from ftmq.util import make_fingerprint
 
 from openaleph_search.index.util import bool_query, none_query
 
@@ -23,7 +23,7 @@ def _make_queries(type_, value):
                 }
             }
         }
-        fp = fingerprints.generate(value)
+        fp = make_fingerprint(value)
         if fp is None:
             return
         if fp.lower() != value.lower():
