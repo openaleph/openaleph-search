@@ -278,7 +278,6 @@ def configure_index(index, mapping, settings):
         return True
 
 
-@error_handler(logger=log, max_retries=settings.elasticsearch_max_retries)
 def index_settings(
     shards: int | None = settings.index_shards,
     replicas: int | None = settings.index_replicas,
