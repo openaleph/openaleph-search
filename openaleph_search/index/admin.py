@@ -30,6 +30,7 @@ def delete_index():
 
 def clear_index():
     es = get_es()
+    log.warning("🔥 Deleting all data 🔥")
     es.delete_by_query(
         index=all_indexes(),
         body={"query": {"match_all": {}}},

@@ -5,7 +5,7 @@ from ftmq.io import smart_read_proxies
 from ftmq.util import make_entity
 
 from openaleph_search.core import get_es
-from openaleph_search.index.admin import delete_index, upgrade_search
+from openaleph_search.index.admin import clear_index, delete_index, upgrade_search
 from openaleph_search.index.entities import index_bulk
 
 FIXTURES_PATH = (Path(__file__).parent / "fixtures").absolute()
@@ -59,9 +59,12 @@ def entities():
 
 @pytest.fixture(scope="module")
 def index_entities(entities):
+    """Index some entities and delete them after test run"""
     index_bulk("test_samples", entities)
     index_bulk("test_private", map(make_entity, TEST_PRIVATE))
     index_bulk("test_public", map(make_entity, TEST_PUBLIC))
+    yield
+    clear_index()
 
 
 @pytest.fixture(scope="module", autouse=True)
