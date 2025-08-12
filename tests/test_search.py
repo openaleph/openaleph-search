@@ -252,3 +252,9 @@ def test_search_fingerprints():
     assert (
         result["hits"]["hits"][0]["_id"] == "6cb6066ec282d5f8ddf9ca28a0d20c1713ac0a5b"
     )
+
+
+def test_search_prefix():
+    query = _create_query(f"/search?prefix=vla")
+    result = query.search()
+    assert result["hits"]["total"]["value"] == 2

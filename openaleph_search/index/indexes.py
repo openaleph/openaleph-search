@@ -12,6 +12,7 @@ from followthemoney.types import registry
 from openaleph_search.index.util import (
     GEOPOINT,
     KEYWORD,
+    KEYWORD_COPY,
     NUMERIC,
     NUMERIC_TYPES,
     PARTIAL_DATE,
@@ -175,8 +176,8 @@ def configure_schema_bucket(bucket: INDEX_BUCKET, version: str):
             registry.date.group: PARTIAL_DATE,
             registry.address.group: KEYWORD,
             registry.name.group: KEYWORD,
-            "symbols": KEYWORD,
-            "fingerprints": KEYWORD,
+            "symbols": KEYWORD_COPY,
+            "fingerprints": KEYWORD_COPY,
             "text": {
                 "type": "text",
                 "term_vector": "with_positions_offsets",

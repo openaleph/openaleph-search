@@ -15,8 +15,8 @@ SCORE_CUTOFF = 0.5
 
 
 class EntitiesQuery(Query):
-    TEXT_FIELDS = ["fingerprints.text^3", "text"]
-    PREFIX_FIELD = "fingerprints.text"
+    TEXT_FIELDS = ["fingerprints^3", "text"]
+    PREFIX_FIELD = "fingerprints"
     HIGHLIGHT_FIELD = "properties.*"
     SKIP_FILTERS = ["schema", "schemata"]
     SOURCE = ENTITY_SOURCE

@@ -57,9 +57,7 @@ class Query(object):
             }
             query.append(qs)
         if self.parser.prefix:
-            query.append(
-                {"match_phrase_prefix": {self.PREFIX_FIELD: self.parser.prefix}}
-            )
+            query.append({"prefix": {self.PREFIX_FIELD: self.parser.prefix}})
         if not len(query):
             query.append({"match_all": {}})
         return query
