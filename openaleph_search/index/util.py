@@ -1,10 +1,15 @@
+import asyncio
+import itertools
+from typing import Generator, Iterable, TypeAlias
+
 from anystore.decorators import error_handler
 from anystore.logging import get_logger
+from anystore.types import SDict
 from banal import ensure_list, is_mapping
-from elasticsearch.helpers import streaming_bulk
+from elasticsearch.helpers import async_bulk
 from followthemoney.types import registry
 
-from openaleph_search.core import get_es
+from openaleph_search.core import get_async_es, get_es
 from openaleph_search.settings import Settings
 
 log = get_logger(__name__)
@@ -28,13 +33,20 @@ TEXT = {
     "analyzer": "default",
     "search_analyzer": "default",
 }
+ANNOTATED_TEXT = {
+    "type": "annotated_text",
+    "analyzer": "default",
+    "search_analyzer": "default",
+}
 KEYWORD = {"type": "keyword"}
 KEYWORD_COPY = {"type": "keyword", "copy_to": "text"}
 NUMERIC = {"type": "double"}
 GEOPOINT = {"type": "geo_point"}
 
+Actions: TypeAlias = Generator[SDict, None, None] | Iterable[SDict]
 
-def refresh_sync(sync):
+
+def refresh_sync(sync: bool | None = False) -> bool:
     if settings.testing:
         return True
     return True if sync else False
@@ -44,7 +56,7 @@ def index_name(name: str, version: str) -> str:
     return "-".join((settings.index_prefix, name, version))
 
 
-def unpack_result(res):
+def unpack_result(res: SDict) -> SDict | None:
     """Turn a document hit from ES into a more traditional JSON object."""
     error = res.get("error")
     if error is not None:
@@ -79,18 +91,18 @@ def authz_query(authz, field="collection_id"):
     return {"terms": {field: collections}}
 
 
-def bool_query():
+def bool_query() -> SDict:
     return {"bool": {"should": [], "filter": [], "must": [], "must_not": []}}
 
 
-def none_query(query=None):
+def none_query(query: SDict | None = None) -> SDict:
     if query is None:
         query = bool_query()
     query["bool"]["must"].append({"match_none": {}})
     return query
 
 
-def field_filter_query(field, values):
+def field_filter_query(field: str, values: str | Iterable[str]) -> SDict:
     """Need to define work-around for full-text fields."""
     values = ensure_list(values)
     if not len(values):
@@ -107,7 +119,7 @@ def field_filter_query(field, values):
     return {"terms": {field: values}}
 
 
-def range_filter_query(field, ops):
+def range_filter_query(field: str, ops) -> SDict:
     return {"range": {field: ops}}
 
 
@@ -146,7 +158,7 @@ def query_delete(index, query, sync=False, **kwargs):
     return es.delete_by_query(
         index=index,
         body={"query": query},
-        _source=False,
+        # _source=False,
         slices="auto",
         conflicts="proceed",
         wait_for_completion=sync,
@@ -158,28 +170,74 @@ def query_delete(index, query, sync=False, **kwargs):
     )
 
 
+def bulk_actions(
+    actions: Actions,
+    chunk_size: int | None = BULK_PAGE,
+    sync: bool | None = False,
+    max_concurrency: int | None = settings.indexer_concurrency,
+):
+    """Bulk indexing with parallel async processing - entry point for sync
+    applications"""
+    return asyncio.run(bulk_actions_async(actions, chunk_size, sync, max_concurrency))
+
+
 @error_handler(logger=log, max_retries=settings.elasticsearch_max_retries)
-def bulk_actions(actions, chunk_size=BULK_PAGE, sync=False):
-    """Bulk indexing with timeouts, bells and whistles."""
-    # start_time = time()
-    es = get_es()
-    stream = streaming_bulk(
-        es,
-        actions,
-        chunk_size=chunk_size,
-        max_retries=10,
-        yield_ok=False,
-        raise_on_error=False,
-        refresh=refresh_sync(sync),
-        request_timeout=MAX_REQUEST_TIMEOUT,
-        timeout=MAX_TIMEOUT,
-    )
-    for _, details in stream:
-        if details.get("delete", {}).get("status") == 404:
+async def bulk_actions_async(
+    actions: Actions,
+    chunk_size: int | None = BULK_PAGE,
+    sync: bool | None = False,
+    max_concurrency: int | None = settings.indexer_concurrency,
+):
+    """Async parallel bulk indexing with concurrency control."""
+    es = await get_async_es()
+
+    async def process_chunk(chunk_actions):
+        try:
+            result = await async_bulk(
+                es,
+                chunk_actions,
+                chunk_size=chunk_size,
+                max_retries=10,
+                refresh=refresh_sync(sync),
+                request_timeout=MAX_REQUEST_TIMEOUT,
+            )
+            success, failed = result
+            failed_list = ensure_list(failed) if failed else []
+            for failure in failed_list:
+                if failure.get("delete", {}).get("status") == 404:
+                    continue
+                log.warning("Bulk index error: %r", failure)
+            return success, failed_list
+        except Exception as e:
+            log.error("Bulk indexing chunk failed: %r", e)
+            return 0, []
+
+    chunks = itertools.batched(actions, n=BULK_PAGE)
+    max_concurrency = max_concurrency or settings.indexer_concurrency
+    semaphore = asyncio.Semaphore(max_concurrency)
+
+    async def process_with_semaphore(chunk):
+        async with semaphore:
+            return await process_chunk(chunk)
+
+    tasks = [process_with_semaphore(chunk) for chunk in chunks]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    total_success = 0
+    total_failed = 0
+    for result in results:
+        if isinstance(result, Exception):
+            log.error("Task failed with exception: %r", result)
             continue
-        log.warning("Bulk index error: %r", details)
-    # duration = (time() - start_time)
-    # log.debug("Bulk write: %.4fs", duration)
+        success, failed = result
+        total_success += success
+        total_failed += len(failed)
+
+    log.info(
+        "Bulk indexing completed: %d successful, %d failed", total_success, total_failed
+    )
+
+    await es.close()
 
 
 @error_handler(logger=log, max_retries=settings.elasticsearch_max_retries)

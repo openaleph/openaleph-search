@@ -3,7 +3,7 @@ from functools import cache
 from anystore.decorators import error_handler
 from anystore.logging import get_logger
 from banal import ensure_list
-from elasticsearch import Elasticsearch
+from elasticsearch import AsyncElasticsearch, Elasticsearch
 
 from openaleph_search.settings import Settings
 
@@ -34,6 +34,26 @@ def _get_client() -> Elasticsearch:
     return es
 
 
+@error_handler(logger=log)
+async def _get_async_client() -> AsyncElasticsearch:
+    settings = Settings()
+    urls = _nodes()
+    es = AsyncElasticsearch(
+        hosts=urls,
+        request_timeout=settings.elasticsearch_timeout,
+        max_retries=settings.elasticsearch_max_retries,
+        retry_on_timeout=settings.elasticsearch_retry_on_timeout,
+        retry_on_status=[502, 503, 504],
+    )
+    await es.info()
+    log.info("Connected to AsyncElasticsearch", nodes=urls)
+    return es
+
+
 @cache
 def get_es() -> Elasticsearch:
     return _get_client()
+
+
+async def get_async_es() -> AsyncElasticsearch:
+    return await _get_async_client()
