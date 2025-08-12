@@ -180,7 +180,8 @@ def configure_schema_bucket(bucket: INDEX_BUCKET, version: str):
             "fingerprints": KEYWORD_COPY,
             "text": {
                 "type": "text",
-                "term_vector": "with_positions_offsets",
+                # "term_vector": "with_positions_offsets",
+                "index_options": "offsets",
             },
             "properties": {"type": "object", "properties": schema_mapping},
             "numeric": {"type": "object", "properties": numeric_mapping},
