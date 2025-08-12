@@ -264,7 +264,7 @@ def configure_index(index, mapping, settings):
             if not _check_response(index, res):
                 return False
         mapping = rewrite_mapping_safe(mapping, config.get("mappings"))
-        res = es.indices.put_mapping(body=mapping, ignore=[400], **options)
+        res = es.indices.put_mapping(body=mapping, **options)
         if not _check_response(index, res):
             return False
         res = es.indices.open(**options)
@@ -272,7 +272,7 @@ def configure_index(index, mapping, settings):
     else:
         log.info("Creating index: %s...", index)
         body = {"settings": settings, "mappings": mapping}
-        res = es.indices.create(index, body=body)
+        res = es.indices.create(index=index, body=body)
         if not _check_response(index, res):
             return False
         return True

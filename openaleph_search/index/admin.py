@@ -23,7 +23,9 @@ def all_indexes():
 def delete_index():
     es = get_es()
     log.warning("🔥 Deleting all indices 🔥")
-    es.indices.delete(index=all_indexes(), ignore=[404, 400])
+    for index in all_indexes().split(","):
+        if es.indices.exists(index=index):
+            es.indices.delete(index=index)
 
 
 def clear_index():
@@ -34,5 +36,4 @@ def clear_index():
         refresh=True,
         wait_for_completion=True,
         conflicts="proceed",
-        ignore=[404],
     )

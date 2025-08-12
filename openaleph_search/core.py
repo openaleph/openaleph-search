@@ -10,12 +10,12 @@ from openaleph_search.settings import Settings
 log = get_logger(__name__)
 
 
-def _nodes() -> set[str]:
+def _nodes() -> list[str]:
     nodes: set[str] = set()
     settings = Settings()
     for node in ensure_list(settings.elasticsearch_url):
         nodes.add(str(node))
-    return nodes
+    return list(nodes)
 
 
 @error_handler(logger=log)
@@ -23,8 +23,8 @@ def _get_client() -> Elasticsearch:
     settings = Settings()
     urls = _nodes()
     es = Elasticsearch(
-        urls,
-        timeout=settings.elasticsearch_timeout,
+        hosts=urls,
+        request_timeout=settings.elasticsearch_timeout,
         max_retries=settings.elasticsearch_max_retries,
         retry_on_timeout=settings.elasticsearch_retry_on_timeout,
         retry_on_status=[502, 503, 504],
