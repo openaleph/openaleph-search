@@ -255,6 +255,12 @@ def test_search_fingerprints():
 
 
 def test_search_prefix():
-    query = _create_query(f"/search?prefix=vla")
+    query = _create_query("/search?prefix=vla")
     result = query.search()
     assert result["hits"]["total"]["value"] == 2
+
+
+def test_search_nonlatin():
+    query = _create_query("/search?q=Українська")
+    result = query.search()
+    assert result["hits"]["total"]["value"] == 1
