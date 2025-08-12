@@ -8,11 +8,15 @@ def _search_highlight(q: str) -> str | None:
     res = query.search()
     for hit in res["hits"]["hits"]:
         for values in hit["highlight"].values():
-            return values[0]
+            return " ".join(values)
 
 
 def test_highlighting(index_entities):
     highlight = _search_highlight("search wikipedia")
+    assert highlight is not None
+    assert "<em>Search</em> <em>Wikipedia</em>" in highlight
+
+    highlight = _search_highlight('"search wikipedia"')
     assert highlight is not None
     assert "<em>Search</em> <em>Wikipedia</em>" in highlight
 
