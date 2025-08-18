@@ -7,7 +7,7 @@ from elasticsearch.helpers import scan
 from followthemoney import model
 from followthemoney.proxy import EntityProxy
 from followthemoney.types import registry
-from ftmq.util import entity_fingerprints
+from ftmq.util import entity_fingerprints, get_symbols
 
 from openaleph_search import __version__
 from openaleph_search.core import get_es
@@ -19,13 +19,12 @@ from openaleph_search.index.util import (
     MAX_PAGE,
     MAX_REQUEST_TIMEOUT,
     MAX_TIMEOUT,
-    NUMERIC_TYPES,
-    authz_query,
     bulk_actions,
     delete_safe,
     unpack_result,
 )
-from openaleph_search.transform import make_symbols
+from openaleph_search.mapping import NUMERIC_TYPES, Field
+from openaleph_search.query.util import datasets_query
 
 log = logging.getLogger(__name__)
 PROXY_INCLUDES = [
@@ -50,7 +49,7 @@ def _source_spec(includes, excludes):
 def _entities_query(filters, authz, collection_id, schemata):
     filters = filters or []
     if authz is not None:
-        filters.append(authz_query(authz))
+        filters.append(datasets_query(authz))
     if collection_id is not None:
         filters.append({"term": {"collection_id": collection_id}})
     # if ensure_list(schemata):
@@ -208,10 +207,10 @@ def format_proxy(proxy: EntityProxy, dataset: str):
     if proxy.schema.name == "Pages":
         proxy.add("bodyText", " ".join(proxy.get("indexText")))
     data = proxy.to_full_dict(matchable=True)
-    data["schemata"] = list(proxy.schema.names)
-    data["caption"] = proxy.caption
-    data["fingerprints"] = list(entity_fingerprints(proxy))
-    data["symbols"] = list(make_symbols(proxy))
+    data[Field.SCHEMATA] = list(proxy.schema.names)
+    data[Field.CAPTION] = proxy.caption
+    data[Field.FINGERPRINTS] = list(entity_fingerprints(proxy))
+    data[Field.NAME_SYMBOLS] = list(get_symbols(proxy))
 
     # Slight hack: a magic property in followthemoney that gets taken out
     # of the properties and added straight to the index text.

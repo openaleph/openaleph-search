@@ -4,6 +4,7 @@ from urllib.parse import urlencode
 from anystore.logging import get_logger
 
 from openaleph_search.index.util import unpack_result
+from openaleph_search.parse.parser import QueryParser
 from openaleph_search.search.facet import (
     CategoryFacet,
     CollectionFacet,
@@ -13,7 +14,6 @@ from openaleph_search.search.facet import (
     LanguageFacet,
     SchemaFacet,
 )
-from openaleph_search.search.parser import QueryParser
 
 log = get_logger(__name__)
 

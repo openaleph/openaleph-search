@@ -1,7 +1,7 @@
 from unittest import TestCase
 
-from openaleph_search.search.parser import SearchQueryParser
-from openaleph_search.search.query import Query
+from openaleph_search.parse.parser import SearchQueryParser
+from openaleph_search.query.queries import Query
 
 
 def query(args):

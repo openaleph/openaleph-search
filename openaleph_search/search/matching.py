@@ -4,7 +4,7 @@ from banal import ensure_list
 from followthemoney.types import registry
 from ftmq.util import make_fingerprint
 
-from openaleph_search.index.util import bool_query, none_query
+from openaleph_search.query.util import bool_query, none_query
 
 log = logging.getLogger(__name__)
 

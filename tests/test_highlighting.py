@@ -1,5 +1,5 @@
-from openaleph_search.search import EntitiesQuery
-from openaleph_search.search.parser import SearchQueryParser
+from openaleph_search.parse.parser import SearchQueryParser
+from openaleph_search.query.queries import EntitiesQuery
 
 
 def _search_highlight(q: str) -> str | None:

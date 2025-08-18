@@ -1,7 +1,7 @@
 from urllib.parse import parse_qsl, urlparse
 
-from openaleph_search.search import EntitiesQuery
-from openaleph_search.search.parser import SearchQueryParser
+from openaleph_search.parse.parser import SearchQueryParser
+from openaleph_search.query.queries import EntitiesQuery
 
 
 def _url_to_args(url):
@@ -233,8 +233,8 @@ def test_search_query_parser_from_url():
 
 
 def test_search_symbols():
-    symbol = "47200243"  # vladimir
-    query = _create_query(f"/search?filter:symbols={symbol}")
+    symbol = "[NAME:47200243]"  # vladimir
+    query = _create_query(f"/search?filter:name_symbols={symbol}")
     result = query.search()
 
     assert result["hits"]["total"]["value"] == 1

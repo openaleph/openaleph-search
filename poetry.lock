@@ -1442,12 +1442,10 @@ name = "ftmq"
 version = "4.1.4"
 description = "followthemoney query dsl and io helpers"
 optional = false
-python-versions = "<4,>=3.11"
+python-versions = ">=3.11,<4"
 groups = ["main"]
-files = [
-    {file = "ftmq-4.1.4-py3-none-any.whl", hash = "sha256:422c99fb4f1bcd8496347e5b39b8615672f9190aef5ad4e4f4bce1b10f581c07"},
-    {file = "ftmq-4.1.4.tar.gz", hash = "sha256:80f41f6d366c51447f0c49a888f63bc2853856fc17c5d619fd0ac94f95729649"},
-]
+files = []
+develop = false
 
 [package.dependencies]
 anystore = ">=0.3.10,<0.4.0"
@@ -1467,6 +1465,12 @@ level = ["plyvel (>=1.5.1,<2.0.0)"]
 postgres = ["psycopg2 (>=2.9.10,<3.0.0)", "sqlalchemy (>=2.0.36,<3.0.0)"]
 redis = ["fakeredis (>=2.26.2,<3.0.0)", "redis (>=5.2.1,<6.0.0)"]
 sql = ["sqlalchemy (>=2.0.36,<3.0.0)"]
+
+[package.source]
+type = "git"
+url = "https://github.com/dataresearchcenter/ftmq.git"
+reference = "HEAD"
+resolved_reference = "a8ab6965e0c0c1588d72bd43be0a5491009af856"
 
 [[package]]
 name = "ghp-import"
@@ -4608,13 +4612,13 @@ jupyter = ["ipywidgets (>=7.5.1,<9)"]
 
 [[package]]
 name = "rigour"
-version = "1.2.4"
+version = "1.2.6"
 description = "Financial crime domain data validation and normalization library."
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "rigour-1.2.4-py3-none-any.whl", hash = "sha256:2f8875d1ce8f27218baec4867711d165cf9e602a624fc2b08fafb9ef49fdb84d"},
+    {file = "rigour-1.2.6-py3-none-any.whl", hash = "sha256:d17c29f658b674e124b5d557e96f2fb2aa685a50442b3a2b9d15dd4c9f9c0853"},
 ]
 
 [package.dependencies]
@@ -5788,4 +5792,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<4"
-content-hash = "a2ed4de7a15a8cd1dc284e7e3eb0c2ceb6efaf6476eb1d9c5f0520b1d086bcae"
+content-hash = "f83e210dcb15835092e6d0f8ac028a08bc6dbb2f0885fbf8a6a68617c25cecfb"

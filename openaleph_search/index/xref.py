@@ -8,9 +8,6 @@ from followthemoney.types import registry
 
 from openaleph_search.core import get_es
 from openaleph_search.index.util import (
-    KEYWORD,
-    TEXT,
-    authz_query,
     bulk_actions,
     configure_index,
     index_name,
@@ -18,6 +15,8 @@ from openaleph_search.index.util import (
     query_delete,
     unpack_result,
 )
+from openaleph_search.mapping import FieldType
+from openaleph_search.query.util import datasets_query
 
 log = logging.getLogger(__name__)
 XREF_SOURCE = {"excludes": ["text", "countries", "entityset_ids"]}
@@ -35,18 +34,18 @@ def configure_xref():
         "properties": {
             "score": {"type": "float"},
             "doubt": {"type": "float"},
-            "method": KEYWORD,
+            "method": FieldType.KEYWORD,
             # TODO: remove "random" field once "doubt" field has fermented
             # in production
             "random": {"type": "integer"},
-            "entity_id": KEYWORD,
-            "collection_id": KEYWORD,
-            "entityset_ids": KEYWORD,
-            "match_id": KEYWORD,
-            "match_collection_id": KEYWORD,
-            registry.country.group: KEYWORD,
-            "schema": KEYWORD,
-            "text": TEXT,
+            "entity_id": FieldType.KEYWORD,
+            "collection_id": FieldType.KEYWORD,
+            "entityset_ids": FieldType.KEYWORD,
+            "match_id": FieldType.KEYWORD,
+            "match_collection_id": FieldType.KEYWORD,
+            registry.country.group: FieldType.KEYWORD,
+            "schema": FieldType.KEYWORD,
+            "text": FieldType.TEXT,
             "created_at": {"type": "date"},
         },
     }
@@ -89,11 +88,11 @@ def index_matches(collection, matches, sync=False):
     bulk_actions(_index_form(collection, matches), sync=sync)
 
 
-def iter_matches(collection, authz):
+def iter_matches(collection_id: int, allowed_datasets: list[str]):
     """Scan all matching xref results, does not support sorting."""
     filters = [
-        {"term": {"collection_id": collection.id}},
-        authz_query(authz, field="match_collection_id"),
+        {"term": {"collection_id": collection_id}},
+        datasets_query(allowed_datasets, field="match_collection_id"),
     ]
     query = {"query": {"bool": {"filter": filters}}, "_source": XREF_SOURCE}
     es = get_es()

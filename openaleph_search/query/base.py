@@ -1,49 +1,42 @@
+from typing import Any, ClassVar
+
 from anystore.logging import get_logger
 from banal import ensure_list
 from followthemoney.types import registry
 
 from openaleph_search.core import get_es
 from openaleph_search.index.entities import get_field_type
-from openaleph_search.index.util import (
-    DATE_FORMAT,
-    NUMERIC_TYPES,
-    authz_query,
+from openaleph_search.mapping import DATE_FORMAT, NUMERIC_TYPES, get_index_field_type
+from openaleph_search.parse.parser import SearchQueryParser
+from openaleph_search.query.util import (
+    datasets_query,
     field_filter_query,
     filter_text,
     range_filter_query,
 )
-from openaleph_search.search.parser import SearchQueryParser
 from openaleph_search.search.result import SearchQueryResult
-from openaleph_search.search.utils import get_index_field_type
 
 log = get_logger(__name__)
 
 
-def convert_filters(filters):
-    ret = []
-    for field, values in filters.items():
-        ret.append(field_filter_query(field, values))
-    return ret
-
-
-class Query(object):
-    TEXT_FIELDS = ["text"]
-    PREFIX_FIELD = "name"
-    SKIP_FILTERS = []
-    # AUTHZ_FIELD = "collection_id"
-    AUTHZ_FIELD = None  # FIXME
-    HIGHLIGHT_FIELD = "text"
-    SORT_FIELDS = {
+class Query:
+    TEXT_FIELDS: ClassVar[list[str]] = ["text"]
+    PREFIX_FIELD: ClassVar[str] = "name"
+    SKIP_FILTERS: ClassVar[list[str]] = []
+    AUTHZ_FIELD = None
+    # AUTHZ_FIELD: ClassVar[str | None] = "collection_id"
+    HIGHLIGHT_FIELD: ClassVar[str] = "text"
+    SORT_FIELDS: ClassVar[dict[str, str]] = {
         "label": "label.kw",
         "score": "_score",
     }
-    SORT_DEFAULT = ["_score"]
-    SOURCE = {}
+    SORT_DEFAULT: ClassVar[list[str]] = ["_score"]
+    SOURCE: ClassVar[dict[str, Any]] = {}
 
-    def __init__(self, parser):
+    def __init__(self, parser: SearchQueryParser) -> None:
         self.parser = parser
 
-    def get_text_query(self):
+    def get_text_query(self) -> list[dict[str, Any]]:
         query = []
         if self.parser.text:
             qs = {
@@ -62,7 +55,7 @@ class Query(object):
             query.append({"match_all": {}})
         return query
 
-    def get_filters_list(self, skip):
+    def get_filters_list(self, skip: set[str]) -> list[dict[str, Any]]:
         filters = []
         range_filters = dict()
         for field, values in self.parser.filters.items():
@@ -83,7 +76,7 @@ class Query(object):
 
         return filters
 
-    def get_filters(self):
+    def get_filters(self) -> list[dict[str, Any]]:
         """Apply query filters from the user interface."""
         skip = {*self.SKIP_FILTERS, *self.parser.facet_names}
         # important as we don't have schema indexes anymore:
@@ -95,12 +88,15 @@ class Query(object):
             # This enforces the authorization (access control) rules on
             # a particular query by comparing the collections a user is
             # authorized for with the one on the document.
-            if self.parser.authz and not self.parser.authz.is_admin:
-                authz = authz_query(self.parser.authz, field=self.AUTHZ_FIELD)
-                filters.append(authz)
+            datasets = datasets_query(
+                self.parser.allowed_datasets,
+                field=self.AUTHZ_FIELD,
+                auth_is_admin=self.parser.authz_is_admin,
+            )
+            filters.append(datasets)
         return filters
 
-    def get_post_filters(self, exclude=None):
+    def get_post_filters(self, exclude: str | None = None) -> dict[str, dict[str, Any]]:
         """Apply post-aggregation query filters."""
         pre = set(self.parser.filters.keys())
         pre = pre.difference(self.parser.facet_names)
@@ -108,7 +104,7 @@ class Query(object):
         filters = self.get_filters_list(skip)
         return {"bool": {"filter": filters}}
 
-    def get_negative_filters(self):
+    def get_negative_filters(self) -> list[dict[str, Any]]:
         """Apply negative filters."""
         filters = []
         for field, _ in self.parser.empties.items():
@@ -118,7 +114,7 @@ class Query(object):
             filters.append(field_filter_query(field, values))
         return filters
 
-    def get_query(self):
+    def get_query(self) -> dict[str, Any]:
         return {
             "bool": {
                 "should": self.get_text_query(),
@@ -129,14 +125,14 @@ class Query(object):
             }
         }
 
-    def get_full_query(self):
+    def get_full_query(self) -> dict[str, Any]:
         """Return a version of the query with post-filters included."""
         query = self.get_query()
         post_filters = self.get_post_filters()["bool"]["filter"]
         query["bool"]["filter"].extend(post_filters)
         return query
 
-    def get_aggregations(self):
+    def get_aggregations(self) -> dict[str, Any]:
         """Aggregate the query in order to generate faceted results."""
         aggregations = {}
         for facet_name in self.parser.facet_names:
@@ -203,7 +199,7 @@ class Query(object):
 
         return aggregations
 
-    def get_sort(self):
+    def get_sort(self) -> list[str | dict[str, dict[str, Any]]]:
         """Pick one of a set of named result orderings."""
         if not len(self.parser.sorts):
             return self.SORT_DEFAULT
@@ -224,7 +220,7 @@ class Query(object):
             sort_fields.append({field: config})
         return list(reversed(sort_fields))
 
-    def get_highlight(self):
+    def get_highlight(self) -> dict[str, Any]:
         if not self.parser.highlight:
             return {}
         return {
@@ -247,10 +243,10 @@ class Query(object):
             },
         }
 
-    def get_source(self):
+    def get_source(self) -> dict[str, Any]:
         return self.SOURCE
 
-    def get_body(self):
+    def get_body(self) -> dict[str, Any]:
         body = {
             "query": self.get_query(),
             "post_filter": self.get_post_filters(),
@@ -264,10 +260,10 @@ class Query(object):
         # log.info("Query: %s", pformat(body))
         return body
 
-    def get_index(self):
+    def get_index(self) -> str:
         raise NotImplementedError
 
-    def to_text(self, empty="*:*"):
+    def to_text(self, empty: str = "*:*") -> str:
         """Generate a string representation of the query."""
         parts = []
         if self.parser.text:
@@ -290,7 +286,7 @@ class Query(object):
             parts.remove(empty)
         return " ".join([p for p in parts if p is not None])
 
-    def search(self):
+    def search(self) -> dict[str, Any]:
         """Execute the query as assmbled."""
         log.debug("Search index: %s", self.get_index())
         es = get_es()
@@ -306,7 +302,9 @@ class Query(object):
         return result
 
     @classmethod
-    def handle(cls, request, parser=None, **kwargs):
+    def handle(
+        cls, request: Any, parser: SearchQueryParser | None = None, **kwargs: Any
+    ) -> SearchQueryResult:
         if parser is None:
             parser = SearchQueryParser(request.args, request.authz)
         query = cls(parser, **kwargs)

@@ -1,3 +1,5 @@
+from typing import Any, Iterator, cast
+
 from anystore.logging import get_logger
 from banal import as_bool
 from followthemoney.util import sanitize_text
@@ -10,7 +12,7 @@ settings = Settings()
 log = get_logger(__name__)
 
 
-class QueryParser(object):
+class QueryParser:
     """Hold state for common query parameters."""
 
     SORT_ASC = "asc"
@@ -20,18 +22,18 @@ class QueryParser(object):
 
     def __init__(
         self,
-        args,
+        args: MultiDict | dict[str, Any],
         authenticated: bool | None = False,
         limit: int | None = None,
         max_limit: int | None = MAX_PAGE,
     ):
         if not isinstance(args, MultiDict):
             args = OrderedMultiDict(args)
-        self.args = args
+        self.args: MultiDict = cast(MultiDict, args)
         self.authenticated = authenticated
-        self.offset = max(0, self.getint("offset", 0))
+        self.offset = max(0, self.getint("offset", 0) or 0)
         if limit is None:
-            limit = min(max_limit or MAX_PAGE, max(0, self.getint("limit", 20)))
+            limit = min(max_limit or MAX_PAGE, max(0, self.getint("limit", 20) or 20))
         self.limit = limit
         self.next_limit = self.getint("next_limit", limit)
         self.text = sanitize_text(self.get("q"))
@@ -44,12 +46,12 @@ class QueryParser(object):
         self.empties = self.prefixed_items("empty:")
 
     @property
-    def page(self):
+    def page(self) -> int:
         if self.limit == 0:
             return 1
         return (self.offset // self.limit) + 1
 
-    def prefixed_items(self, prefix):
+    def prefixed_items(self, prefix: str) -> dict[str, set[str]]:
         items = {}
         for key in self.args.keys():
             if not key.startswith(prefix):
@@ -59,7 +61,7 @@ class QueryParser(object):
         return items
 
     @property
-    def sorts(self):
+    def sorts(self) -> list[tuple[str, str]]:
         sort = []
         for value in self.getlist("sort"):
             direction = self.SORT_DEFAULT
@@ -70,7 +72,7 @@ class QueryParser(object):
         return sort
 
     @property
-    def items(self):
+    def items(self) -> Iterator[tuple[str, str]]:
         for key, value in self.args.items(multi=True):
             if key in ("offset", "limit", "next_limit"):
                 continue
@@ -78,7 +80,7 @@ class QueryParser(object):
             if value is not None:
                 yield key, value
 
-    def getlist(self, name, default=None):
+    def getlist(self, name: str, default: list[str] | None = None) -> list[str]:
         values = []
         for value in self.args.getlist(name):
             value = sanitize_text(value, encoding="utf-8")
@@ -86,12 +88,12 @@ class QueryParser(object):
                 values.append(value)
         return values or (default or [])
 
-    def get(self, name, default=None):
+    def get(self, name: str, default: str | None = None) -> str | None:
         for value in self.getlist(name):
             return value
         return default
 
-    def getintlist(self, name, default=None):
+    def getintlist(self, name: str, default: list[str] | None = None) -> list[int]:
         values = []
         for value in self.getlist(name, default=default):
             try:
@@ -100,15 +102,15 @@ class QueryParser(object):
                 pass
         return values
 
-    def getint(self, name, default=None):
+    def getint(self, name: str, default: int | None = None) -> int | None:
         for value in self.getintlist(name):
             return value
         return default
 
-    def getbool(self, name, default=False):
+    def getbool(self, name: str, default: bool = False) -> bool:
         return as_bool(self.get(name), default=default)
 
-    def to_dict(self):
+    def to_dict(self) -> dict[str, Any]:
         parser = {
             "text": self.text,
             "prefix": self.prefix,
@@ -128,7 +130,7 @@ class SearchQueryParser(QueryParser):
     # Facets with known, limited cardinality:
     SMALL_FACETS = ("schema", "schemata", "collection_id", "countries", "languages")
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super(SearchQueryParser, self).__init__(*args, **kwargs)
         self.offset = min(MAX_PAGE, self.offset)
         if (self.limit + self.offset) > MAX_PAGE:
@@ -160,31 +162,31 @@ class SearchQueryParser(QueryParser):
             "max_highlight_analyzed_offset", 999999
         )
 
-    def get_facet_size(self, name):
+    def get_facet_size(self, name: str) -> int:
         """Number of distinct values to be included (i.e. top N)."""
-        facet_size = self.getint("facet_size:%s" % name, 20)
+        facet_size = self.getint("facet_size:%s" % name, 20) or 20
         # Added to mitigate a DDoS by scripted facet bots (2020-11-24):
         if not self.authenticated and name not in self.SMALL_FACETS:
             facet_size = min(50, facet_size)
         return facet_size
 
-    def get_facet_total(self, name):
+    def get_facet_total(self, name: str) -> bool:
         """Flag to perform a count of the total number of distinct values."""
         if not self.authenticated and name not in self.SMALL_FACETS:
             return False
         return self.getbool("facet_total:%s" % name, False)
 
-    def get_facet_values(self, name):
+    def get_facet_values(self, name: str) -> bool:
         """Flag to disable returning actual values (i.e. count only)."""
         # Added to mitigate a DDoS by scripted facet bots (2020-11-24):
         if self.get_facet_size(name) == 0:
             return False
         return self.getbool("facet_values:%s" % name, True)
 
-    def get_facet_type(self, name):
+    def get_facet_type(self, name: str) -> str | None:
         return self.get("facet_type:%s" % name)
 
-    def get_facet_interval(self, name):
+    def get_facet_interval(self, name: str) -> str | None:
         """Interval to facet on when faceting on date properties
 
         See https://www.elastic.co/guide/en/elasticsearch/reference/current/search-aggregations-bucket-datehistogram-aggregation.html#calendar_intervals   # noqa: B950
@@ -192,7 +194,7 @@ class SearchQueryParser(QueryParser):
         """
         return self.get("facet_interval:%s" % name)
 
-    def to_dict(self):
-        parser = super(SearchQueryParser, self).to_dict()
-        parser["facet_filters"] = list(self.facet_filters)
+    def to_dict(self) -> dict[str, Any]:
+        parser = super().to_dict()
+        parser["facet_names"] = list(self.facet_names)
         return parser
