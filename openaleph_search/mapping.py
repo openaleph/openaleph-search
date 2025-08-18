@@ -78,7 +78,6 @@ class Field:
     # probably deprecated in v6
     ROLE = "role_id"
     PROFILE = "profile_id"
-    COLLECTION = "collection_id"
     ORIGIN = "origin"
 
     # deprecated
@@ -117,7 +116,6 @@ PROPERTIES = {
     Field.CREATED_AT: FieldType.DATE,
     Field.ROLE: FieldType.KEYWORD,
     Field.PROFILE: FieldType.KEYWORD,
-    Field.COLLECTION: FieldType.KEYWORD,
     Field.ORIGIN: FieldType.KEYWORD,
     # prop type groups
     registry.entity.group: FieldType.KEYWORD,

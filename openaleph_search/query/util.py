@@ -1,7 +1,9 @@
-from typing import Iterable
+from typing import Any, Iterable
 
 from anystore.types import SDict
 from banal import ensure_list, is_mapping
+
+from openaleph_search.mapping import Field
 
 
 def bool_query() -> SDict:
@@ -32,16 +34,16 @@ def field_filter_query(field: str, values: str | Iterable[str]) -> SDict:
     return {"terms": {field: values}}
 
 
-def range_filter_query(field: str, ops) -> SDict:
+def range_filter_query(field: str, ops: dict[str, Any]) -> SDict:
     return {"range": {field: ops}}
 
 
-def filter_text(spec, invert=False):
+def filter_text(spec: Any, invert: bool = False) -> str | None:
     """Try to convert a given filter to a lucene query string."""
     # CAVEAT: This doesn't cover all filters used by aleph.
     if isinstance(spec, (list, tuple, set)):
         parts = [filter_text(s, invert=invert) for s in spec]
-        return " ".join(parts)
+        return " ".join(p for p in parts if p)
     if not is_mapping(spec):
         return spec
     for op, props in spec.items():
@@ -54,7 +56,7 @@ def filter_text(spec, invert=False):
             parts = [{"term": {field: v}} for v in values]
             parts = [filter_text(p, invert=invert) for p in parts]
             predicate = " AND " if invert else " OR "
-            text = predicate.join(parts)
+            text = predicate.join(p for p in parts if p)
             if len(parts) > 1:
                 text = "(%s)" % text
             return text
@@ -62,14 +64,18 @@ def filter_text(spec, invert=False):
             field = props.get("field")
             field = "-%s" % field if invert else field
             return "%s:*" % field
+    return None
 
 
-def datasets_query(
-    datasets: list[str], field="collection_id", auth_is_admin: bool | None = False
-):
+DEFAULT_AUTHZ_FIELD = Field.DATASET
+
+
+def auth_datasets_query(
+    datasets: list[str], field: str = DEFAULT_AUTHZ_FIELD, is_admin: bool | None = False
+) -> dict[str, Any]:
     """Generate a search query filter for the given datasets."""
     # Hot-wire authorization entirely for admins.
-    if auth_is_admin:
+    if is_admin:
         return {"match_all": {}}
     if not len(datasets):
         return {"match_none": {}}

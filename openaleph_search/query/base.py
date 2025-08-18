@@ -9,7 +9,6 @@ from openaleph_search.index.entities import get_field_type
 from openaleph_search.mapping import DATE_FORMAT, NUMERIC_TYPES, get_index_field_type
 from openaleph_search.parse.parser import SearchQueryParser
 from openaleph_search.query.util import (
-    datasets_query,
     field_filter_query,
     filter_text,
     range_filter_query,
@@ -23,8 +22,7 @@ class Query:
     TEXT_FIELDS: ClassVar[list[str]] = ["text"]
     PREFIX_FIELD: ClassVar[str] = "name"
     SKIP_FILTERS: ClassVar[list[str]] = []
-    AUTHZ_FIELD = None
-    # AUTHZ_FIELD: ClassVar[str | None] = "collection_id"
+    AUTHZ_FIELD: ClassVar[str | None] = "dataset"
     HIGHLIGHT_FIELD: ClassVar[str] = "text"
     SORT_FIELDS: ClassVar[dict[str, str]] = {
         "label": "label.kw",
@@ -86,14 +84,11 @@ class Query:
 
         if self.AUTHZ_FIELD is not None:
             # This enforces the authorization (access control) rules on
-            # a particular query by comparing the collections a user is
+            # a particular query by comparing the datasets a user is
             # authorized for with the one on the document.
-            datasets = datasets_query(
-                self.parser.allowed_datasets,
-                field=self.AUTHZ_FIELD,
-                auth_is_admin=self.parser.authz_is_admin,
-            )
-            filters.append(datasets)
+            if self.parser.auth and not self.parser.auth.is_admin:
+                datasets = self.parser.auth.datasets_query(self.AUTHZ_FIELD)
+                filters.append(datasets)
         return filters
 
     def get_post_filters(self, exclude: str | None = None) -> dict[str, dict[str, Any]]:

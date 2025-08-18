@@ -7,8 +7,8 @@ from openaleph_search.index.util import unpack_result
 from openaleph_search.parse.parser import QueryParser
 from openaleph_search.search.facet import (
     CategoryFacet,
-    CollectionFacet,
     CountryFacet,
+    DatasetFacet,
     EntityFacet,
     Facet,
     LanguageFacet,
@@ -81,8 +81,8 @@ class DatabaseQueryResult(QueryResult):
 
 class SearchQueryResult(QueryResult):
     FACETS = {
-        "collection_id": CollectionFacet,
-        "match_collection_id": CollectionFacet,
+        "dataset": DatasetFacet,
+        "match_dataset": DatasetFacet,
         "languages": LanguageFacet,
         "language": LanguageFacet,
         "countries": CountryFacet,

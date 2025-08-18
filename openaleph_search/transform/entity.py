@@ -35,12 +35,16 @@ def format_entity(entity: EntityProxy, dataset: str):
     # api response size
     if entity.schema.name == "Pages":
         entity.add("bodyText", " ".join(entity.get("indexText")))
+
     data = entity.to_full_dict(matchable=True)
+
+    data[Field.DATASET] = dataset
     data[Field.SCHEMATA] = list(entity.schema.names)
     data[Field.CAPTION] = entity.caption
     data[Field.FINGERPRINTS] = list(entity_fingerprints(entity))
-    data[Field.NAME_SYMBOLS] = list(get_symbols(entity))
+
     names = list(entity.names)
+    data[Field.NAME_SYMBOLS] = list(get_symbols(entity))
     data[Field.NAME_KEYS] = list(index_name_keys(entity.schema, names))
     data[Field.NAME_PARTS] = list(index_name_parts(entity.schema, names))
     data[Field.NAME_PHONETIC] = list(phonetic_names(entity.schema, names))
@@ -64,10 +68,7 @@ def format_entity(entity: EntityProxy, dataset: str):
     if "latitude" in entity.schema.properties:
         data["geo_point"] = get_geopoints(entity)
 
-    data["dataset"] = dataset
-
     # Context data - from aleph system, not followthemoney.
-    data["collection_id"] = first(data.get("collection_id", [])) or dataset  # FIXME
     data["role_id"] = first(data.get("role_id", []))
     data["profile_id"] = first(data.get("profile_id", []))
     data["mutable"] = False  # deprecated

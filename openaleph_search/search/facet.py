@@ -111,16 +111,5 @@ class CategoryFacet(Facet):
         result["label"] = key  # Collection.CATEGORIES.get(key, key)
 
 
-class CollectionFacet(Facet):
+class DatasetFacet(Facet):
     pass
-    # def expand(self, keys):
-    #     for key in keys:
-    #         if self.parser.authz.can(key, self.parser.authz.READ):
-    #             resolver.queue(self.parser, Collection, key)
-    #     resolver.resolve(self.parser)
-
-    # def update(self, result, key):
-    #     collection = resolver.get(self.parser, Collection, key)
-    #     if collection is not None:
-    #         result["label"] = collection.get("label")
-    #         result["category"] = collection.get("category")

@@ -16,8 +16,7 @@ args = QueryParser(
         ("mybadint", "six"),
         ("mybool", "t"),
         ("mybadbool", "oui"),
-    ],
-    None,
+    ]
 )
 
 

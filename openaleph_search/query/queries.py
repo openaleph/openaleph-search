@@ -34,10 +34,10 @@ class EntitiesQuery(Query):
 class MatchQuery(EntitiesQuery):
     """Given an entity, find the most similar other entities."""
 
-    def __init__(self, parser, entity=None, exclude=None, collection_ids=None):
+    def __init__(self, parser, entity=None, exclude=None, datasets=None):
         self.entity = entity
         self.exclude = ensure_list(exclude)
-        self.collection_ids = collection_ids
+        self.datasets = datasets
         super(MatchQuery, self).__init__(parser)
 
     def get_index(self):
@@ -52,9 +52,7 @@ class MatchQuery(EntitiesQuery):
 
     def get_query(self):
         query = super(MatchQuery, self).get_query()
-        query = match_query(
-            self.entity, collection_ids=self.collection_ids, query=query
-        )
+        query = match_query(self.entity, datasets=self.datasets, query=query)
         if len(self.exclude):
             exclude = {"ids": {"values": self.exclude}}
             query["bool"]["must_not"].append(exclude)
@@ -65,10 +63,10 @@ class GeoDistanceQuery(EntitiesQuery):
     """Given an Address entity, find the nearby Address entities via the
     geo_point field"""
 
-    def __init__(self, parser, entity=None, exclude=None, collection_ids=None):
+    def __init__(self, parser, entity=None, exclude=None, datasets=None):
         self.entity = entity
         self.exclude = ensure_list(exclude)
-        self.collection_ids = collection_ids
+        self.datasets = datasets
         super(EntitiesQuery, self).__init__(parser)
 
     def is_valid(self) -> bool:
@@ -115,18 +113,18 @@ class XrefQuery(Query):
         "doubt": "doubt",
         "score": "_score",
     }
-    AUTHZ_FIELD = "match_collection_id"
+    AUTHZ_FIELD = "match_dataset"
     SCORE_CUTOFF = SCORE_CUTOFF
     SOURCE = XREF_SOURCE
 
-    def __init__(self, parser, collection_id=None):
-        self.collection_id = collection_id
+    def __init__(self, parser, dataset=None):
+        self.dataset = dataset
         parser.highlight = False
         super(XrefQuery, self).__init__(parser)
 
     def get_filters(self, **kwargs):
         filters = super(XrefQuery, self).get_filters(**kwargs)
-        filters.append({"term": {"collection_id": self.collection_id}})
+        filters.append({"term": {"dataset": self.dataset}})
         sorts = [f for (f, _) in self.parser.sorts]
         if "random" not in sorts and "doubt" not in sorts:
             filters.append({"range": {"score": {"gt": self.SCORE_CUTOFF}}})

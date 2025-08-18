@@ -43,24 +43,24 @@ def _make_queries(type_, value):
         yield {"term": {type_.group: {"value": value}}}
 
 
-def match_query(proxy, collection_ids=None, query=None):
+def match_query(proxy, datasets=None, query=None):
     """Given a document or entity in indexed form, build a query that
     will find similar entities based on a variety of criteria."""
     if query is None:
         query = bool_query()
 
-    # Don't match the query entity and source collection_id:
+    # Don't match the query entity and source dataset:
     must_not = []
     if proxy.id is not None:
         must_not.append({"ids": {"values": [proxy.id]}})
-    # if source_collection_id is not None:
-    #     must_not.append({'term': {'collection_id': source_collection_id}})
+    # if source_dataset is not None:
+    #     must_not.append({'term': {'dataset': source_dataset}})
     if len(must_not):
         query["bool"]["must_not"].extend(must_not)
 
-    collection_ids = ensure_list(collection_ids)
-    if len(collection_ids):
-        query["bool"]["filter"].append({"terms": {"collection_id": collection_ids}})
+    datasets = ensure_list(datasets)
+    if len(datasets):
+        query["bool"]["filter"].append({"terms": {"dataset": datasets}})
 
     filters = set()
     for prop, value in proxy.itervalues():

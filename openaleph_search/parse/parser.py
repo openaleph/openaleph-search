@@ -6,6 +6,7 @@ from followthemoney.util import sanitize_text
 from werkzeug.datastructures import MultiDict, OrderedMultiDict
 
 from openaleph_search.index.util import MAX_PAGE
+from openaleph_search.model import SearchAuth
 from openaleph_search.settings import Settings
 
 settings = Settings()
@@ -23,14 +24,17 @@ class QueryParser:
     def __init__(
         self,
         args: MultiDict | dict[str, Any],
-        authenticated: bool | None = False,
+        auth: SearchAuth | None = None,
         limit: int | None = None,
         max_limit: int | None = MAX_PAGE,
     ):
+        if self.settings.search_auth and auth is None:
+            raise RuntimeError("An auth object is required.")
+
         if not isinstance(args, MultiDict):
             args = OrderedMultiDict(args)
         self.args: MultiDict = cast(MultiDict, args)
-        self.authenticated = authenticated
+        self.auth = auth
         self.offset = max(0, self.getint("offset", 0) or 0)
         if limit is None:
             limit = min(max_limit or MAX_PAGE, max(0, self.getint("limit", 20) or 20))
@@ -39,8 +43,6 @@ class QueryParser:
         self.text = sanitize_text(self.get("q"))
         self.prefix = sanitize_text(self.get("prefix"))
 
-        # Disable or enable query caching
-        self.cache = False  # self.getbool("cache", SETTINGS.CACHE)
         self.filters = self.prefixed_items("filter:")
         self.excludes = self.prefixed_items("exclude:")
         self.empties = self.prefixed_items("empty:")
@@ -123,12 +125,19 @@ class QueryParser:
         }
         return parser
 
+    @property
+    def settings(self) -> Settings:
+        # useful for test runtime to patch env vars
+        if settings.testing:
+            return Settings()
+        return settings
+
 
 class SearchQueryParser(QueryParser):
     """ElasticSearch-specific query parameters."""
 
     # Facets with known, limited cardinality:
-    SMALL_FACETS = ("schema", "schemata", "collection_id", "countries", "languages")
+    SMALL_FACETS = ("schema", "schemata", "dataset", "countries", "languages")
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super(SearchQueryParser, self).__init__(*args, **kwargs)
@@ -166,14 +175,16 @@ class SearchQueryParser(QueryParser):
         """Number of distinct values to be included (i.e. top N)."""
         facet_size = self.getint("facet_size:%s" % name, 20) or 20
         # Added to mitigate a DDoS by scripted facet bots (2020-11-24):
-        if not self.authenticated and name not in self.SMALL_FACETS:
-            facet_size = min(50, facet_size)
+        if self.auth:
+            if not self.auth.logged_in and name not in self.SMALL_FACETS:
+                facet_size = min(50, facet_size)
         return facet_size
 
     def get_facet_total(self, name: str) -> bool:
         """Flag to perform a count of the total number of distinct values."""
-        if not self.authenticated and name not in self.SMALL_FACETS:
-            return False
+        if self.auth:
+            if not self.auth.logged_in and name not in self.SMALL_FACETS:
+                return False
         return self.getbool("facet_total:%s" % name, False)
 
     def get_facet_values(self, name: str) -> bool:

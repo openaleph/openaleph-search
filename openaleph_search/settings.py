@@ -12,6 +12,9 @@ class Settings(BaseSettings):
         default=False, validation_alias=AliasChoices("testing", "debug")
     )
 
+    search_auth: bool = False
+    """Set to true when using with OpenAleph"""
+
     elasticsearch_url: HttpUrl | list[HttpUrl] = HttpUrl("http://localhost:9200")
     elasticsearch_timeout: int = 60
     elasticsearch_max_retries: int = 3

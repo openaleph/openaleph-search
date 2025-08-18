@@ -7,6 +7,7 @@ from ftmq.util import make_entity
 from openaleph_search.core import get_es
 from openaleph_search.index.admin import clear_index, delete_index, upgrade_search
 from openaleph_search.index.entities import index_bulk
+from openaleph_search.model import SearchAuth
 
 FIXTURES_PATH = (Path(__file__).parent / "fixtures").absolute()
 ENTITIES = "samples.ijson"
@@ -35,14 +36,14 @@ TEST_PRIVATE = [
 ]
 TEST_PUBLIC = [
     {
-        "id": "id-kwazulu",
+        "id": "id-company",
         "schema": "Company",
         "properties": {"name": ["KwaZulu"], "alias": ["kwazulu"]},
     },
     {
-        "id": "note",
+        "id": "id-note",
         "schema": "Note",
-        "properties": {"description": ["note"], "entity": ["id-kwazulu"]},
+        "properties": {"description": ["note"], "entity": ["id-company"]},
     },
 ]
 
@@ -65,6 +66,23 @@ def index_entities(entities):
     index_bulk("test_public", map(make_entity, TEST_PUBLIC))
     yield
     clear_index()
+
+
+@pytest.fixture(scope="session")
+def auth_public():
+    return SearchAuth(datasets={"test_samples", "test_public"})
+
+
+@pytest.fixture(scope="session")
+def auth_private():
+    return SearchAuth(
+        logged_in=True, datasets={"test_samples", "test_public", "test_private"}
+    )
+
+
+@pytest.fixture(scope="session")
+def auth_admin():
+    return SearchAuth(logged_in=True, is_admin=True)
 
 
 @pytest.fixture(scope="module", autouse=True)

@@ -1,5 +1,5 @@
 import logging
-from typing import Iterable
+from typing import Any, Iterable
 
 from banal import ensure_list
 from elasticsearch.helpers import scan
@@ -20,14 +20,14 @@ from openaleph_search.index.util import (
     delete_safe,
     unpack_result,
 )
-from openaleph_search.query.util import datasets_query
+from openaleph_search.model import SearchAuth
 from openaleph_search.transform.entity import format_entity
 
 log = logging.getLogger(__name__)
 PROXY_INCLUDES = [
     "schema",
     "properties",
-    "collection_id",
+    "dataset",
     "profile_id",
     "role_id",
     "mutable",
@@ -43,12 +43,17 @@ def _source_spec(includes, excludes):
     return {"includes": includes, "excludes": excludes}
 
 
-def _entities_query(filters, authz, collection_id, schemata):
+def _entities_query(
+    filters: list[Any],
+    auth: SearchAuth | None = None,
+    dataset: str | None = None,
+    schemata: set[str] | None = None,
+):
     filters = filters or []
-    if authz is not None:
-        filters.append(datasets_query(authz))
-    if collection_id is not None:
-        filters.append({"term": {"collection_id": collection_id}})
+    if auth is not None:
+        filters.append(auth.datasets_query)
+    if dataset is not None:
+        filters.append({"term": {"dataset": dataset}})
     # if ensure_list(schemata):
     #     filters.append({"terms": {"schemata": ensure_list(schemata)}})
     return {"bool": {"filter": filters}}
@@ -66,7 +71,7 @@ def get_field_type(field):
 
 def iter_entities(
     authz=None,
-    collection_id=None,
+    dataset=None,
     schemata=None,
     includes=PROXY_INCLUDES,
     excludes=None,
@@ -77,7 +82,7 @@ def iter_entities(
 ):
     """Scan all entities matching the given criteria."""
     query = {
-        "query": _entities_query(filters, authz, collection_id, schemata),
+        "query": _entities_query(filters, authz, dataset, schemata),
         "_source": _source_spec(includes, excludes),
     }
     preserve_order = False
@@ -109,11 +114,11 @@ def iter_proxies(**kw):
         yield model.get_proxy(data)
 
 
-def iter_adjacent(collection_id, entity_id):
+def iter_adjacent(dataset, entity_id):
     """Used for recursively deleting entities and their linked associations."""
     yield from iter_entities(
-        includes=["collection_id"],
-        collection_id=collection_id,
+        includes=["dataset"],
+        dataset=dataset,
         filters=[{"term": {"entities": entity_id}}],
     )
 
@@ -155,11 +160,6 @@ def get_entity(entity_id, **kwargs):
     """Fetch an entity from the index."""
     for entity in entities_by_ids(entity_id, cached=True, **kwargs):
         return entity
-
-
-def index_entity(entity, sync=False):
-    """Index an entity."""
-    return index_proxy(entity.collection, entity.to_proxy(), sync=sync)
 
 
 def index_proxy(dataset: str, proxy: EntityProxy, sync=False):

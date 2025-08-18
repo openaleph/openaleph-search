@@ -1,5 +1,6 @@
 from urllib.parse import parse_qsl, urlparse
 
+from openaleph_search.model import SearchAuth
 from openaleph_search.parse.parser import SearchQueryParser
 from openaleph_search.query.queries import EntitiesQuery
 
@@ -10,26 +11,26 @@ def _url_to_args(url):
     return parse_qsl(parsed.query, keep_blank_values=True)
 
 
-def _create_query(url):
+def _create_query(url, auth: SearchAuth | None = None):
     """Create Query from URL string"""
     args = _url_to_args(url)
-    parser = SearchQueryParser(args)
+    parser = SearchQueryParser(args, auth)
     return EntitiesQuery(parser)
 
 
 def test_search_simplest_search(index_entities):
-    query = _create_query("/search?q=kwazulu&facet=collection_id")
+    query = _create_query("/search?q=kwazulu&facet=dataset")
     result = query.search()
 
-    assert result["hits"]["total"]["value"] == 2
+    assert result["hits"]["total"]["value"] == 1
     assert "aggregations" in result
 
-    query = _create_query("/search?q=banana&facet=collection_id")
+    query = _create_query("/search?q=banana&facet=dataset")
     result = query.search()
 
     assert result["hits"]["total"]["value"] == 3
     assert "aggregations" in result
-    assert result["aggregations"]["collection_id.values"]["buckets"][0] == {
+    assert result["aggregations"]["dataset.values"]["buckets"][0] == {
         "key": "test_private",
         "doc_count": 3,
     }
@@ -144,7 +145,7 @@ def test_search_boolean_query(index_entities):
     query = _create_query("/search?q=banana OR kwazulu")
     result = query.search()
 
-    assert result["hits"]["total"]["value"] == 5
+    assert result["hits"]["total"]["value"] == 4
     or_total = result["hits"]["total"]["value"]
 
     # Test AND query
@@ -166,7 +167,7 @@ def test_search_entity_facet(index_entities):
 
     assert result["hits"]["total"]["value"] >= 0
     assert result["aggregations"]["properties.entity.values"]["buckets"] == [
-        {"key": "id-kwazulu", "doc_count": 1}
+        {"key": "id-company", "doc_count": 1}
     ]
 
 
@@ -207,12 +208,12 @@ def test_search_empty_query(index_entities):
 
 def test_search_url_to_args_conversion():
     """Test URL parsing utility function"""
-    args = _url_to_args("/search?q=test&filter:schema=Document&facet=collection_id")
+    args = _url_to_args("/search?q=test&filter:schema=Document&facet=dataset")
 
     expected = [
         ("q", "test"),
         ("filter:schema", "Document"),
-        ("facet", "collection_id"),
+        ("facet", "dataset"),
     ]
 
     assert args == expected
@@ -220,7 +221,7 @@ def test_search_url_to_args_conversion():
 
 def test_search_query_parser_from_url():
     """Test SearchQueryParser creation from URL"""
-    url = "/search?q=test query&offset=10&limit=50&filter:schema=Document&facet=collection_id"
+    url = "/search?q=test query&offset=10&limit=50&filter:schema=Document&facet=dataset"
     args = _url_to_args(url)
     parser = SearchQueryParser(args, None)
 
@@ -229,7 +230,7 @@ def test_search_query_parser_from_url():
     assert parser.limit == 50
     assert "schema" in parser.filters
     assert parser.filters["schema"] == {"Document"}
-    assert "collection_id" in parser.facet_names
+    assert "dataset" in parser.facet_names
 
 
 def test_search_symbols():
