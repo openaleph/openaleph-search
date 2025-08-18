@@ -1,5 +1,6 @@
+from anystore.settings import BaseSettings
 from pydantic import AliasChoices, Field, HttpUrl
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
 
 
 class Settings(BaseSettings):

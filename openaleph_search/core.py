@@ -1,6 +1,5 @@
-from functools import cache
-
 from anystore.decorators import error_handler
+from anystore.functools import weakref_cache as cache
 from anystore.logging import get_logger
 from banal import ensure_list
 from elasticsearch import AsyncElasticsearch, Elasticsearch

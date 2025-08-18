@@ -1,8 +1,8 @@
 import logging
 from copy import deepcopy
-from functools import cache
 from typing import Any, Literal, TypeAlias
 
+from anystore.functools import weakref_cache as cache
 from banal import ensure_list
 from followthemoney import model
 from followthemoney.exc import InvalidData
