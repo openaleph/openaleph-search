@@ -244,15 +244,11 @@ def test_search_symbols():
     )
 
 
-def test_search_fingerprints():
-    fp = "l vladimir"
-    query = _create_query(f"/search?filter:fingerprints={fp}")
+def test_search_name_parts():
+    fp = "vladimir"
+    query = _create_query(f"/search?filter:name_parts={fp}")
     result = query.search()
-
-    assert result["hits"]["total"]["value"] == 1
-    assert (
-        result["hits"]["hits"][0]["_id"] == "6cb6066ec282d5f8ddf9ca28a0d20c1713ac0a5b"
-    )
+    assert result["hits"]["total"]["value"] == 2
 
 
 def test_search_prefix():

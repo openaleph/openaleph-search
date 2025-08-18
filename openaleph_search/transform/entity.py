@@ -1,7 +1,7 @@
 from anystore.logging import get_logger
 from banal import ensure_list, first
 from followthemoney import EntityProxy, registry
-from ftmq.util import entity_fingerprints, get_symbols
+from ftmq.util import get_symbols
 
 from openaleph_search import __version__
 from openaleph_search.index.indexes import entities_write_index
@@ -41,7 +41,6 @@ def format_entity(entity: EntityProxy, dataset: str):
     data[Field.DATASET] = dataset
     data[Field.SCHEMATA] = list(entity.schema.names)
     data[Field.CAPTION] = entity.caption
-    data[Field.FINGERPRINTS] = list(entity_fingerprints(entity))
 
     names = list(entity.names)
     data[Field.NAME_SYMBOLS] = list(get_symbols(entity))

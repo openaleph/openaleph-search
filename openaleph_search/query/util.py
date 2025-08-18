@@ -1,4 +1,4 @@
-from typing import Any, Iterable
+from typing import Any, Iterable, TypedDict
 
 from anystore.types import SDict
 from banal import ensure_list, is_mapping
@@ -6,11 +6,22 @@ from banal import ensure_list, is_mapping
 from openaleph_search.mapping import Field
 
 
-def bool_query() -> SDict:
+class Bools(TypedDict):
+    should: list[Any]
+    filter: list[Any]
+    must: list[Any]
+    must_not: list[Any]
+
+
+class BoolQuery(TypedDict):
+    bool: Bools
+
+
+def bool_query() -> BoolQuery:
     return {"bool": {"should": [], "filter": [], "must": [], "must_not": []}}
 
 
-def none_query(query: SDict | None = None) -> SDict:
+def none_query(query: BoolQuery | None = None) -> BoolQuery:
     if query is None:
         query = bool_query()
     query["bool"]["must"].append({"match_none": {}})
@@ -25,7 +36,7 @@ def field_filter_query(field: str, values: str | Iterable[str]) -> SDict:
     if field in ["_id", "id"]:
         return {"ids": {"values": values}}
     if field in ["names"]:
-        field = "fingerprints"
+        field = Field.NAME_PARTS
     if len(values) == 1:
         # if field in ['addresses']:
         #     field = '%s.text' % field

@@ -39,13 +39,6 @@ class FieldType:
     NUMERIC = {"type": "double"}
     GEOPOINT = {"type": "geo_point"}
 
-    # deprecated
-    FINGERPRINT = {
-        "type": "keyword",
-        "copy_to": "text",
-        "fields": {"text": {"type": "text"}},
-    }
-
 
 TYPE_MAPPINGS = {
     registry.text: {"type": "text", "index": False},
@@ -80,9 +73,6 @@ class Field:
     PROFILE = "profile_id"
     ORIGIN = "origin"
 
-    # deprecated
-    FINGERPRINTS = "fingerprints"
-
 
 SOURCE_EXCLUDES = [
     *[t.group for t in registry.groups.values()],
@@ -92,7 +82,6 @@ SOURCE_EXCLUDES = [
     Field.NAME_PARTS,
     Field.NAME_SYMBOLS,
     Field.NAME_PHONETIC,
-    Field.FINGERPRINTS,
 ]
 
 # base property mapping without specific schema fields
@@ -106,7 +95,6 @@ PROPERTIES = {
     Field.NAME_PARTS: FieldType.KEYWORD_COPY,
     Field.NAME_SYMBOLS: FieldType.KEYWORD,
     Field.NAME_PHONETIC: FieldType.KEYWORD,
-    Field.FINGERPRINTS: FieldType.FINGERPRINT,
     Field.GEO_POINT: FieldType.GEOPOINT,
     # full text
     Field.TEXT: FieldType.TEXT,
@@ -139,6 +127,10 @@ NUMERIC_MAPPING = {
     for prop in model.properties
     if prop.type in NUMERIC_TYPES
 }
+
+
+def property_field(prop: str) -> str:
+    return f"properties.{prop}"
 
 
 def make_object_type(properties: dict[str, Any]) -> dict[str, Any]:

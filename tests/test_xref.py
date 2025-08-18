@@ -10,6 +10,7 @@ from uuid import uuid4
 from followthemoney import EntityProxy
 from ftmq.util import make_entity
 
+from openaleph_search.index.admin import clear_index
 from openaleph_search.index.entities import index_bulk
 from openaleph_search.index.util import bulk_actions
 from openaleph_search.index.xref import delete_xref, iter_matches, xref_index
@@ -98,3 +99,5 @@ def test_xref(monkeypatch):
     assert len(results) == 0
     results = list(iter_matches("dataset1", auth2))
     assert len(results) == 0
+
+    clear_index()

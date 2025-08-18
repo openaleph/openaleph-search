@@ -5,8 +5,9 @@ from banal import ensure_list
 from openaleph_search.index.entities import ENTITY_SOURCE
 from openaleph_search.index.indexes import entities_read_index
 from openaleph_search.index.xref import XREF_SOURCE, xref_index
+from openaleph_search.mapping import Field, property_field
 from openaleph_search.query.base import Query
-from openaleph_search.search.matching import match_query
+from openaleph_search.query.matching import match_query
 
 log = logging.getLogger(__name__)
 
@@ -14,10 +15,10 @@ SCORE_CUTOFF = 0.5
 
 
 class EntitiesQuery(Query):
-    TEXT_FIELDS = ["fingerprints^3", "text"]
-    PREFIX_FIELD = "fingerprints"
-    HIGHLIGHT_FIELD = "properties.*"
-    SKIP_FILTERS = ["schema", "schemata"]
+    TEXT_FIELDS = [f"{Field.NAMES}^3", f"{Field.NAME_PARTS}^2", Field.TEXT]
+    PREFIX_FIELD = Field.NAME_PARTS
+    HIGHLIGHT_FIELD = property_field("*")
+    SKIP_FILTERS = [Field.SCHEMA, Field.SCHEMATA]
     SOURCE = ENTITY_SOURCE
     SORT_DEFAULT = []
 
