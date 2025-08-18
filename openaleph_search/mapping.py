@@ -86,6 +86,7 @@ class Field:
 
 
 SOURCE_EXCLUDES = [
+    *[t.group for t in registry.groups.values()],
     Field.TEXT,
     Field.NAMES,
     Field.NAME_KEYS,
@@ -103,7 +104,7 @@ PROPERTIES = {
     Field.CAPTION: FieldType.KEYWORD,
     Field.NAMES: FieldType.KEYWORD_COPY,
     Field.NAME_KEYS: FieldType.KEYWORD,
-    Field.NAME_PARTS: FieldType.KEYWORD,
+    Field.NAME_PARTS: FieldType.KEYWORD_COPY,
     Field.NAME_SYMBOLS: FieldType.KEYWORD,
     Field.NAME_PHONETIC: FieldType.KEYWORD,
     Field.FINGERPRINTS: FieldType.FINGERPRINT,

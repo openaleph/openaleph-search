@@ -6,7 +6,12 @@ from ftmq.util import entity_fingerprints, get_symbols
 from openaleph_search import __version__
 from openaleph_search.index.indexes import entities_write_index
 from openaleph_search.mapping import NUMERIC_TYPES, Field
-from openaleph_search.transform.util import get_geopoints
+from openaleph_search.transform.util import (
+    get_geopoints,
+    index_name_keys,
+    index_name_parts,
+    phonetic_names,
+)
 
 log = get_logger(__name__)
 
@@ -35,6 +40,10 @@ def format_entity(entity: EntityProxy, dataset: str):
     data[Field.CAPTION] = entity.caption
     data[Field.FINGERPRINTS] = list(entity_fingerprints(entity))
     data[Field.NAME_SYMBOLS] = list(get_symbols(entity))
+    names = list(entity.names)
+    data[Field.NAME_KEYS] = list(index_name_keys(entity.schema, names))
+    data[Field.NAME_PARTS] = list(index_name_parts(entity.schema, names))
+    data[Field.NAME_PHONETIC] = list(phonetic_names(entity.schema, names))
 
     # Slight hack: a magic property in followthemoney that gets taken out
     # of the properties and added straight to the index text.
