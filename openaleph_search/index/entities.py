@@ -1,15 +1,12 @@
-import itertools
 import logging
 from typing import Iterable
 
-from banal import ensure_list, first
+from banal import ensure_list
 from elasticsearch.helpers import scan
 from followthemoney import model
 from followthemoney.proxy import EntityProxy
 from followthemoney.types import registry
-from ftmq.util import entity_fingerprints, get_symbols
 
-from openaleph_search import __version__
 from openaleph_search.core import get_es
 from openaleph_search.index.indexes import (
     entities_read_index,
@@ -23,8 +20,8 @@ from openaleph_search.index.util import (
     delete_safe,
     unpack_result,
 )
-from openaleph_search.mapping import NUMERIC_TYPES, Field
 from openaleph_search.query.util import datasets_query
+from openaleph_search.transform.entity import format_entity
 
 log = logging.getLogger(__name__)
 PROXY_INCLUDES = [
@@ -172,90 +169,9 @@ def index_proxy(dataset: str, proxy: EntityProxy, sync=False):
 
 def index_bulk(dataset: str, entities: Iterable[EntityProxy], sync=False):
     """Index a set of entities."""
-    _entities = (format_proxy(p, dataset) for p in entities)
+    _entities = (format_entity(p, dataset) for p in entities)
     _entities = (e for e in _entities if e is not None)
     bulk_actions(_entities, sync=sync)
-
-
-def _numeric_values(type_, values):
-    values = [type_.to_number(v) for v in ensure_list(values)]
-    return [v for v in values if v is not None]
-
-
-def get_geopoints(proxy: EntityProxy) -> list[dict[str, str]]:
-    points = []
-    if proxy.schema.is_a("Address"):
-        lons = proxy.get("longitude")
-        lats = proxy.get("latitude")
-        for lon, lat in itertools.product(lons, lats):
-            points.append({"lon": lon, "lat": lat})
-    return points
-
-
-def format_proxy(proxy: EntityProxy, dataset: str):
-    """Apply final denormalisations to the index."""
-    # Abstract entities can appear when profile fragments for a missing entity
-    # are present.
-    if proxy.schema.abstract:
-        log.warning("Tried to index an abstract-typed entity: %r", proxy)
-        return None
-
-    # FIXME
-    # a hack to display text previews in search for `Pages` `bodyText` property
-    # will be removed again in `views.serializers.EntitySerializer` to reduce
-    # api response size
-    if proxy.schema.name == "Pages":
-        proxy.add("bodyText", " ".join(proxy.get("indexText")))
-    data = proxy.to_full_dict(matchable=True)
-    data[Field.SCHEMATA] = list(proxy.schema.names)
-    data[Field.CAPTION] = proxy.caption
-    data[Field.FINGERPRINTS] = list(entity_fingerprints(proxy))
-    data[Field.NAME_SYMBOLS] = list(get_symbols(proxy))
-
-    # Slight hack: a magic property in followthemoney that gets taken out
-    # of the properties and added straight to the index text.
-    properties = data.get("properties")
-    data["text"] = properties.pop("indexText", [])
-
-    # integer casting
-    numeric = {}
-    for prop in proxy.iterprops():
-        if prop.type in NUMERIC_TYPES:
-            values = proxy.get(prop)
-            numeric[prop.name] = _numeric_values(prop.type, values)
-    # also cast group field for dates
-    numeric["dates"] = _numeric_values(registry.date, data.get("dates"))
-    data["numeric"] = numeric
-
-    # geo data if entity is an Address
-    if proxy.schema.is_a("Address"):
-        data["geo_point"] = get_geopoints(proxy)
-
-    data["dataset"] = dataset
-
-    # Context data - from aleph system, not followthemoney.
-    data["collection_id"] = first(data.get("collection_id")) or dataset  # FIXME
-    data["role_id"] = first(data.get("role_id"))
-    data["profile_id"] = first(data.get("profile_id"))
-    data["mutable"] = False  # deprecated
-    data["origin"] = ensure_list(data.get("origin"))
-    # Logical simplifications of dates:
-    created_at = ensure_list(data.get("created_at"))
-    if len(created_at) > 0:
-        data["created_at"] = min(created_at)
-    updated_at = ensure_list(data.get("updated_at")) or created_at
-    if len(updated_at) > 0:
-        data["updated_at"] = max(updated_at)
-
-    data["index_version"] = __version__
-
-    # log.info("%s", pformat(data))
-    entity_id = data.pop("id")
-    return {
-        "_id": entity_id,
-        "_index": entities_write_index(proxy.schema),
-        "_source": data,
-    }
 
 
 def delete_entity(entity_id, exclude=None, sync=False):
