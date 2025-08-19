@@ -2,6 +2,7 @@ import logging
 from typing import Any
 
 from banal import ensure_list
+from followthemoney import EntityProxy
 
 from openaleph_search.index.entities import ENTITY_SOURCE
 from openaleph_search.index.indexes import entities_read_index
@@ -33,8 +34,10 @@ class EntitiesQuery(Query):
         return entities_read_index(schema=schemata)
 
     def get_query(self) -> dict[str, Any]:
-        query = super().get_query()
-        return self.wrap_query_function_score(query)
+        return self.wrap_query_function_score(self.get_inner_query())
+
+    def get_inner_query(self) -> dict[str, Any]:
+        return super().get_query()
 
     def wrap_query_function_score(self, query: dict[str, Any]) -> dict[str, Any]:
         # Wrap query in function_score to up-score important entities.
@@ -63,7 +66,9 @@ class EntitiesQuery(Query):
 class MatchQuery(EntitiesQuery):
     """Given an entity, find the most similar other entities."""
 
-    def __init__(self, parser, entity=None, exclude=None, datasets=None):
+    def __init__(
+        self, parser, entity: EntityProxy | None = None, exclude=None, datasets=None
+    ):
         self.entity = entity
         self.exclude = ensure_list(exclude)
         self.datasets = datasets
@@ -79,9 +84,10 @@ class MatchQuery(EntitiesQuery):
         schemata = list(self.entity.schema.matchable_schemata)
         return entities_read_index(schema=schemata)
 
-    def get_query(self):
-        query = super(MatchQuery, self).get_query()
-        query = match_query(self.entity, datasets=self.datasets, query=query)
+    def get_inner_query(self) -> dict[str, Any]:
+        query = match_query(
+            self.entity, datasets=self.datasets, query=super().get_inner_query()
+        )
         if len(self.exclude):
             exclude = {"ids": {"values": self.exclude}}
             query["bool"]["must_not"].append(exclude)
