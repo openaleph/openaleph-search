@@ -2,6 +2,8 @@ from anystore.settings import BaseSettings
 from pydantic import AliasChoices, Field, HttpUrl
 from pydantic_settings import SettingsConfigDict
 
+__version__ = "0.0.0"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -21,6 +23,7 @@ class Settings(BaseSettings):
     elasticsearch_retry_on_timeout: bool = True
 
     indexer_concurrency: int = 8
+    indexer_chunk_size: int = 1000
 
     index_shards: int = 5
     index_replicas: int = 0
