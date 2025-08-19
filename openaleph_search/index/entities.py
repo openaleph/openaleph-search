@@ -51,7 +51,7 @@ def _entities_query(
 ):
     filters = filters or []
     if auth is not None:
-        filters.append(auth.datasets_query)
+        filters.append(auth.datasets_query())
     if dataset is not None:
         filters.append({"term": {"dataset": dataset}})
     # if ensure_list(schemata):
@@ -70,8 +70,8 @@ def get_field_type(field):
 
 
 def iter_entities(
-    authz=None,
-    dataset=None,
+    auth: SearchAuth | None = None,
+    dataset: str | None = None,
     schemata=None,
     includes=PROXY_INCLUDES,
     excludes=None,
@@ -82,7 +82,7 @@ def iter_entities(
 ):
     """Scan all entities matching the given criteria."""
     query = {
-        "query": _entities_query(filters, authz, dataset, schemata),
+        "query": _entities_query(filters, auth, dataset, schemata),
         "_source": _source_spec(includes, excludes),
     }
     preserve_order = False
@@ -133,7 +133,8 @@ def entities_by_ids(
         return
     entities = {}
     if cached:
-        raise RuntimeError("Caching not implemented")
+        # raise RuntimeError("Caching not implemented")
+        log.warning("Caching not implemented")
 
     index = entities_read_index(schema=schemata)
 
