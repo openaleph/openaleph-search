@@ -8,6 +8,7 @@ from followthemoney import model
 from followthemoney.types import registry
 
 # MAPPING SHORTCUTS #
+TEXT = "text"
 DEFAULT_ANALYZER = "default"
 DATE_FORMAT = (
     "yyyy-MM-dd'T'HH:mm:ss||yyyy-MM-dd'T'HH:mm||yyyy-MM-dd||yyyy-MM||yyyy"  # noqa: E501
@@ -23,7 +24,7 @@ class FieldType:
     DATE = {"type": "date"}
     PARTIAL_DATE = {"type": "date", "format": DATE_FORMAT}
     TEXT = {
-        "type": "text",
+        "type": TEXT,
         "analyzer": DEFAULT_ANALYZER,
         "search_analyzer": DEFAULT_ANALYZER,
         "index_phrases": True,  # shingles
@@ -35,15 +36,23 @@ class FieldType:
         "store": True,
     }
     KEYWORD = {"type": "keyword"}
-    KEYWORD_COPY = {"type": "keyword", "copy_to": "text"}
+    KEYWORD_COPY = {"type": "keyword", "copy_to": TEXT}
     NUMERIC = {"type": "double"}
+    INTEGER = {"type": "integer"}
     GEOPOINT = {"type": "geo_point"}
+    # No length normalization for names. Merged entities have a lot of names,
+    # and we don't want to penalize them for that.
+    NAMES_KEYWORD_COPY = {
+        "type": "keyword",
+        "copy_to": TEXT,
+        "similarity": "weak_length_norm",
+    }
 
 
 TYPE_MAPPINGS = {
-    registry.text: {"type": "text", "index": False},
-    registry.html: {"type": "text", "index": False},
-    registry.json: {"type": "text", "index": False},
+    registry.text: {"type": TEXT, "index": False},
+    registry.html: {"type": TEXT, "index": False},
+    registry.json: {"type": TEXT, "index": False},
     registry.date: FieldType.PARTIAL_DATE,
 }
 
@@ -73,6 +82,9 @@ class Field:
     PROFILE = "profile_id"
     ORIGIN = "origin"
 
+    # length norm
+    NUM_VALUES = "num_values"
+
 
 SOURCE_EXCLUDES = [
     *[t.group for t in registry.groups.values()],
@@ -90,7 +102,7 @@ PROPERTIES = {
     Field.SCHEMA: FieldType.KEYWORD,
     Field.SCHEMATA: FieldType.KEYWORD,
     Field.CAPTION: FieldType.KEYWORD,
-    Field.NAMES: FieldType.KEYWORD_COPY,
+    Field.NAMES: FieldType.NAMES_KEYWORD_COPY,
     Field.NAME_KEYS: FieldType.KEYWORD,
     Field.NAME_PARTS: FieldType.KEYWORD_COPY,
     Field.NAME_SYMBOLS: FieldType.KEYWORD,
@@ -119,6 +131,8 @@ PROPERTIES = {
     registry.date.group: FieldType.PARTIAL_DATE,
     registry.address.group: FieldType.KEYWORD,
     registry.name.group: FieldType.KEYWORD,
+    # length normalization
+    Field.NUM_VALUES: FieldType.INTEGER,
 }
 
 

@@ -1,11 +1,12 @@
 from anystore.logging import get_logger
+from anystore.types import SDict
 from banal import ensure_list, first
 from followthemoney import EntityProxy, registry
 from ftmq.util import get_symbols
 
-from openaleph_search import __version__
 from openaleph_search.index.indexes import entities_write_index
 from openaleph_search.mapping import NUMERIC_TYPES, Field
+from openaleph_search.settings import __version__
 from openaleph_search.transform.util import (
     get_geopoints,
     index_name_keys,
@@ -21,7 +22,7 @@ def _numeric_values(type_, values) -> list[float]:
     return [v for v in values if v is not None]
 
 
-def format_entity(entity: EntityProxy, dataset: str):
+def format_entity(dataset: str, entity: EntityProxy) -> SDict | None:
     """Apply final denormalisations to the index."""
     # Abstract entities can appear when profile fragments for a missing entity
     # are present.
@@ -52,6 +53,9 @@ def format_entity(entity: EntityProxy, dataset: str):
     # of the properties and added straight to the index text.
     properties = data.get("properties", {})
     data["text"] = properties.pop("indexText", [])
+
+    # length normalization
+    data[Field.NUM_VALUES] = sum([len(v) for v in properties.values()])
 
     # integer casting
     numeric = {}

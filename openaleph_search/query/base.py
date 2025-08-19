@@ -2,11 +2,17 @@ from typing import Any, ClassVar
 
 from anystore.logging import get_logger
 from banal import ensure_list
+from elastic_transport import ObjectApiResponse
 from followthemoney.types import registry
 
 from openaleph_search.core import get_es
 from openaleph_search.index.entities import get_field_type
-from openaleph_search.mapping import DATE_FORMAT, NUMERIC_TYPES, get_index_field_type
+from openaleph_search.mapping import (
+    DATE_FORMAT,
+    NUMERIC_TYPES,
+    Field,
+    get_index_field_type,
+)
 from openaleph_search.parse.parser import SearchQueryParser
 from openaleph_search.query.util import (
     field_filter_query,
@@ -28,7 +34,7 @@ class Query:
         "label": "label.kw",
         "score": "_score",
     }
-    SORT_DEFAULT: ClassVar[list[str]] = ["_score"]
+    SORT_DEFAULT: ClassVar[list[str | dict[str, Any]]] = ["_score"]
     SOURCE: ClassVar[dict[str, Any]] = {}
 
     def __init__(self, parser: SearchQueryParser) -> None:
@@ -117,6 +123,28 @@ class Query:
                 "must_not": self.get_negative_filters(),
                 "filter": self.get_filters(),
                 "minimum_should_match": 1,
+            }
+        }
+
+    def wrap_query_function_score(self, query: dict[str, Any]) -> dict[str, Any]:
+        # Wrap query in function_score to up-score important entities.
+        return {
+            "function_score": {
+                "query": query,
+                "functions": [
+                    {
+                        "field_value_factor": {
+                            "field": Field.NUM_VALUES,
+                            # This is a bit of a jiggle factor. Currently, very
+                            # large documents (like Vladimir Putin) have a
+                            # num_values of ~200, so get a +10 boost.  The order
+                            # is modifier(factor * value)
+                            "factor": 0.5,
+                            "modifier": "sqrt",
+                        }
+                    }
+                ],
+                "boost_mode": "sum",
             }
         }
 
@@ -242,8 +270,9 @@ class Query:
         return self.SOURCE
 
     def get_body(self) -> dict[str, Any]:
+        wrapped_query = self.wrap_query_function_score(self.get_query())
         body = {
-            "query": self.get_query(),
+            "query": wrapped_query,
             "post_filter": self.get_post_filters(),
             "from": self.parser.offset,
             "size": self.parser.limit,
@@ -281,7 +310,7 @@ class Query:
             parts.remove(empty)
         return " ".join([p for p in parts if p is not None])
 
-    def search(self) -> dict[str, Any]:
+    def search(self) -> ObjectApiResponse:
         """Execute the query as assmbled."""
         log.debug("Search index: %s", self.get_index())
         es = get_es()

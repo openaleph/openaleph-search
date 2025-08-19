@@ -169,7 +169,7 @@ def index_proxy(dataset: str, proxy: EntityProxy, sync=False):
 
 def index_bulk(dataset: str, entities: Iterable[EntityProxy], sync=False):
     """Index a set of entities."""
-    _entities = (format_entity(p, dataset) for p in entities)
+    _entities = (format_entity(dataset, p) for p in entities)
     _entities = (e for e in _entities if e is not None)
     bulk_actions(_entities, sync=sync)
 
