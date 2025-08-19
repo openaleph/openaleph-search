@@ -90,6 +90,7 @@ class SearchQueryResult(QueryResult):
         super(SearchQueryResult, self).__init__(request, parser=query.parser)
         self.query = query
         result = query.search()
+        result = dict(result)
         hits = result.get("hits", {})
         total = hits.get("total", {})
         self.total = total.get("value")
