@@ -19,7 +19,9 @@ log = get_logger(__name__)
 
 
 class QueryResult(object):
-    def __init__(self, request, parser=None, results=None, total=None):
+    def __init__(
+        self, request, parser: QueryParser | None = None, results=None, total=None
+    ):
         self.request = request
         self.parser = parser or QueryParser(request.args, request.authz)
         self.results = results or []
@@ -68,15 +70,6 @@ class QueryResult(object):
             "next": self.next_url,
             "previous": self.previous_url,
         }
-
-
-class DatabaseQueryResult(QueryResult):
-    def __init__(self, request, query, parser=None):
-        super(DatabaseQueryResult, self).__init__(request, parser=parser)
-        self.total = query.count()
-        results = query.limit(self.parser.limit)
-        results = results.offset(self.parser.offset)
-        self.results = results.all()
 
 
 class SearchQueryResult(QueryResult):
