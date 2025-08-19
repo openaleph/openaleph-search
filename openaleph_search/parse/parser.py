@@ -171,6 +171,15 @@ class SearchQueryParser(QueryParser):
             "max_highlight_analyzed_offset", 999999
         )
 
+    @property
+    def routing_key(self) -> str | None:
+        # get datsaet routing if filter is only for 1 specific dataset
+        datasets = self.filters.get("dataset", set())
+        datasets.update(self.filters.get("datasets", set()))
+        if len(datasets) == 1:
+            for name in datasets:
+                return name
+
     def get_facet_size(self, name: str) -> int:
         """Number of distinct values to be included (i.e. top N)."""
         facet_size = self.getint("facet_size:%s" % name, 20) or 20

@@ -10,7 +10,6 @@ from anystore.types import SDict
 from banal import ensure_list
 from elasticsearch import AsyncElasticsearch
 from elasticsearch.helpers import async_bulk
-from followthemoney import EntityProxy
 
 from openaleph_search.core import get_async_es, get_es
 from openaleph_search.settings import Settings
@@ -259,17 +258,3 @@ def index_settings(
             },
         }
     }
-
-
-def routing_key(dataset: str) -> str:
-    if not dataset:
-        raise RuntimeError("Invalid routing key")
-    return dataset
-
-
-def entity_routing_key(e: EntityProxy) -> str:
-    """Use the dataset as a shard routing key"""
-    dataset = getattr(e, "dataset", None)
-    if dataset in (None, "default"):
-        raise RuntimeError(f"Invalid dataset: `{dataset}`")
-    return routing_key(dataset)

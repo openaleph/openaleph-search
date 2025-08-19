@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     indexer_concurrency: int = 8
     indexer_chunk_size: int = 1000
 
-    index_shards: int = 5
+    index_shards: int = 25  # 4 indices with dataset routing
     index_replicas: int = 0
     index_prefix: str = "openaleph"
     index_write: str = "v1"

@@ -42,7 +42,7 @@ class FieldType:
     GEOPOINT = {"type": "geo_point"}
     # No length normalization for names. Merged entities have a lot of names,
     # and we don't want to penalize them for that.
-    NAMES_KEYWORD_COPY = {
+    NAMES_WEAK_NORM = {
         "type": "keyword",
         "copy_to": TEXT,
         "similarity": "weak_length_norm",
@@ -85,6 +85,10 @@ class Field:
     # length norm
     NUM_VALUES = "num_values"
 
+    # index metadata
+    INDEX_VERSION = "index_version"
+    INDEX_TS = "indexed_at"
+
 
 SOURCE_EXCLUDES = [
     *[t.group for t in registry.groups.values()],
@@ -102,7 +106,7 @@ PROPERTIES = {
     Field.SCHEMA: FieldType.KEYWORD,
     Field.SCHEMATA: FieldType.KEYWORD,
     Field.CAPTION: FieldType.KEYWORD,
-    Field.NAMES: FieldType.NAMES_KEYWORD_COPY,
+    Field.NAMES: FieldType.NAMES_WEAK_NORM,
     Field.NAME_KEYS: FieldType.KEYWORD,
     Field.NAME_PARTS: FieldType.KEYWORD_COPY,
     Field.NAME_SYMBOLS: FieldType.KEYWORD,
@@ -133,6 +137,9 @@ PROPERTIES = {
     registry.name.group: FieldType.KEYWORD,
     # length normalization
     Field.NUM_VALUES: FieldType.INTEGER,
+    # index metadata
+    Field.INDEX_VERSION: {**FieldType.KEYWORD, "index": False},
+    Field.INDEX_TS: {**FieldType.DATE, "index": False},
 }
 
 
