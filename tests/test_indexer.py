@@ -2,7 +2,7 @@ from openaleph_search.index.admin import clear_index
 from openaleph_search.index.entities import index_bulk, iter_entities
 
 
-def test_indexer(entities):
+def test_indexer(entities, cleanup_after):
     # clear
     clear_index()
 
