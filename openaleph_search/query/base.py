@@ -10,7 +10,6 @@ from openaleph_search.index.entities import get_field_type
 from openaleph_search.mapping import (
     DATE_FORMAT,
     NUMERIC_TYPES,
-    Field,
     get_index_field_type,
 )
 from openaleph_search.parse.parser import SearchQueryParser
@@ -123,28 +122,6 @@ class Query:
                 "must_not": self.get_negative_filters(),
                 "filter": self.get_filters(),
                 "minimum_should_match": 1,
-            }
-        }
-
-    def wrap_query_function_score(self, query: dict[str, Any]) -> dict[str, Any]:
-        # Wrap query in function_score to up-score important entities.
-        return {
-            "function_score": {
-                "query": query,
-                "functions": [
-                    {
-                        "field_value_factor": {
-                            "field": Field.NUM_VALUES,
-                            # This is a bit of a jiggle factor. Currently, very
-                            # large documents (like Vladimir Putin) have a
-                            # num_values of ~200, so get a +10 boost.  The order
-                            # is modifier(factor * value)
-                            "factor": 0.5,
-                            "modifier": "sqrt",
-                        }
-                    }
-                ],
-                "boost_mode": "sum",
             }
         }
 
@@ -270,9 +247,8 @@ class Query:
         return self.SOURCE
 
     def get_body(self) -> dict[str, Any]:
-        wrapped_query = self.wrap_query_function_score(self.get_query())
         body = {
-            "query": wrapped_query,
+            "query": self.get_query(),
             "post_filter": self.get_post_filters(),
             "from": self.parser.offset,
             "size": self.parser.limit,
@@ -335,6 +311,6 @@ class Query:
         cls, request: Any, parser: SearchQueryParser | None = None, **kwargs: Any
     ) -> SearchQueryResult:
         if parser is None:
-            parser = SearchQueryParser(request.args, request.authz)
+            parser = SearchQueryParser(request.args, request.authz.search_auth)
         query = cls(parser, **kwargs)
         return SearchQueryResult(request, query)

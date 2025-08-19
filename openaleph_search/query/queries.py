@@ -1,4 +1,5 @@
 import logging
+from typing import Any
 
 from banal import ensure_list
 
@@ -30,6 +31,33 @@ class EntitiesQuery(Query):
         if not len(schemata):
             schemata = ["Thing"]
         return entities_read_index(schema=schemata)
+
+    def get_query(self) -> dict[str, Any]:
+        query = super().get_query()
+        return self.wrap_query_function_score(query)
+
+    def wrap_query_function_score(self, query: dict[str, Any]) -> dict[str, Any]:
+        # Wrap query in function_score to up-score important entities.
+        # (thank you, OpenSanctions/yente :))
+        return {
+            "function_score": {
+                "query": query,
+                "functions": [
+                    {
+                        "field_value_factor": {
+                            "field": Field.NUM_VALUES,
+                            # This is a bit of a jiggle factor. Currently, very
+                            # large documents (like Vladimir Putin) have a
+                            # num_values of ~200, so get a +10 boost.  The order
+                            # is modifier(factor * value)
+                            "factor": 0.5,
+                            "modifier": "sqrt",
+                        }
+                    }
+                ],
+                "boost_mode": "sum",
+            }
+        }
 
 
 class MatchQuery(EntitiesQuery):
