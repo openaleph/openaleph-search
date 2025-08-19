@@ -248,6 +248,15 @@ def index_settings(
             "number_of_shards": str(shards),
             "number_of_replicas": str(replicas),
             # "refresh_interval": refresh,
+            "similarity": {
+                # We use this for names, to avoid over-penalizing entities with many names.
+                "weak_length_norm": {
+                    # BM25 is the default similarity algorithm.
+                    "type": "BM25",
+                    # 0.75 is the default
+                    "b": 0.25,
+                }
+            },
         }
     }
 

@@ -156,15 +156,16 @@ def match_query(
     groups = []
     for type_, value, _ in filters:
         if type_.group in MATCH_GROUPS and num_clauses <= MAX_CLAUSES:
-            groups.extend({"term": {type_.group: {"value": value, "boost": 2.0}}})
+            groups.append({"term": {type_.group: {"value": value, "boost": 2.0}}})
             num_clauses += 1
 
     scoring = []
     for type_, value, _ in filters:
         if type_.group not in MATCH_GROUPS and num_clauses <= MAX_CLAUSES:
-            groups.extend({"term": {type_.group: {"value": value}}})
+            scoring.append({"term": {type_.group: {"value": value}}})
             num_clauses += 1
 
     query["bool"]["should"].extend(groups)
     query["bool"]["should"].extend(scoring)
+
     return query
