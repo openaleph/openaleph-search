@@ -2,20 +2,25 @@ from typing import Annotated, Optional
 
 import typer
 from anystore.cli import ErrorHandler
+from anystore.io import smart_write
 from anystore.logging import configure_logging, get_logger
+from anystore.util import dump_json
 from ftmq.io import smart_read_proxies
 from rich import print
 
-from openaleph_search import __version__
 from openaleph_search.index import admin, entities
-from openaleph_search.settings import Settings
+from openaleph_search.search.logic import search_query_string
+from openaleph_search.settings import Settings, __version__
 
 settings = Settings()
 
 cli = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=settings.debug)
+cli_search = typer.Typer(name="search", no_args_is_help=True)
+cli.add_typer(cli_search, short_help="Execute search queries")
 log = get_logger(__name__)
 
 OPT_INPUT_URI = typer.Option("-", "-i", help="Input uri, default stdin")
+OPT_OUTPUT_URI = typer.Option("-", "-o", help="Output uri, default stdout")
 OPT_DATASET = typer.Option(..., "-d", help="Dataset")
 
 
@@ -59,3 +64,40 @@ def cli_index_entities(
     """Index entities into given dataset"""
     with ErrorHandler(log):
         entities.index_bulk(dataset, smart_read_proxies(input_uri))
+
+
+OPT_SEARCH_ARGS = Annotated[
+    Optional[str],
+    typer.Option(
+        help="Query parser args and filters (e.g. `filter:dataset=my_dataset`)"
+    ),
+]
+OPT_SEARCH_FORMAT = Annotated[
+    Optional[str], typer.Option(help="Output format (raw, parsed)")
+]
+
+
+@cli_search.command("query-string")
+def cli_search_query(
+    q: str,
+    args: OPT_SEARCH_ARGS = None,
+    output_uri: str = OPT_OUTPUT_URI,
+    output_format: OPT_SEARCH_FORMAT = "raw",
+):
+    """Search using elastic 'query_string' using the `EntitiesQuery` class"""
+    res = search_query_string(q, args)
+    data = dump_json(dict(res), clean=True, newline=True)
+    smart_write(output_uri, data)
+
+
+@cli_search.command("match")
+def cli_match(
+    q: str,
+    args: OPT_SEARCH_ARGS = None,
+    output_uri: str = OPT_OUTPUT_URI,
+    output_format: OPT_SEARCH_FORMAT = "raw",
+):
+    """Search using elastic 'match_query' using the `MatchQuery` class"""
+    res = search_query_string(q, args)
+    data = dump_json(dict(res), clean=True, newline=True)
+    smart_write(output_uri, data)
