@@ -1,15 +1,30 @@
 import logging
+from typing import Any
 
 from followthemoney import model
 from followthemoney.types import registry
 
+from openaleph_search.parse.parser import QueryParser
+
 log = logging.getLogger(__name__)
 
 
+COUNTRIES = dict(registry.country.names)
+LANGUAGES = dict(registry.language.names)
+SCHEMATA = {k: s.plural for k, s in model.schemata.items()}
+
+
 class Facet(object):
-    def __init__(self, name, aggregations, parser):
+    def __init__(
+        self,
+        name: str,
+        aggregations: dict[str, Any],
+        parser: QueryParser,
+        labels: dict[str, Any] | None = None,
+    ):
         self.name = name
         self.parser = parser
+        self.labels = labels or dict()
         self.data = self.extract(aggregations, name, "values")
         self.cardinality = self.extract(aggregations, name, "cardinality")
         self.intervals = self.extract(aggregations, name, "intervals")
@@ -26,7 +41,7 @@ class Facet(object):
         pass
 
     def update(self, result, key):
-        pass
+        result["label"] = self.labels.get("key", key)
 
     def get_key(self, bucket):
         return str(bucket.get("key"))
@@ -75,16 +90,12 @@ class Facet(object):
 
 class SchemaFacet(Facet):
     def update(self, result, key):
-        schema = model.get(key)
-        if schema is not None:
-            result["label"] = schema.plural
-        else:
-            result["label"] = key
+        result["label"] = SCHEMATA.get(key, key)
 
 
 class CountryFacet(Facet):
     def update(self, result, key):
-        result["label"] = registry.country.names.get(key, key)
+        result["label"] = COUNTRIES.get(key, key)
 
 
 class EntityFacet(Facet):
@@ -103,12 +114,11 @@ class EntityFacet(Facet):
 
 class LanguageFacet(Facet):
     def update(self, result, key):
-        result["label"] = registry.language.names.get(key, key)
+        result["label"] = LANGUAGES.get(key, key)
 
 
 class CategoryFacet(Facet):
-    def update(self, result, key):
-        result["label"] = key  # Collection.CATEGORIES.get(key, key)
+    pass
 
 
 class DatasetFacet(Facet):
