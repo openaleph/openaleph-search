@@ -1,3 +1,4 @@
+from functools import cached_property
 from typing import Any, Iterator, cast
 
 from anystore.logging import get_logger
@@ -8,6 +9,7 @@ from werkzeug.datastructures import MultiDict, OrderedMultiDict
 from openaleph_search.index.util import MAX_PAGE
 from openaleph_search.model import SearchAuth
 from openaleph_search.settings import Settings
+from openaleph_search.util import valid_dataset
 
 settings = Settings()
 log = get_logger(__name__)
@@ -171,13 +173,17 @@ class SearchQueryParser(QueryParser):
             "max_highlight_analyzed_offset", 999999
         )
 
-    @property
-    def routing_key(self) -> str | None:
-        # get datsaet routing if filter is only for 1 specific dataset
+    @cached_property
+    def datasets(self) -> set[str]:
         datasets = self.filters.get("dataset", set())
         datasets.update(self.filters.get("datasets", set()))
-        if len(datasets) == 1:
-            for name in datasets:
+        return {valid_dataset(d) for d in datasets}
+
+    @cached_property
+    def routing_key(self) -> str | None:
+        # get datsaet routing if filter is only for 1 specific dataset
+        if len(self.datasets) == 1:
+            for name in self.datasets:
                 return name
 
     def get_facet_size(self, name: str) -> int:

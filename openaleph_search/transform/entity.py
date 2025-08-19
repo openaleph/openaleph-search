@@ -15,6 +15,7 @@ from openaleph_search.transform.util import (
     index_name_parts,
     phonetic_names,
 )
+from openaleph_search.util import valid_dataset
 
 log = get_logger(__name__)
 
@@ -31,6 +32,8 @@ def format_entity(dataset: str, entity: EntityProxy) -> SDict | None:
     if entity.schema.abstract:
         log.warning("Tried to index an abstract-typed entity: %r", entity)
         return None
+
+    dataset = valid_dataset(dataset)
 
     # FIXME
     # a hack to display text previews in search for `Pages` `bodyText` property
