@@ -68,6 +68,12 @@ def index_entities(entities):
     clear_index()
 
 
+@pytest.fixture(scope="function")
+def cleanup_after():
+    yield
+    clear_index()
+
+
 @pytest.fixture(scope="session")
 def auth_public():
     return SearchAuth(datasets={"test_samples", "test_public"})
