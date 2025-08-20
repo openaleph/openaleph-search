@@ -10,6 +10,7 @@ from openaleph_search.index.entities import get_field_type
 from openaleph_search.mapping import (
     DATE_FORMAT,
     NUMERIC_TYPES,
+    TEXT,
     get_index_field_type,
 )
 from openaleph_search.parse.parser import SearchQueryParser
@@ -125,13 +126,6 @@ class Query:
             }
         }
 
-    def get_full_query(self) -> dict[str, Any]:
-        """Return a version of the query with post-filters included."""
-        query = self.get_query()
-        post_filters = self.get_post_filters()["bool"]["filter"]
-        query["bool"]["filter"].extend(post_filters)
-        return query
-
     def get_aggregations(self) -> dict[str, Any]:
         """Aggregate the query in order to generate faceted results."""
         aggregations = {}
@@ -181,6 +175,17 @@ class Query:
                         "extended_bounds"
                     ] = extended_bounds
 
+            significant = self.parser.get_facet_significant(facet_name)
+            if significant:
+                agg_name = "%s.significant_terms" % facet_name
+                facet_aggregations[agg_name] = {
+                    "significant_terms": {"field": facet_name}
+                }
+                if self.parser.get_facet_significant_type(facet_name) == "nested":
+                    facet_aggregations[agg_name]["aggregations"] = {
+                        agg_name: {"significant_terms": {"field": facet_name}}
+                    }
+
             if not len(facet_aggregations):
                 break
 
@@ -196,6 +201,9 @@ class Query:
                 }
             else:
                 aggregations.update(facet_aggregations)
+
+        if self.parser.get_facet_significant_text():
+            aggregations["significant_text"] = {"significant_text": {"field": TEXT}}
 
         return aggregations
 

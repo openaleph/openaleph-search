@@ -37,7 +37,7 @@ def test_search_auth(
 
     # simple counts
     PRIVATE = 3
-    PUBLIC = 2 + len(entities)
+    PUBLIC = 2 + len(entities) - 2  # -Page
     ALL = PRIVATE + PUBLIC
     # no auth obj raises when OPENALEPH_SEARCH_AUTH=true
     with pytest.raises(RuntimeError):

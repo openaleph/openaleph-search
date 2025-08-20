@@ -7,6 +7,7 @@ from followthemoney.util import sanitize_text
 from werkzeug.datastructures import MultiDict, OrderedMultiDict
 
 from openaleph_search.index.util import MAX_PAGE
+from openaleph_search.mapping import TEXT
 from openaleph_search.model import SearchAuth
 from openaleph_search.settings import Settings
 from openaleph_search.util import valid_dataset
@@ -219,6 +220,23 @@ class SearchQueryParser(QueryParser):
         for available options for possible values
         """
         return self.get("facet_interval:%s" % name)
+
+    def get_facet_significant(self, name: str) -> bool:
+        """Significant terms aggregation"""
+        return bool(self.get("facet_significant:%s" % name))
+
+    def get_facet_significant_type(self, name: str) -> str | None:
+        """Significant terms aggregation type (nested, text)"""
+        if self.auth and not self.auth.logged_in:
+            return
+        if self.get_facet_significant(name):
+            return self.get("facet_significant:%s" % name)
+
+    def get_facet_significant_text(self) -> bool:
+        """Enable significant_text terms aggregation (expensive)"""
+        if self.auth and not self.auth.logged_in:
+            return False
+        return self.get_facet_significant(TEXT)
 
     def to_dict(self) -> dict[str, Any]:
         parser = super().to_dict()

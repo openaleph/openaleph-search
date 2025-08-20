@@ -31,5 +31,5 @@ def test_pages(fixture_pages, cleanup_after):
     result = query.search()
     # no page but the parent pages
     assert len(result["hits"]["hits"]) == 1
-    assert len(result["hits"]["hits"][0]["_source"]["schema"]) == "Pages"
-    assert "<em>MIT</em>" in result["hits"]["hits"][0]["highlights"]["text"][0]
+    assert result["hits"]["hits"][0]["_source"]["schema"] == "Pages"
+    assert "<em>MIT</em>" in result["hits"]["hits"][0]["highlight"]["text"][0]
