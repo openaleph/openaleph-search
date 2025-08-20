@@ -235,13 +235,21 @@ def test_search_query_parser_from_url():
 
 def test_search_symbols():
     symbol = "[NAME:47200243]"  # vladimir
-    query = _create_query(f"/search?filter:name_symbols={symbol}")
+    query = _create_query(
+        f"/search?filter:schemata=LegalEntity&filter:name_symbols={symbol}"
+    )
     result = query.search()
-
     assert result["hits"]["total"]["value"] == 1
     assert (
         result["hits"]["hits"][0]["_id"] == "6cb6066ec282d5f8ddf9ca28a0d20c1713ac0a5b"
     )
+
+    # as well found in 1 document
+    query = _create_query(
+        f"/search?filter:schemata=Document&filter:name_symbols={symbol}"
+    )
+    result = query.search()
+    assert result["hits"]["total"]["value"] == 1
 
 
 def test_search_name_parts():

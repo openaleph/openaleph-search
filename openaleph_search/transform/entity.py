@@ -3,8 +3,8 @@ from datetime import datetime
 from anystore.logging import get_logger
 from anystore.types import SDict
 from banal import ensure_list, first
-from followthemoney import EntityProxy, registry
-from ftmq.util import get_symbols
+from followthemoney import EntityProxy, model, registry
+from ftmq.util import get_name_symbols, get_symbols
 
 from openaleph_search.index.indexes import entities_write_index
 from openaleph_search.mapping import NUMERIC_TYPES, Field
@@ -25,6 +25,15 @@ def _numeric_values(type_, values) -> list[float]:
     return [v for v in values if v is not None]
 
 
+def _get_symbols(entity: EntityProxy) -> set[str]:
+    if entity.schema.is_a("LegalEntity"):
+        return get_symbols(entity)
+    symbols: set[str] = set()
+    symbols.update(get_name_symbols(model["Person"], entity.names))
+    symbols.update(get_name_symbols(model["Organization"], entity.names))
+    return symbols
+
+
 def format_entity(dataset: str, entity: EntityProxy) -> SDict | None:
     """Apply final denormalisations to the index."""
     # Abstract entities can appear when profile fragments for a missing entity
@@ -42,7 +51,7 @@ def format_entity(dataset: str, entity: EntityProxy) -> SDict | None:
     data[Field.CAPTION] = entity.caption
 
     names = list(entity.names)
-    data[Field.NAME_SYMBOLS] = list(get_symbols(entity))
+    data[Field.NAME_SYMBOLS] = list(_get_symbols(entity))
     data[Field.NAME_KEYS] = list(index_name_keys(entity.schema, names))
     data[Field.NAME_PARTS] = list(index_name_parts(entity.schema, names))
     data[Field.NAME_PHONETIC] = list(phonetic_names(entity.schema, names))
