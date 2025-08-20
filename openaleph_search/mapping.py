@@ -29,17 +29,12 @@ class FieldType:
         "search_analyzer": DEFAULT_ANALYZER,
         "index_phrases": True,  # shingles
     }
-    TEXT_ANNOTATED = {
-        "type": "annotated_text",
-        "analyzer": DEFAULT_ANALYZER,
-        "search_analyzer": DEFAULT_ANALYZER,
-        "store": True,
-    }
     KEYWORD = {"type": "keyword"}
     KEYWORD_COPY = {"type": "keyword", "copy_to": TEXT}
     NUMERIC = {"type": "double"}
     INTEGER = {"type": "integer"}
     GEOPOINT = {"type": "geo_point"}
+
     # No length normalization for names. Merged entities have a lot of names,
     # and we don't want to penalize them for that.
     NAMES_WEAK_NORM = {
@@ -114,7 +109,6 @@ PROPERTIES = {
     Field.GEO_POINT: FieldType.GEOPOINT,
     # full text
     Field.TEXT: FieldType.TEXT,
-    Field.TEXT_ANNOTATED: FieldType.TEXT_ANNOTATED,
     # metadata
     Field.UPDATED_AT: FieldType.DATE,
     Field.CREATED_AT: FieldType.DATE,

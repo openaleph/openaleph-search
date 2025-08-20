@@ -35,13 +35,6 @@ def format_entity(dataset: str, entity: EntityProxy) -> SDict | None:
 
     dataset = valid_dataset(dataset)
 
-    # FIXME
-    # a hack to display text previews in search for `Pages` `bodyText` property
-    # will be removed again in `views.serializers.EntitySerializer` to reduce
-    # api response size
-    if entity.schema.name == "Pages":
-        entity.add("bodyText", " ".join(entity.get("indexText")))
-
     data = entity.to_full_dict(matchable=True)
 
     data[Field.DATASET] = dataset

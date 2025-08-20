@@ -59,6 +59,11 @@ def entities():
 
 
 @pytest.fixture(scope="module")
+def fixture_pages():
+    return list(smart_read_proxies(FIXTURES_PATH / "pages.jsonl"))
+
+
+@pytest.fixture(scope="module")
 def index_entities(entities):
     """Index some entities and delete them after test run"""
     index_bulk("test_samples", entities)

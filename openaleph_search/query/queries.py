@@ -1,43 +1,59 @@
 import logging
+from functools import cached_property
 from typing import Any
 
 from banal import ensure_list
-from followthemoney import EntityProxy
+from followthemoney import EntityProxy, model
 
 from openaleph_search.index.entities import ENTITY_SOURCE
 from openaleph_search.index.indexes import entities_read_index
 from openaleph_search.index.xref import XREF_SOURCE, xref_index
-from openaleph_search.mapping import Field, property_field
+from openaleph_search.mapping import Field
 from openaleph_search.query.base import Query
 from openaleph_search.query.matching import match_query
+from openaleph_search.query.util import field_filter_query
 
 log = logging.getLogger(__name__)
 
 SCORE_CUTOFF = 0.5
+EXCLUDE_SCHEMATA = [
+    s.name for s in model.schemata.values() if s.hidden
+]  # Page, Mention
 
 
 class EntitiesQuery(Query):
     TEXT_FIELDS = [f"{Field.NAMES}^3", f"{Field.NAME_PARTS}^2", Field.TEXT]
     PREFIX_FIELD = Field.NAME_PARTS
-    HIGHLIGHT_FIELD = property_field("*")
+    HIGHLIGHT_FIELD = "text"
     SKIP_FILTERS = [Field.SCHEMA, Field.SCHEMATA]
     SOURCE = ENTITY_SOURCE
     SORT_DEFAULT = []
 
-    def get_index(self):
+    @cached_property
+    def schemata(self) -> list[str]:
         schemata = self.parser.getlist("filter:schema")
         if len(schemata):
-            return entities_read_index(schema=schemata, expand=False)
+            return schemata
         schemata = self.parser.getlist("filter:schemata")
         if not len(schemata):
             schemata = ["Thing"]
-        return entities_read_index(schema=schemata)
+        return schemata
+
+    def get_index(self):
+        return entities_read_index(schema=self.schemata)
 
     def get_query(self) -> dict[str, Any]:
         return self.wrap_query_function_score(self.get_inner_query())
 
     def get_inner_query(self) -> dict[str, Any]:
         return super().get_query()
+
+    def get_negative_filters(self) -> list[dict[str, Any]]:
+        # exclude hidden schemata unless we explicitly want them
+        filters = super().get_negative_filters()
+        exclude_schemata = set(EXCLUDE_SCHEMATA) - set(self.schemata)
+        filters.append(field_filter_query("schema", exclude_schemata))
+        return filters
 
     def wrap_query_function_score(self, query: dict[str, Any]) -> dict[str, Any]:
         # Wrap query in function_score to up-score important entities.

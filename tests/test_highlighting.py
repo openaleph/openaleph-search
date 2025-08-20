@@ -16,10 +16,10 @@ def test_highlighting(index_entities):
     assert highlight is not None
     assert "<em>Search</em> <em>Wikipedia</em>" in highlight
 
-    # FIXME
-    # highlight = _search_highlight('"search wikipedia"')
-    # assert highlight is not None
-    # assert "<em>Search</em> <em>Wikipedia</em>" in highlight
+    # FIXME ?
+    highlight = _search_highlight("'search wikipedia'")
+    assert highlight is not None
+    assert "<em>Search</em> <em>Wikipedia</em>" in highlight
 
     highlight = _search_highlight("Українська")
     assert highlight is not None
