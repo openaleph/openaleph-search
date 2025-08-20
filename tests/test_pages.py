@@ -20,7 +20,7 @@ def _create_query(url):
 
 
 def test_pages_mapping():
-    mapping = make_schema_bucket_mapping("pages", "v1")
+    mapping = make_schema_bucket_mapping("pages")
     assert mapping["properties"]["text"]["store"] is True
 
 
