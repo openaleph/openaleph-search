@@ -119,7 +119,7 @@ def configure_entities():
             configure_schema_bucket(bucket, version)
 
 
-def make_schema_bucket_mapping(bucket: Bucket, version: str) -> dict[str, Any]:
+def make_schema_bucket_mapping(bucket: Bucket) -> dict[str, Any]:
     properties = get_schema_bucket_mapping(bucket)
     mapping = make_mapping(properties)
     if bucket == "pages":
@@ -133,7 +133,7 @@ def configure_schema_bucket(bucket: Bucket, version: str):
     Generate relevant type mappings for entity properties so that
     we can do correct searches on each.
     """
-    mapping = make_schema_bucket_mapping(bucket, version)
+    mapping = make_schema_bucket_mapping(bucket)
     index = bucket_index(bucket, version)
     settings = index_settings()
     return configure_index(index, mapping, settings)

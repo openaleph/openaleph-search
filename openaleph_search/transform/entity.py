@@ -138,10 +138,6 @@ def format_parallel(
 ) -> Actions:
     """
     Transform entities into index actions in parallel
-
-    !!! Warning
-        This currently doesn't work with modern entities (ValueEntity,
-        StatementEntity) as there is a pickling error.
     """
     batches = itertools.batched(entities, n=chunk_size or settings.indexer_chunk_size)
     max_workers = min((cpu_count(), concurrency or settings.indexer_concurrency))

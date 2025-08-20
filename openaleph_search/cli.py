@@ -12,7 +12,7 @@ from openaleph_search.index import admin, entities
 from openaleph_search.index.indexer import bulk_actions
 from openaleph_search.search.logic import search_query_string
 from openaleph_search.settings import Settings, __version__
-from openaleph_search.transform.entity import format_entities  # , format_parallel
+from openaleph_search.transform.entity import format_parallel
 
 settings = Settings()
 
@@ -68,7 +68,7 @@ def cli_format_entities(
     with ErrorHandler(log):
         entities = smart_read_proxies(input_uri)
         formatted = logged_items(
-            format_entities(dataset, entities), "Format", 10_000, "Entity", log
+            format_parallel(dataset, entities), "Format", 10_000, "Entity", log
         )
         smart_write_json(output_uri, formatted)
 

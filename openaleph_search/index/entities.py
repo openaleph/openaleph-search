@@ -21,7 +21,7 @@ from openaleph_search.index.indexes import (
 from openaleph_search.index.util import unpack_result
 from openaleph_search.model import SearchAuth
 from openaleph_search.settings import MAX_PAGE
-from openaleph_search.transform.entity import format_entities
+from openaleph_search.transform.entity import format_parallel
 
 log = logging.getLogger(__name__)
 PROXY_INCLUDES = [
@@ -170,8 +170,7 @@ def index_proxy(dataset: str, proxy: EntityProxy, sync=False):
 
 def index_bulk(dataset: str, entities: Iterable[EntityProxy], sync=False):
     """Index a set of entities."""
-    actions = format_entities(dataset, entities)
-    # actions = format_parallel(dataset, entities)
+    actions = format_parallel(dataset, entities)
     bulk_actions(actions, sync=sync)
 
 
