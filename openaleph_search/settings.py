@@ -35,6 +35,3 @@ class Settings(BaseSettings):
     index_expand_clause_limit: int = 10
     index_delete_by_query_batchsize: int = 100
     index_namespace_ids: bool = True
-
-    xref_scroll: str = "5m"
-    xref_scroll_size: int = 1000

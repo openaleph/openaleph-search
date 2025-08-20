@@ -8,7 +8,6 @@ from followthemoney import EntityProxy, model
 from openaleph_search.index.entities import ENTITY_SOURCE
 from openaleph_search.index.indexes import entities_read_index
 from openaleph_search.index.mapping import Field
-from openaleph_search.index.xref import XREF_SOURCE, xref_index
 from openaleph_search.query.base import Query
 from openaleph_search.query.matching import match_query
 from openaleph_search.query.util import field_filter_query
@@ -154,32 +153,3 @@ class GeoDistanceQuery(EntitiesQuery):
                 }
             }
         ]
-
-
-class XrefQuery(Query):
-    TEXT_FIELDS = ["text"]
-    SORT_DEFAULT = [{"score": "desc"}]
-    SORT_FIELDS = {
-        "random": "random",
-        "doubt": "doubt",
-        "score": "_score",
-    }
-    AUTHZ_FIELD = "match_dataset"
-    SCORE_CUTOFF = SCORE_CUTOFF
-    SOURCE = XREF_SOURCE
-
-    def __init__(self, parser, dataset=None):
-        self.dataset = dataset
-        parser.highlight = False
-        super(XrefQuery, self).__init__(parser)
-
-    def get_filters(self, **kwargs):
-        filters = super(XrefQuery, self).get_filters(**kwargs)
-        filters.append({"term": {"dataset": self.dataset}})
-        sorts = [f for (f, _) in self.parser.sorts]
-        if "random" not in sorts and "doubt" not in sorts:
-            filters.append({"range": {"score": {"gt": self.SCORE_CUTOFF}}})
-        return filters
-
-    def get_index(self):
-        return xref_index()

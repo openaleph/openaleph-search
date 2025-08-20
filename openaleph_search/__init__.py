@@ -4,7 +4,6 @@ from openaleph_search.query.queries import (
     EntitiesQuery,
     GeoDistanceQuery,
     MatchQuery,
-    XrefQuery,
 )
 from openaleph_search.search.result import QueryResult
 
@@ -16,5 +15,4 @@ __all__ = [
     "QueryParser",
     "QueryResult",
     "SearchQueryParser",
-    "XrefQuery",
 ]
