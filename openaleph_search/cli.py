@@ -2,15 +2,17 @@ from typing import Annotated, Optional
 
 import typer
 from anystore.cli import ErrorHandler
-from anystore.io import smart_write
+from anystore.io import logged_items, smart_stream_json, smart_write, smart_write_json
 from anystore.logging import configure_logging, get_logger
-from anystore.util import dump_json
+from anystore.util import Took, dump_json
 from ftmq.io import smart_read_proxies
 from rich import print
 
 from openaleph_search.index import admin, entities
+from openaleph_search.index.indexer import bulk_actions
 from openaleph_search.search.logic import search_query_string
 from openaleph_search.settings import Settings, __version__
+from openaleph_search.transform.entity import format_entities  # , format_parallel
 
 settings = Settings()
 
@@ -56,6 +58,21 @@ def cli_reset():
         admin.upgrade_search()
 
 
+@cli.command("format-entities")
+def cli_format_entities(
+    input_uri: str = OPT_INPUT_URI,
+    output_uri: str = OPT_OUTPUT_URI,
+    dataset: str = OPT_DATASET,
+):
+    """Transform entities into index actions"""
+    with ErrorHandler(log):
+        entities = smart_read_proxies(input_uri)
+        formatted = logged_items(
+            format_entities(dataset, entities), "Format", 10_000, "Entity", log
+        )
+        smart_write_json(output_uri, formatted)
+
+
 @cli.command("index-entities")
 def cli_index_entities(
     input_uri: str = OPT_INPUT_URI,
@@ -64,6 +81,15 @@ def cli_index_entities(
     """Index entities into given dataset"""
     with ErrorHandler(log):
         entities.index_bulk(dataset, smart_read_proxies(input_uri))
+
+
+@cli.command("index-actions")
+def cli_index_actions(input_uri: str = OPT_INPUT_URI):
+    """Index a stream of actions"""
+    with ErrorHandler(log), Took() as t:
+        actions = smart_stream_json(input_uri)
+        bulk_actions(actions)
+        log.info("Index actions complete.", input_uri=input_uri, took=t.took)
 
 
 OPT_SEARCH_ARGS = Annotated[

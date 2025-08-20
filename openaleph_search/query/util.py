@@ -3,7 +3,7 @@ from typing import Any, Iterable, TypedDict
 from anystore.types import SDict
 from banal import ensure_list, is_mapping
 
-from openaleph_search.mapping import Field
+from openaleph_search.index.mapping import Field
 
 
 class Bools(TypedDict):

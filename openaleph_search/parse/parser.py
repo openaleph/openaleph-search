@@ -6,10 +6,9 @@ from banal import as_bool
 from followthemoney.util import sanitize_text
 from werkzeug.datastructures import MultiDict, OrderedMultiDict
 
-from openaleph_search.index.util import MAX_PAGE
-from openaleph_search.mapping import TEXT
+from openaleph_search.index.mapping import TEXT
 from openaleph_search.model import SearchAuth
-from openaleph_search.settings import Settings
+from openaleph_search.settings import MAX_PAGE, Settings
 from openaleph_search.util import valid_dataset
 
 settings = Settings()

@@ -7,8 +7,8 @@ from followthemoney import EntityProxy, model
 
 from openaleph_search.index.entities import ENTITY_SOURCE
 from openaleph_search.index.indexes import entities_read_index
+from openaleph_search.index.mapping import Field
 from openaleph_search.index.xref import XREF_SOURCE, xref_index
-from openaleph_search.mapping import Field
 from openaleph_search.query.base import Query
 from openaleph_search.query.matching import match_query
 from openaleph_search.query.util import field_filter_query

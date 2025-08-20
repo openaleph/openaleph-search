@@ -7,15 +7,13 @@ from elasticsearch.helpers import scan
 from followthemoney.types import registry
 
 from openaleph_search.core import get_es
+from openaleph_search.index.indexer import bulk_actions, configure_index, query_delete
+from openaleph_search.index.mapping import FieldType
 from openaleph_search.index.util import (
-    bulk_actions,
-    configure_index,
     index_name,
     index_settings,
-    query_delete,
     unpack_result,
 )
-from openaleph_search.mapping import FieldType
 from openaleph_search.model import SearchAuth
 
 log = logging.getLogger(__name__)

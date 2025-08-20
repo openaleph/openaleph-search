@@ -7,7 +7,7 @@ from followthemoney.types import registry
 
 from openaleph_search.core import get_es
 from openaleph_search.index.entities import get_field_type
-from openaleph_search.mapping import (
+from openaleph_search.index.mapping import (
     DATE_FORMAT,
     NUMERIC_TYPES,
     TEXT,

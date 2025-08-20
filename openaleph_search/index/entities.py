@@ -8,20 +8,20 @@ from followthemoney.proxy import EntityProxy
 from followthemoney.types import registry
 
 from openaleph_search.core import get_es
-from openaleph_search.index.indexes import (
-    entities_read_index,
-    entities_write_index,
-)
-from openaleph_search.index.util import (
-    MAX_PAGE,
+from openaleph_search.index.indexer import (
     MAX_REQUEST_TIMEOUT,
     MAX_TIMEOUT,
     bulk_actions,
     delete_safe,
-    unpack_result,
 )
+from openaleph_search.index.indexes import (
+    entities_read_index,
+    entities_write_index,
+)
+from openaleph_search.index.util import unpack_result
 from openaleph_search.model import SearchAuth
-from openaleph_search.transform.entity import format_entity
+from openaleph_search.settings import MAX_PAGE
+from openaleph_search.transform.entity import format_entities
 
 log = logging.getLogger(__name__)
 PROXY_INCLUDES = [
@@ -170,9 +170,9 @@ def index_proxy(dataset: str, proxy: EntityProxy, sync=False):
 
 def index_bulk(dataset: str, entities: Iterable[EntityProxy], sync=False):
     """Index a set of entities."""
-    _entities = (format_entity(dataset, p) for p in entities)
-    _entities = (e for e in _entities if e is not None)
-    bulk_actions(_entities, sync=sync)
+    actions = format_entities(dataset, entities)
+    # actions = format_parallel(dataset, entities)
+    bulk_actions(actions, sync=sync)
 
 
 def delete_entity(entity_id, exclude=None, sync=False):

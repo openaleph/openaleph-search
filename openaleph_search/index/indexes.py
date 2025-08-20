@@ -8,8 +8,9 @@ from followthemoney import model
 from followthemoney.exc import InvalidData
 from followthemoney.schema import Schema
 
-from openaleph_search.index.util import configure_index, index_name, index_settings
-from openaleph_search.mapping import TYPE_MAPPINGS, FieldType, make_mapping
+from openaleph_search.index.indexer import configure_index
+from openaleph_search.index.mapping import TYPE_MAPPINGS, FieldType, make_mapping
+from openaleph_search.index.util import index_name, index_settings
 from openaleph_search.settings import Settings
 
 log = logging.getLogger(__name__)

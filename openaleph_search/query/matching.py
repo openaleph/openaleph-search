@@ -6,7 +6,7 @@ from followthemoney.types import registry
 from ftmq.util import get_name_symbols
 from rigour.text import levenshtein
 
-from openaleph_search.mapping import Field, property_field
+from openaleph_search.index.mapping import Field, property_field
 from openaleph_search.query.util import BoolQuery, bool_query, none_query
 from openaleph_search.transform.util import (
     index_name_keys,

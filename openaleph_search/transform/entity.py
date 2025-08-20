@@ -1,14 +1,23 @@
+"""Transform followthemoney.EntityProxy into index actions"""
+
+import functools
+import itertools
+import time
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
+from multiprocessing import cpu_count
+from typing import Generator, Iterable
 
 from anystore.logging import get_logger
-from anystore.types import SDict
+from anystore.util import Took
 from banal import ensure_list, first
 from followthemoney import EntityProxy, model, registry
 from ftmq.util import get_name_symbols, get_symbols
 
+from openaleph_search.index.indexer import Action, Actions
 from openaleph_search.index.indexes import entities_write_index
-from openaleph_search.mapping import NUMERIC_TYPES, Field
-from openaleph_search.settings import __version__
+from openaleph_search.index.mapping import NUMERIC_TYPES, Field
+from openaleph_search.settings import Settings, __version__
 from openaleph_search.transform.util import (
     get_geopoints,
     index_name_keys,
@@ -18,6 +27,7 @@ from openaleph_search.transform.util import (
 from openaleph_search.util import valid_dataset
 
 log = get_logger(__name__)
+settings = Settings()
 
 
 def _numeric_values(type_, values) -> list[float]:
@@ -34,7 +44,7 @@ def _get_symbols(entity: EntityProxy) -> set[str]:
     return symbols
 
 
-def format_entity(dataset: str, entity: EntityProxy) -> SDict | None:
+def format_entity(dataset: str, entity: EntityProxy) -> Action | None:
     """Apply final denormalisations to the index."""
     # Abstract entities can appear when profile fragments for a missing entity
     # are present.
@@ -102,3 +112,74 @@ def format_entity(dataset: str, entity: EntityProxy) -> SDict | None:
         "_source": data,
         "_routing": dataset,
     }
+
+
+def format_entities(dataset: str, entities: Iterable[EntityProxy]) -> Actions:
+    for entity in entities:
+        formatted = format_entity(dataset, entity)
+        if formatted is not None:
+            yield formatted
+
+
+def format_batch(dataset: str, entities: Iterable[EntityProxy]) -> list[Action]:
+    actions = []
+    for entity in entities:
+        formatted = format_entity(dataset, entity)
+        if formatted is not None:
+            actions.append(formatted)
+    return actions
+
+
+def format_parallel(
+    dataset: str,
+    entities: Generator[EntityProxy, None, None],
+    concurrency: int | None = settings.indexer_concurrency,
+    chunk_size: int | None = settings.indexer_chunk_size,
+) -> Actions:
+    """
+    Transform entities into index actions in parallel
+
+    !!! Warning
+        This currently doesn't work with modern entities (ValueEntity,
+        StatementEntity) as there is a pickling error.
+    """
+    batches = itertools.batched(entities, n=chunk_size or settings.indexer_chunk_size)
+    max_workers = min((cpu_count(), concurrency or settings.indexer_concurrency))
+    max_queued = max_workers * 2
+    func = functools.partial(format_batch, dataset=dataset)
+
+    with ProcessPoolExecutor(max_workers=max_workers) as executor, Took() as t:
+        transformed = 0
+        active_futures = {}
+        # Submit initial batches
+        for _ in range(max_queued):
+            try:
+                batch = next(batches)
+                future = executor.submit(func, entities=batch)
+                active_futures[hash(future)] = future
+            except StopIteration:
+                break
+
+        # Process results as they complete
+        while active_futures:
+            # Wait for at least one to complete
+            completed = [f for f in active_futures.values() if f.done()]
+            for future in completed:
+                for action in future.result():
+                    transformed += 1
+                    yield action
+                del active_futures[hash(future)]
+
+                # Submit next batch
+                try:
+                    batch = next(batches)
+                    new_future = executor.submit(func, entities=batch)
+                    active_futures[hash(new_future)] = new_future
+                except StopIteration:
+                    pass
+
+            if not completed:
+                # If none completed, wait a bit
+                time.sleep(0.1)
+
+    log.info(f"Transformed {transformed} actions.", took=t.took)

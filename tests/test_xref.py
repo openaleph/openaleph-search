@@ -11,7 +11,7 @@ from followthemoney import EntityProxy
 from ftmq.util import make_entity
 
 from openaleph_search.index.entities import index_bulk
-from openaleph_search.index.util import bulk_actions
+from openaleph_search.index.indexer import bulk_actions
 from openaleph_search.index.xref import delete_xref, iter_matches, xref_index
 from openaleph_search.model import SearchAuth
 

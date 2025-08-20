@@ -9,6 +9,7 @@ from openaleph_search.settings import Settings
 log = get_logger(__name__)
 
 
+@cache
 def _nodes() -> list[str]:
     nodes: set[str] = set()
     settings = Settings()

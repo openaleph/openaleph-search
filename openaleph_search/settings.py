@@ -4,6 +4,8 @@ from pydantic_settings import SettingsConfigDict
 
 __version__ = "0.0.0"
 
+MAX_PAGE = 9999
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
