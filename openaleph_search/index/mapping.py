@@ -107,6 +107,7 @@ class FieldType:
     NAMES = {
         "type": "text",
         "similarity": "weak_length_norm",
+        "fields": {"kw": {"type": "keyword"}},
     }
 
 

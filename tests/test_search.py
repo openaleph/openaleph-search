@@ -37,11 +37,11 @@ def test_search_simplest_search(index_entities):
 
 
 def test_search_facet_attribute(index_entities):
-    query = _create_query("/search?facet=names")
+    query = _create_query("/search?facet=names.kw")
     result = query.search()
 
     assert result["hits"]["total"]["value"] > 0
-    assert result["aggregations"]["names.values"]["buckets"] == [
+    assert result["aggregations"]["names.kw.values"]["buckets"] == [
         {"key": "Banana", "doc_count": 2},
         {"key": "Vladimir L.", "doc_count": 2},
         {"key": "Banana ba Nana", "doc_count": 1},
@@ -51,11 +51,11 @@ def test_search_facet_attribute(index_entities):
 
 
 def test_search_facet_counts(index_entities):
-    query = _create_query("/search?facet=names&facet_total:names=true")
+    query = _create_query("/search?facet=names.kw&facet_total:names.kw=true")
     result = query.search()
 
     assert result["hits"]["total"]["value"] > 0
-    assert result["aggregations"]["names.values"]["buckets"] == [
+    assert result["aggregations"]["names.kw.values"]["buckets"] == [
         {"key": "Banana", "doc_count": 2},
         {"key": "Vladimir L.", "doc_count": 2},
         {"key": "Banana ba Nana", "doc_count": 1},
