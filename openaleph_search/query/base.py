@@ -14,6 +14,8 @@ from openaleph_search.index.mapping import (
 )
 from openaleph_search.parse.parser import SearchQueryParser
 from openaleph_search.query.util import (
+    BoolQuery,
+    bool_query,
     field_filter_query,
     filter_text,
     range_filter_query,
@@ -178,11 +180,19 @@ class Query:
             if significant:
                 agg_name = "%s.significant_terms" % facet_name
                 facet_aggregations[agg_name] = {
-                    "significant_terms": {"field": facet_name}
+                    "significant_terms": {
+                        "field": facet_name,
+                        "background_filter": self.get_significant_background(),
+                    }
                 }
                 if self.parser.get_facet_significant_type(facet_name) == "nested":
                     facet_aggregations[agg_name]["aggregations"] = {
-                        agg_name: {"significant_terms": {"field": facet_name}}
+                        agg_name: {
+                            "significant_terms": {
+                                "field": facet_name,
+                                "background_filter": self.get_significant_background(),
+                            }
+                        }
                     }
 
             if not len(facet_aggregations):
@@ -203,10 +213,21 @@ class Query:
 
         if self.parser.get_facet_significant_text():
             aggregations["significant_text"] = {
-                "significant_text": {"field": Field.TEXT}
+                "significant_text": {
+                    "field": Field.TEXT,
+                    "background_filter": self.get_significant_background(),
+                }
             }
 
         return aggregations
+
+    def get_significant_background(self) -> BoolQuery | None:
+        query = bool_query()
+        if self.parser.datasets:
+            query["bool"]["must"].append(
+                field_filter_query(Field.DATASET, self.parser.datasets)
+            )
+        return query
 
     def get_sort(self) -> list[str | dict[str, dict[str, Any]]]:
         """Pick one of a set of named result orderings."""

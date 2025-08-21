@@ -177,6 +177,8 @@ class SearchQueryParser(QueryParser):
     def datasets(self) -> set[str]:
         datasets = self.filters.get("dataset", set())
         datasets.update(self.filters.get("datasets", set()))
+        if self.auth and not self.auth.is_admin:
+            datasets = datasets & set(self.auth.datasets)
         return {valid_dataset(d) for d in datasets}
 
     @cached_property
