@@ -1,9 +1,12 @@
 """High level search interface"""
 
+from typing import Any
 from urllib.parse import parse_qsl
 
 from elastic_transport import ObjectApiResponse
 
+from openaleph_search.core import get_es
+from openaleph_search.index.indexes import entities_read_index
 from openaleph_search.parse.parser import SearchQueryParser
 from openaleph_search.query.queries import EntitiesQuery
 
@@ -19,3 +22,11 @@ def search_query_string(q: str, args: str | None = None) -> ObjectApiResponse:
     parser = SearchQueryParser(_args)
     query = EntitiesQuery(parser)
     return query.search()
+
+
+def search_body(
+    body: dict[str, Any], index: str | None = None, routing: str | None = None
+) -> ObjectApiResponse:
+    es = get_es()
+    index = index or entities_read_index()
+    return es.search(index=index, body=body, routing=routing)

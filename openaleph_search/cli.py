@@ -2,7 +2,13 @@ from typing import Annotated, Optional
 
 import typer
 from anystore.cli import ErrorHandler
-from anystore.io import logged_items, smart_stream_json, smart_write, smart_write_json
+from anystore.io import (
+    logged_items,
+    smart_read,
+    smart_stream_json,
+    smart_write,
+    smart_write_json,
+)
 from anystore.logging import configure_logging, get_logger
 from anystore.util import Took, dump_json
 from ftmq.io import smart_read_proxies
@@ -10,7 +16,7 @@ from rich import print
 
 from openaleph_search.index import admin, entities
 from openaleph_search.index.indexer import bulk_actions
-from openaleph_search.search.logic import search_query_string
+from openaleph_search.search.logic import search_body, search_query_string
 from openaleph_search.settings import Settings, __version__
 from openaleph_search.transform.entity import format_parallel
 
@@ -112,6 +118,21 @@ def cli_search_query(
 ):
     """Search using elastic 'query_string' using the `EntitiesQuery` class"""
     res = search_query_string(q, args)
+    data = dump_json(dict(res), clean=True, newline=True)
+    smart_write(output_uri, data)
+
+
+@cli_search.command("body")
+def cli_search_body(
+    input_uri: str = OPT_INPUT_URI,
+    output_uri: str = OPT_OUTPUT_URI,
+    output_format: OPT_SEARCH_FORMAT = "raw",
+    index: str | None = None,
+    routing: str | None = None,
+):
+    """Search with raw json body for query"""
+    body = smart_read(input_uri, serialization_mode="json")
+    res = search_body(body, index, routing)
     data = dump_json(dict(res), clean=True, newline=True)
     smart_write(output_uri, data)
 

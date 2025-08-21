@@ -1,6 +1,7 @@
 from anystore.decorators import error_handler
 from anystore.functools import weakref_cache as cache
 from anystore.logging import get_logger
+from anystore.util import mask_uri
 from banal import ensure_list
 from elasticsearch import AsyncElasticsearch, Elasticsearch
 
@@ -30,6 +31,7 @@ def _get_client() -> Elasticsearch:
         retry_on_status=[502, 503, 504],
     )
     es.info()
+    urls = [mask_uri(u) for u in urls]
     log.info("Connected to Elasticsearch", nodes=urls)
     return es
 
