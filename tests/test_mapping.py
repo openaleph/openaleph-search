@@ -38,12 +38,14 @@ def test_mappings_copy_to(es, cleanup_after):
     index_proxy("test_mapping", entity, sync=True)
     time.sleep(1)  # FIXME async es
 
-    # all name fields are keyword
+    # names is a text field, so need to use match
     search_result = es.search(
-        index=index, query={"bool": {"must": [{"term": {"names": "Vladimir Putin"}}]}}
+        index=index, query={"bool": {"must": [{"match": {"names": "Vladimir"}}]}}
     )
     assert len(search_result["hits"]["hits"]) == 1, "Failed to match on names"
 
+    # all other name fields are keyword
+    assert len(search_result["hits"]["hits"]) == 1, "Failed to match on names"
     # name_parts and name_phonetic are a bit of a special case, we syntesize them in the index=indexer
     search_result = es.search(
         index=index, query={"bool": {"must": [{"term": {"name_parts": "vladimir"}}]}}
@@ -84,7 +86,7 @@ def test_mapping_colliding_prop_names():
 
 
 def test_mapping_spec():
-    assert BASE_MAPPING["names"]["type"] == "keyword"
+    assert BASE_MAPPING["names"]["type"] == "text"
     assert "copy_to" not in BASE_MAPPING["names"]
     assert BASE_MAPPING["name_keys"]["type"] == "keyword"
     assert GROUP_MAPPING["dates"]["type"] == "date"

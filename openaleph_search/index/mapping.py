@@ -104,7 +104,10 @@ class FieldType:
 
     # No length normalization for names. Merged entities have a lot of names,
     # and we don't want to penalize them for that.
-    NAMES = {"type": "keyword", "similarity": "weak_length_norm"}
+    NAMES = {
+        "type": "text",
+        "similarity": "weak_length_norm",
+    }
 
 
 TYPE_MAPPINGS = {
