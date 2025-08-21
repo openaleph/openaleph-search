@@ -102,7 +102,7 @@ class Query:
         """Apply post-aggregation query filters."""
         pre = set(self.parser.filters.keys())
         pre = pre.difference(self.parser.facet_names)
-        skip = [*pre, *self.SKIP_FILTERS, exclude]
+        skip = {*pre, *self.SKIP_FILTERS, exclude}
         filters = self.get_filters_list(skip)
         return {"bool": {"filter": filters}}
 
@@ -183,16 +183,25 @@ class Query:
                     "significant_terms": {
                         "field": facet_name,
                         "background_filter": self.get_significant_background(),
+                        "size": 10,
+                        "min_doc_count": 3,
+                        "shard_size": 100,
+                        "execution_hint": "map",
                     }
                 }
+
                 if self.parser.get_facet_significant_type(facet_name) == "nested":
                     facet_aggregations[agg_name]["aggregations"] = {
                         agg_name: {
                             "significant_terms": {
                                 "field": facet_name,
                                 "background_filter": self.get_significant_background(),
+                                "size": 10,
+                                "min_doc_count": 3,
+                                "shard_size": 100,
+                                "execution_hint": "map",
                             }
-                        }
+                        },
                     }
 
             if not len(facet_aggregations):
@@ -213,10 +222,19 @@ class Query:
 
         if self.parser.get_facet_significant_text():
             aggregations["significant_text"] = {
-                "significant_text": {
-                    "field": Field.TEXT,
-                    "background_filter": self.get_significant_background(),
-                }
+                **self.get_significant_text_sampler(),
+                "aggs": {
+                    "significant_text": {
+                        "significant_text": {
+                            "field": Field.TEXT,
+                            "background_filter": self.get_significant_background(),
+                            "filter_duplicate_text": True,
+                            "size": 5,
+                            "min_doc_count": 5,
+                            "shard_size": 200,
+                        }
+                    }
+                },
             }
 
         return aggregations
@@ -228,6 +246,18 @@ class Query:
                 field_filter_query(Field.DATASET, self.parser.datasets)
             )
         return query
+
+    def get_sample_for_aggregation(
+        self, size: int, agg_name: str, aggregation: dict[str, Any]
+    ) -> dict[str, Any]:
+        # https://www.elastic.co/docs/reference/aggregations/search-aggregations-bucket-sampler-aggregation
+        return {"sampler": {"shard_size": size}, "aggs": {agg_name: aggregation}}
+
+    def get_significant_text_sampler(self) -> dict[str, Any]:
+        if self.parser.datasets:
+            # no sampling on all datasets
+            return {"sampler": {"shard_size": 200}}
+        return {"diversified_sampler": {"shard_size": 200, "field": Field.DATASET}}
 
     def get_sort(self) -> list[str | dict[str, dict[str, Any]]]:
         """Pick one of a set of named result orderings."""
@@ -276,12 +306,28 @@ class Query:
     def get_source(self) -> dict[str, Any]:
         return self.SOURCE
 
+    def has_significant_aggregations(self) -> bool:
+        """Check if any significant aggregations are being performed."""
+        # Check for significant_text aggregation
+        if self.parser.get_facet_significant_text():
+            return True
+
+        # Check for significant terms aggregations on facets
+        for facet_name in self.parser.facet_names:
+            if self.parser.get_facet_significant(facet_name):
+                return True
+
+        return False
+
     def get_body(self) -> dict[str, Any]:
+        # Don't return hits when doing significant aggregations
+        size = 0 if self.has_significant_aggregations() else self.parser.limit
+
         body = {
             "query": self.get_query(),
             "post_filter": self.get_post_filters(),
             "from": self.parser.offset,
-            "size": self.parser.limit,
+            "size": size,
             "aggregations": self.get_aggregations(),
             "sort": self.get_sort(),
             "highlight": self.get_highlight(),

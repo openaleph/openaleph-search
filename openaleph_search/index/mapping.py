@@ -18,20 +18,39 @@ DEFAULT_ANALYZER = "default"
 DEFAULT_NORMALIZER = "default"
 ICU_ANALYZER = "icu-default"
 ICU_NORMALIZER = "icu-default"
+NAME_KW_NORMALIZER = "name-kw-normalizer"
 DATE_FORMAT = "yyyy-MM-dd'T'HH||yyyy-MM-dd'T'HH:mm||yyyy-MM-dd'T'HH:mm:ss||yyyy-MM-dd||yyyy-MM||yyyy||strict_date_optional_time"  # noqa: B950
 NUMERIC_TYPES = (registry.number, registry.date)
 
 # INDEX SETTINGS #
 ANALYZE_SETTINGS = {
     "analysis": {
+        "char_filter": {
+            "remove_special_chars": {
+                "type": "pattern_replace",
+                "pattern": "[^\\p{L}\\p{N}\\s]",
+                "replacement": "",
+            },
+            "normalize_spaces": {
+                "type": "pattern_replace",
+                "pattern": "\\s+",
+                "replacement": " ",
+            },
+        },
         "normalizer": {
             ICU_NORMALIZER: {
                 "type": "custom",
                 "filter": ["icu_folding"],
-            }
+            },
+            NAME_KW_NORMALIZER: {
+                "type": "custom",
+                "char_filter": ["remove_special_chars", "normalize_spaces"],
+                "filter": ["lowercase", "asciifolding"],
+            },
         },
         "analyzer": {
             ICU_ANALYZER: {
+                "char_filter": ["html_strip"],
                 "tokenizer": "icu_tokenizer",
                 "filter": [
                     "icu_folding",
@@ -82,6 +101,7 @@ class Field:
     NUM_VALUES = "num_values"
 
     # index metadata
+    INDEX_BUCKET = "index_bucket"
     INDEX_VERSION = "index_version"
     INDEX_TS = "indexed_at"
 
@@ -107,7 +127,7 @@ class FieldType:
     NAMES = {
         "type": "text",
         "similarity": "weak_length_norm",
-        "fields": {"kw": {"type": "keyword"}},
+        "fields": {"kw": {"type": "keyword", "normalizer": NAME_KW_NORMALIZER}},
     }
 
 
@@ -167,6 +187,7 @@ BASE_MAPPING = {
     # length normalization
     Field.NUM_VALUES: FieldType.INTEGER,
     # index metadata
+    Field.INDEX_BUCKET: {**FieldType.KEYWORD, "index": False},
     Field.INDEX_VERSION: {**FieldType.KEYWORD, "index": False},
     Field.INDEX_TS: {**FieldType.DATE, "index": False},
 }
