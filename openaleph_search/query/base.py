@@ -6,12 +6,11 @@ from elastic_transport import ObjectApiResponse
 from followthemoney.types import registry
 
 from openaleph_search.core import get_es
-from openaleph_search.index.entities import get_field_type
 from openaleph_search.index.mapping import (
     DATE_FORMAT,
     NUMERIC_TYPES,
-    TEXT,
-    get_index_field_type,
+    Field,
+    get_field_type,
 )
 from openaleph_search.parse.parser import SearchQueryParser
 from openaleph_search.query.util import (
@@ -25,11 +24,11 @@ log = get_logger(__name__)
 
 
 class Query:
-    TEXT_FIELDS: ClassVar[list[str]] = ["text"]
+    TEXT_FIELDS: ClassVar[list[str]] = [Field.TEXT]
     PREFIX_FIELD: ClassVar[str] = "name"
     SKIP_FILTERS: ClassVar[list[str]] = []
     AUTHZ_FIELD: ClassVar[str | None] = "dataset"
-    HIGHLIGHT_FIELD: ClassVar[str] = "text"
+    HIGHLIGHT_FIELD: ClassVar[str] = Field.TEXT
     SORT_FIELDS: ClassVar[dict[str, str]] = {
         "label": "label.kw",
         "score": "_score",
@@ -203,7 +202,9 @@ class Query:
                 aggregations.update(facet_aggregations)
 
         if self.parser.get_facet_significant_text():
-            aggregations["significant_text"] = {"significant_text": {"field": TEXT}}
+            aggregations["significant_text"] = {
+                "significant_text": {"field": Field.TEXT}
+            }
 
         return aggregations
 
@@ -217,7 +218,7 @@ class Query:
             field = self.SORT_FIELDS.get(field, field)
             type_ = get_field_type(field)
             config = {"order": direction, "missing": "_last"}
-            es_type = get_index_field_type(type_)
+            es_type = get_field_type(type_)
             if es_type:
                 config["unmapped_type"] = es_type
             if field == registry.date.group:

@@ -54,7 +54,7 @@ def format_entity(dataset: str, entity: EntityProxy) -> Action | None:
 
     dataset = valid_dataset(dataset)
 
-    data = entity.to_full_dict(matchable=True)
+    data = entity.to_dict()
 
     data[Field.DATASET] = dataset
     data[Field.SCHEMATA] = list(entity.schema.names)

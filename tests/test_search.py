@@ -133,9 +133,21 @@ def test_search_facet_interval(index_entities):
 
     assert result["hits"]["total"]["value"] == 3
     assert result["aggregations"]["properties.birthDate.values"]["buckets"] == [
-        {"key": -19440000000, "key_as_string": "1969-05-21T00:00:00", "doc_count": 1},
-        {"key": 6825600000, "key_as_string": "1970-03-21T00:00:00", "doc_count": 1},
-        {"key": 20044800000, "key_as_string": "1970-08-21T00:00:00", "doc_count": 1},
+        {
+            "key": -19440000000,
+            "key_as_string": "1969-05-21T00:00:00.000Z",
+            "doc_count": 1,
+        },
+        {
+            "key": 6825600000,
+            "key_as_string": "1970-03-21T00:00:00.000Z",
+            "doc_count": 1,
+        },
+        {
+            "key": 20044800000,
+            "key_as_string": "1970-08-21T00:00:00.000Z",
+            "doc_count": 1,
+        },
     ]
 
 

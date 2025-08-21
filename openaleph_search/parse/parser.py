@@ -6,7 +6,7 @@ from banal import as_bool
 from followthemoney.util import sanitize_text
 from werkzeug.datastructures import MultiDict, OrderedMultiDict
 
-from openaleph_search.index.mapping import TEXT
+from openaleph_search.index.mapping import Field
 from openaleph_search.model import SearchAuth
 from openaleph_search.settings import MAX_PAGE, Settings
 from openaleph_search.util import valid_dataset
@@ -235,7 +235,7 @@ class SearchQueryParser(QueryParser):
         """Enable significant_text terms aggregation (expensive)"""
         if self.auth and not self.auth.logged_in:
             return False
-        return self.get_facet_significant(TEXT)
+        return self.get_facet_significant(Field.TEXT)
 
     def to_dict(self) -> dict[str, Any]:
         parser = super().to_dict()

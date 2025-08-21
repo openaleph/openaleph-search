@@ -23,7 +23,7 @@ EXCLUDE_SCHEMATA = [
 class EntitiesQuery(Query):
     TEXT_FIELDS = [f"{Field.NAMES}^3", f"{Field.NAME_PARTS}^2", Field.TEXT]
     PREFIX_FIELD = Field.NAME_PARTS
-    HIGHLIGHT_FIELD = "text"
+    HIGHLIGHT_FIELD = Field.TEXT
     SKIP_FILTERS = [Field.SCHEMA, Field.SCHEMATA]
     SOURCE = ENTITY_SOURCE
     SORT_DEFAULT = []

@@ -105,3 +105,8 @@ def clear_es():
 def setup_es():
     delete_index()
     upgrade_search()
+
+
+@pytest.fixture(scope="session")
+def es():
+    yield get_es()

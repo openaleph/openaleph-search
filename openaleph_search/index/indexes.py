@@ -1,5 +1,4 @@
 import logging
-from copy import deepcopy
 from typing import Any, Literal, TypeAlias
 
 from anystore.functools import weakref_cache as cache
@@ -9,14 +8,14 @@ from followthemoney.exc import InvalidData
 from followthemoney.schema import Schema
 
 from openaleph_search.index.indexer import configure_index
-from openaleph_search.index.mapping import TYPE_MAPPINGS, FieldType, make_mapping
+from openaleph_search.index.mapping import make_mapping, make_schema_mapping
 from openaleph_search.index.util import index_name, index_settings
 from openaleph_search.settings import Settings
+from openaleph_search.util import SchemaType
 
 log = logging.getLogger(__name__)
 settings = Settings()
 
-SchemaType: TypeAlias = Schema | str
 Bucket: TypeAlias = Literal["pages", "documents", "intervals", "things"]
 BUCKETS = ("pages", "documents", "intervals", "things")
 
@@ -99,17 +98,13 @@ def entities_write_index(schema):
     return schema_index(schema, settings.index_write)
 
 
-@cache
-def get_schema_bucket_mapping(bucket: Bucket) -> dict[str, Any]:
+def make_schema_bucket_properties(bucket: Bucket) -> dict[str, Any]:
     """Configure the property mapping for the given schema bucket"""
-    mapping = {}
+    schemata: set[Schema] = set()
     for schema in model.schemata.values():
         if schema_bucket(schema) == bucket:
-            for prop in schema.properties.values():
-                config = deepcopy(TYPE_MAPPINGS.get(prop.type, FieldType.KEYWORD))
-                config["copy_to"] = ["text"]
-                mapping[prop.name] = config
-    return mapping
+            schemata.add(schema)
+    return make_schema_mapping(schemata)
 
 
 def configure_entities():
@@ -120,7 +115,7 @@ def configure_entities():
 
 
 def make_schema_bucket_mapping(bucket: Bucket) -> dict[str, Any]:
-    properties = get_schema_bucket_mapping(bucket)
+    properties = make_schema_bucket_properties(bucket)
     mapping = make_mapping(properties)
     if bucket == "pages":
         # store full text for highlighting

@@ -90,7 +90,9 @@ async def bulk_actions_async(
     """Process chunks as they complete to limit memory usage."""
     start = datetime.now()
     es = await get_async_es()
-    actions = logged_items(actions, "Index", 10_000, item_name="action", logger=log)
+    actions = logged_items(
+        actions, "Start indexing", 10_000, item_name="action", logger=log
+    )
     chunks = itertools.batched(actions, n=chunk_size or settings.indexer_chunk_size)
     max_concurrency = max_concurrency or settings.indexer_concurrency
     semaphore = asyncio.Semaphore(max_concurrency)

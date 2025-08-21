@@ -2,6 +2,7 @@ from anystore.logging import get_logger
 from anystore.types import SDict
 from banal import ensure_list
 
+from openaleph_search.index.mapping import ANALYZE_SETTINGS
 from openaleph_search.settings import Settings
 
 log = get_logger(__name__)
@@ -70,6 +71,7 @@ def index_settings(
         shards = 1
         replicas = 0
     return {
+        **ANALYZE_SETTINGS,
         "index": {
             "number_of_shards": str(shards),
             "number_of_replicas": str(replicas),
@@ -83,5 +85,5 @@ def index_settings(
                     "b": 0.25,
                 }
             },
-        }
+        },
     }
