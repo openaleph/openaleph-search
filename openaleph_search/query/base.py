@@ -21,15 +21,17 @@ from openaleph_search.query.util import (
     range_filter_query,
 )
 from openaleph_search.search.result import SearchQueryResult
+from openaleph_search.settings import Settings
 
 log = get_logger(__name__)
+settings = Settings()
 
 
 class Query:
     TEXT_FIELDS: ClassVar[list[str]] = [Field.TEXT]
     PREFIX_FIELD: ClassVar[str] = "name"
     SKIP_FILTERS: ClassVar[list[str]] = []
-    AUTHZ_FIELD: ClassVar[str | None] = "dataset"
+    AUTHZ_FIELD: ClassVar[str | None] = settings.search_auth_field
     HIGHLIGHT_FIELD: ClassVar[str] = Field.TEXT
     SORT_FIELDS: ClassVar[dict[str, str]] = {
         "label": "label.kw",
@@ -254,10 +256,10 @@ class Query:
         return {"sampler": {"shard_size": size}, "aggs": {agg_name: aggregation}}
 
     def get_significant_text_sampler(self) -> dict[str, Any]:
-        if self.parser.datasets:
+        if self.parser.collection_ids or self.parser.datasets:
             # no sampling on all datasets
             return {"sampler": {"shard_size": 200}}
-        return {"diversified_sampler": {"shard_size": 200, "field": Field.DATASET}}
+        return {"diversified_sampler": {"shard_size": 200, "field": self.AUTHZ_FIELD}}
 
     def get_sort(self) -> list[str | dict[str, dict[str, Any]]]:
         """Pick one of a set of named result orderings."""

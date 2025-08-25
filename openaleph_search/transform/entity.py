@@ -44,7 +44,7 @@ def _get_symbols(entity: EntityProxy) -> set[str]:
     return symbols
 
 
-def format_entity(dataset: str, entity: EntityProxy) -> Action | None:
+def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
     """Apply final denormalisations to the index."""
     # Abstract entities can appear when profile fragments for a missing entity
     # are present.
@@ -55,6 +55,10 @@ def format_entity(dataset: str, entity: EntityProxy) -> Action | None:
     dataset = valid_dataset(dataset)
 
     data = entity.to_dict()
+    # deprecated
+    collection_id = kwargs.get("collection_id")
+    if collection_id is not None:
+        data[Field.COLLECTION_ID] = collection_id
 
     data[Field.DATASET] = dataset
     data[Field.SCHEMATA] = list(entity.schema.names)
@@ -110,21 +114,23 @@ def format_entity(dataset: str, entity: EntityProxy) -> Action | None:
         "_id": entity_id,
         "_index": entities_write_index(entity.schema),
         "_source": data,
-        "_routing": dataset,
+        "_routing": collection_id or dataset,
     }
 
 
-def format_entities(dataset: str, entities: Iterable[EntityProxy]) -> Actions:
+def format_entities(dataset: str, entities: Iterable[EntityProxy], **kwargs) -> Actions:
     for entity in entities:
-        formatted = format_entity(dataset, entity)
+        formatted = format_entity(dataset, entity, **kwargs)
         if formatted is not None:
             yield formatted
 
 
-def format_batch(dataset: str, entities: Iterable[EntityProxy]) -> list[Action]:
+def format_batch(
+    dataset: str, entities: Iterable[EntityProxy], **kwargs
+) -> list[Action]:
     actions = []
     for entity in entities:
-        formatted = format_entity(dataset, entity)
+        formatted = format_entity(dataset, entity, **kwargs)
         if formatted is not None:
             actions.append(formatted)
     return actions
@@ -135,6 +141,7 @@ def format_parallel(
     entities: Generator[EntityProxy, None, None],
     concurrency: int | None = settings.indexer_concurrency,
     chunk_size: int | None = settings.indexer_chunk_size,
+    **kwargs,
 ) -> Actions:
     """
     Transform entities into index actions in parallel
@@ -142,7 +149,12 @@ def format_parallel(
     batches = itertools.batched(entities, n=chunk_size or settings.indexer_chunk_size)
     max_workers = min((cpu_count(), concurrency or settings.indexer_concurrency))
     max_queued = max_workers * 2
-    func = functools.partial(format_batch, dataset=dataset)
+    func = functools.partial(format_batch, dataset=dataset, **kwargs)
+
+    # shortcut for 1 worker
+    if max_workers == 1:
+        yield from func(entities=entities)
+        return
 
     with ProcessPoolExecutor(max_workers=max_workers) as executor, Took() as t:
         transformed = 0

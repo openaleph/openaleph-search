@@ -25,9 +25,11 @@ from openaleph_search.transform.entity import format_parallel
 
 log = logging.getLogger(__name__)
 PROXY_INCLUDES = [
+    "caption",
     "schema",
     "properties",
     "dataset",
+    "collection_id",
     "profile_id",
     "role_id",
     "mutable",
@@ -47,15 +49,18 @@ def _entities_query(
     filters: list[Any],
     auth: SearchAuth | None = None,
     dataset: str | None = None,
+    collection_id: str | None = None,
     schemata: set[str] | None = None,
 ):
     filters = filters or []
     if auth is not None:
         filters.append(auth.datasets_query())
-    if dataset is not None:
+    if collection_id is not None:
+        filters.append({"term": {"collection_id": collection_id}})
+    elif dataset is not None:
         filters.append({"term": {"dataset": dataset}})
-    # if ensure_list(schemata):
-    #     filters.append({"terms": {"schemata": ensure_list(schemata)}})
+    if ensure_list(schemata):
+        filters.append({"terms": {"schemata": ensure_list(schemata)}})
     return {"bool": {"filter": filters}}
 
 
@@ -72,6 +77,7 @@ def get_field_type(field):
 def iter_entities(
     auth: SearchAuth | None = None,
     dataset: str | None = None,
+    collection_id: str | None = None,
     schemata=None,
     includes=PROXY_INCLUDES,
     excludes=None,
@@ -82,7 +88,7 @@ def iter_entities(
 ):
     """Scan all entities matching the given criteria."""
     query = {
-        "query": _entities_query(filters, auth, dataset, schemata),
+        "query": _entities_query(filters, auth, dataset, collection_id, schemata),
         "_source": _source_spec(includes, excludes),
     }
     preserve_order = False
@@ -100,6 +106,7 @@ def iter_entities(
         preserve_order=preserve_order,
         scroll=es_scroll,
         size=es_scroll_size,
+        routing=collection_id,
     ):
         entity = unpack_result(res)
         if entity is not None:
@@ -131,7 +138,6 @@ def entities_by_ids(
     ids = ensure_list(ids)
     if not len(ids):
         return
-    entities = {}
     if cached:
         # raise RuntimeError("Caching not implemented")
         log.warning("Caching not implemented")
@@ -148,12 +154,6 @@ def entities_by_ids(
     for doc in result.get("hits", {}).get("hits", []):
         entity = unpack_result(doc)
         if entity is not None:
-            entity_id = entity.get("id")
-            entities[entity_id] = entity
-
-    for i in ids:
-        entity = entities.get(i)
-        if entity is not None:
             yield entity
 
 
@@ -163,14 +163,14 @@ def get_entity(entity_id, **kwargs):
         return entity
 
 
-def index_proxy(dataset: str, proxy: EntityProxy, sync=False):
+def index_proxy(dataset: str, proxy: EntityProxy, sync=False, **kwargs):
     delete_entity(proxy.id, exclude=proxy.schema, sync=False)
-    return index_bulk(dataset, [proxy], sync=sync)
+    return index_bulk(dataset, [proxy], sync=sync, **kwargs)
 
 
-def index_bulk(dataset: str, entities: Iterable[EntityProxy], sync=False):
+def index_bulk(dataset: str, entities: Iterable[EntityProxy], sync=False, **kwargs):
     """Index a set of entities."""
-    actions = format_parallel(dataset, entities)
+    actions = format_parallel(dataset, entities, **kwargs)
     bulk_actions(actions, sync=sync)
 
 

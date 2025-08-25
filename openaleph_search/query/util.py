@@ -4,6 +4,9 @@ from anystore.types import SDict
 from banal import ensure_list, is_mapping
 
 from openaleph_search.index.mapping import Field
+from openaleph_search.settings import Settings
+
+settings = Settings()
 
 
 class Bools(TypedDict):
@@ -78,16 +81,15 @@ def filter_text(spec: Any, invert: bool = False) -> str | None:
     return None
 
 
-DEFAULT_AUTHZ_FIELD = Field.DATASET
-
-
 def auth_datasets_query(
-    datasets: list[str], field: str = DEFAULT_AUTHZ_FIELD, is_admin: bool | None = False
+    values: list[str],
+    field: str | None = settings.search_auth_field,
+    is_admin: bool | None = False,
 ) -> dict[str, Any]:
     """Generate a search query filter for the given datasets."""
     # Hot-wire authorization entirely for admins.
     if is_admin:
         return {"match_all": {}}
-    if not len(datasets):
+    if not len(values):
         return {"match_none": {}}
-    return {"terms": {field: datasets}}
+    return {"terms": {field: values}}

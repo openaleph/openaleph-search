@@ -174,6 +174,14 @@ class SearchQueryParser(QueryParser):
         )
 
     @cached_property
+    def collection_ids(self) -> set[str]:
+        collections = self.filters.get("collection_id", set())
+        collections.update(self.filters.get("collections", set()))
+        if self.auth and not self.auth.is_admin:
+            collections = collections & set(self.auth.collection_ids)
+        return collections
+
+    @cached_property
     def datasets(self) -> set[str]:
         datasets = self.filters.get("dataset", set())
         datasets.update(self.filters.get("datasets", set()))
@@ -183,10 +191,11 @@ class SearchQueryParser(QueryParser):
 
     @cached_property
     def routing_key(self) -> str | None:
-        # get datsaet routing if filter is only for 1 specific dataset
-        if len(self.datasets) == 1:
-            for name in self.datasets:
-                return name
+        # get dataset routing if dataset filter is set
+        if self.collection_ids:
+            return ",".join(sorted(self.collection_ids))
+        if self.datasets:
+            return ",".join(sorted(self.datasets))
 
     def get_facet_size(self, name: str) -> int:
         """Number of distinct values to be included (i.e. top N)."""

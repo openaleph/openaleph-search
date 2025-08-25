@@ -22,7 +22,7 @@ def test_routing():
             ("filter:dataset", "another"),
         ]
     )
-    assert parser.routing_key is None
+    assert parser.routing_key == "another,routing_dataset"
 
     # just see if nothing breaks
     query = EntitiesQuery(parser)

@@ -103,6 +103,7 @@ def identifiers_query(entity: EntityProxy) -> Clauses:
 def match_query(
     entity: EntityProxy,
     datasets: list[str] | None = None,
+    collection_ids: list[str] | None = None,
     query: BoolQuery | None = None,
 ):
     """Given a matchable entity in indexed form, build a query that will find
@@ -123,7 +124,9 @@ def match_query(
     if len(must_not):
         query["bool"]["must_not"].extend(must_not)
 
-    if datasets:
+    if collection_ids:
+        query["bool"]["filter"].append({"terms": {"collection_id": datasets}})
+    elif datasets:
         query["bool"]["filter"].append({"terms": {"dataset": datasets}})
 
     # match on magic names

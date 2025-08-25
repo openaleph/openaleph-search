@@ -82,11 +82,17 @@ class MatchQuery(EntitiesQuery):
     """Given an entity, find the most similar other entities."""
 
     def __init__(
-        self, parser, entity: EntityProxy | None = None, exclude=None, datasets=None
+        self,
+        parser,
+        entity: EntityProxy | None = None,
+        exclude=None,
+        datasets=None,
+        collection_ids=None,
     ):
         self.entity = entity
         self.exclude = ensure_list(exclude)
         self.datasets = datasets
+        self.collection_ids = collection_ids
         super(MatchQuery, self).__init__(parser)
 
     def get_index(self):
@@ -101,7 +107,10 @@ class MatchQuery(EntitiesQuery):
 
     def get_inner_query(self) -> dict[str, Any]:
         query = match_query(
-            self.entity, datasets=self.datasets, query=super().get_inner_query()
+            self.entity,
+            datasets=self.datasets,
+            collection_ids=self.collection_ids,
+            query=super().get_inner_query(),
         )
         if len(self.exclude):
             exclude = {"ids": {"values": self.exclude}}

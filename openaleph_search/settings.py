@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     search_auth: bool = False
     """Set to true when using with OpenAleph"""
 
+    search_auth_field: str = "dataset"
+    """Default field to filter/apply auth on"""
+
     elasticsearch_url: HttpUrl | list[HttpUrl] = HttpUrl("http://localhost:9200")
     elasticsearch_timeout: int = 60
     elasticsearch_max_retries: int = 3
