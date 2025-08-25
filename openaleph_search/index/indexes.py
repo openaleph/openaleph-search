@@ -8,7 +8,7 @@ from followthemoney.exc import InvalidData
 from followthemoney.schema import Schema
 
 from openaleph_search.index.indexer import configure_index
-from openaleph_search.index.mapping import make_mapping, make_schema_mapping
+from openaleph_search.index.mapping import Field, make_mapping, make_schema_mapping
 from openaleph_search.index.util import index_name, index_settings
 from openaleph_search.settings import Settings
 from openaleph_search.util import SchemaType
@@ -119,7 +119,7 @@ def make_schema_bucket_mapping(bucket: Bucket) -> dict[str, Any]:
     mapping = make_mapping(properties)
     if bucket == "pages":
         # store full text for highlighting
-        mapping["properties"]["text"]["store"] = True
+        mapping["properties"][Field.CONTENT]["store"] = True
     return mapping
 
 

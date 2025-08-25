@@ -14,16 +14,21 @@ from openaleph_search.query.util import field_filter_query
 
 log = logging.getLogger(__name__)
 
-SCORE_CUTOFF = 0.5
 EXCLUDE_SCHEMATA = [
     s.name for s in model.schemata.values() if s.hidden
 ]  # Page, Mention
 
 
 class EntitiesQuery(Query):
-    TEXT_FIELDS = [f"{Field.NAMES}^3", f"{Field.NAME_PARTS}^2", Field.TEXT]
+    TEXT_FIELDS = [
+        f"{Field.NAME}^4",
+        f"{Field.NAMES}^3",
+        f"{Field.NAME_PARTS}^2",
+        Field.CONTENT,
+        f"{Field.TEXT}^0.8",
+    ]
     PREFIX_FIELD = Field.NAME_PARTS
-    HIGHLIGHT_FIELD = Field.TEXT
+    HIGHLIGHT_FIELD = Field.CONTENT
     SKIP_FILTERS = [Field.SCHEMA, Field.SCHEMATA]
     SOURCE = ENTITY_SOURCE
     SORT_DEFAULT = []

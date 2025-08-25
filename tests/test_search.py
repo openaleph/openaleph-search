@@ -39,11 +39,11 @@ def test_search_simplest_search(index_entities):
 
 
 def test_search_facet_attribute(index_entities):
-    query = _create_query("/search?facet=names.kw")
+    query = _create_query("/search?facet=names")
     result = query.search()
 
     assert result["hits"]["total"]["value"] > 0
-    assert result["aggregations"]["names.kw.values"]["buckets"] == [
+    assert result["aggregations"]["names.values"]["buckets"] == [
         {"key": "banana", "doc_count": 2},
         {"key": "vladimir l", "doc_count": 2},
         {"key": "banana ba nana", "doc_count": 1},
@@ -52,11 +52,11 @@ def test_search_facet_attribute(index_entities):
 
 
 def test_search_facet_counts(index_entities):
-    query = _create_query("/search?facet=names.kw&facet_total:names.kw=true")
+    query = _create_query("/search?facet=names&facet_total:names=true")
     result = query.search()
 
     assert result["hits"]["total"]["value"] > 0
-    assert result["aggregations"]["names.kw.values"]["buckets"] == [
+    assert result["aggregations"]["names.values"]["buckets"] == [
         {"key": "banana", "doc_count": 2},
         {"key": "vladimir l", "doc_count": 2},
         {"key": "banana ba nana", "doc_count": 1},
@@ -193,6 +193,7 @@ def test_search_highlight(index_entities):
             assert isinstance(hit["highlight"], dict)
 
 
+@pytest.mark.skip("Not supported anymore")
 def test_search_highlight_custom_text(index_entities):
     query = _create_query("/search?q=test&highlight=true&highlight_text=custom")
     result = query.search()

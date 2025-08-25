@@ -18,6 +18,8 @@ DEFAULT_ANALYZER = "default"
 DEFAULT_NORMALIZER = "default"
 ICU_ANALYZER = "icu-default"
 ICU_NORMALIZER = "icu-default"
+HTML_ANALYZER = "strip-html"
+KW_NORMALIZER = "kw-normalizer"
 NAME_KW_NORMALIZER = "name-kw-normalizer"
 DATE_FORMAT = "yyyy-MM-dd'T'HH||yyyy-MM-dd'T'HH:mm||yyyy-MM-dd'T'HH:mm:ss||yyyy-MM-dd||yyyy-MM||yyyy||strict_date_optional_time"  # noqa: B950
 NUMERIC_TYPES = (registry.number, registry.date)
@@ -31,9 +33,14 @@ ANALYZE_SETTINGS = {
                 "pattern": "[^\\p{L}\\p{N}\\s]",
                 "replacement": "",
             },
-            "normalize_spaces": {
+            "squash_spaces": {
                 "type": "pattern_replace",
-                "pattern": "\\s+",
+                "pattern": "[\\r\\n\\s]+",
+                "replacement": " ",
+            },
+            "remove_html_tags": {
+                "type": "pattern_replace",
+                "pattern": "<[^>]*>",
                 "replacement": " ",
             },
         },
@@ -44,8 +51,20 @@ ANALYZE_SETTINGS = {
             },
             NAME_KW_NORMALIZER: {
                 "type": "custom",
-                "char_filter": ["remove_special_chars", "normalize_spaces"],
-                "filter": ["lowercase", "asciifolding"],
+                "char_filter": [
+                    "remove_special_chars",
+                    "squash_spaces",
+                    "remove_html_tags",
+                ],
+                "filter": ["lowercase", "asciifolding", "trim"],
+            },
+            KW_NORMALIZER: {
+                "type": "custom",
+                "char_filter": [
+                    "remove_html_tags",
+                    "squash_spaces",
+                ],
+                "filter": ["trim"],
             },
         },
         "analyzer": {
@@ -56,7 +75,12 @@ ANALYZE_SETTINGS = {
                     "icu_folding",
                     "icu_normalizer",
                 ],
-            }
+            },
+            HTML_ANALYZER: {
+                "tokenizer": "standard",
+                "char_filter": ["html_strip", "squash_spaces"],
+                "filter": ["lowercase", "asciifolding", "trim"],
+            },
         },
     },
 }
@@ -69,7 +93,8 @@ class Field:
     SCHEMA = "schema"
     SCHEMATA = "schemata"
     CAPTION = "caption"
-    NAMES = registry.name.group
+    NAME = "name"
+    NAMES = "names"
     NAME_KEYS = "name_keys"
     NAME_PARTS = "name_parts"
     NAME_SYMBOLS = "name_symbols"
@@ -77,6 +102,7 @@ class Field:
     PROPERTIES = "properties"
     NUMERIC = "numeric"
     GEO_POINT = "geo_point"
+    CONTENT = "content"
     TEXT = "text"
 
     NUMERIC = "numeric"
@@ -110,13 +136,20 @@ class Field:
 class FieldType:
     DATE = {"type": "date"}
     PARTIAL_DATE = {"type": "date", "format": DATE_FORMAT}
-    TEXT = {
+    # actual text content (bodyText et. al), optimized for highlighting and
+    # termvectors
+    CONTENT = {
         "type": "text",
         "analyzer": ICU_ANALYZER,
         "search_analyzer": ICU_ANALYZER,
         "index_phrases": True,  # shingles
+        "term_vector": "with_positions_offsets",
     }
-    KEYWORD = {"type": "keyword"}
+    # additional text copied over from other properties for arbitrary lookups,
+    # default analyzer
+    TEXT = {"type": "text", "analyzer": HTML_ANALYZER, "search_analyzer": HTML_ANALYZER}
+
+    KEYWORD = {"type": "keyword", "normalizer": KW_NORMALIZER}
     KEYWORD_COPY = {"type": "keyword", "copy_to": Field.TEXT}
     NUMERIC = {"type": "double"}
     INTEGER = {"type": "integer"}
@@ -124,10 +157,14 @@ class FieldType:
 
     # No length normalization for names. Merged entities have a lot of names,
     # and we don't want to penalize them for that.
-    NAMES = {
-        "type": "text",
-        "similarity": "weak_length_norm",
-        "fields": {"kw": {"type": "keyword", "normalizer": NAME_KW_NORMALIZER}},
+    NAME = {"type": "text", "similarity": "weak_length_norm", "store": True}
+
+    # custom normalized name keywords (used for term aggregations et. al)
+    # this is used for registry.name.group. store for nicer highlighting
+    NAME_KEYWORD = {
+        "type": "keyword",
+        "normalizer": NAME_KW_NORMALIZER,
+        "store": True,
     }
 
 
@@ -138,18 +175,25 @@ TYPE_MAPPINGS = {
     registry.date: FieldType.PARTIAL_DATE,
 }
 
+GROUPS = {t.group for t in registry.groups.values()}
 
 # These fields will be pruned from the _source field after the document has been
 # indexed, but before the _source field is stored. We can still search on these
 # fields, even though they are not in the stored and returned _source.
-SOURCE_EXCLUDES = [
-    *[t.group for t in registry.groups.values()],
-    Field.TEXT,
-    Field.NAME_KEYS,
-    Field.NAME_PARTS,
-    Field.NAME_SYMBOLS,
-    Field.NAME_PHONETIC,
-]
+SOURCE_EXCLUDES = list(
+    sorted(
+        [
+            *GROUPS,
+            Field.TEXT,
+            Field.CONTENT,
+            Field.NAME,
+            Field.NAME_KEYS,
+            Field.NAME_PARTS,
+            Field.NAME_SYMBOLS,
+            Field.NAME_PHONETIC,
+        ]
+    )
+)
 
 
 # base property mapping without specific schema fields
@@ -159,8 +203,10 @@ BASE_MAPPING = {
     Field.SCHEMATA: FieldType.KEYWORD,
     # for fast label display
     Field.CAPTION: FieldType.KEYWORD,
-    # original names
-    Field.NAMES: FieldType.NAMES,
+    # original names as matching (text) field
+    Field.NAME: FieldType.NAME,
+    # names keywords, a bit normalized
+    Field.NAMES: FieldType.NAME_KEYWORD,
     # name normalizations for filters and matching
     Field.NAME_KEYS: FieldType.KEYWORD,
     Field.NAME_PARTS: FieldType.KEYWORD_COPY,
@@ -171,6 +217,7 @@ BASE_MAPPING = {
     # references to other entities (after merging)
     Field.REFERENTS: FieldType.KEYWORD,
     # full text
+    Field.CONTENT: FieldType.CONTENT,
     Field.TEXT: FieldType.TEXT,
     # processing metadata
     Field.UPDATED_AT: FieldType.DATE,
@@ -199,7 +246,7 @@ GROUP_MAPPING = {
     if group not in BASE_MAPPING
 }
 
-# FIXME do we still need that?
+# used for efficient sorting
 NUMERIC_MAPPING = {
     prop.name: FieldType.NUMERIC
     for prop in model.properties
@@ -245,7 +292,10 @@ def make_schema_mapping(schemata: Iterable[SchemaType]) -> Mapping:
             if prop.stub:
                 continue
             merged_props[name]["type"].add(get_field_type(prop.type))
-            merged_props[name]["copy_to"].add("text")
+            if prop.type == registry.text:
+                merged_props[name]["copy_to"].add(Field.CONTENT)
+            else:
+                merged_props[name]["copy_to"].add(Field.TEXT)
             if prop.type.group:
                 merged_props[name]["copy_to"].add(prop.type.group)
 

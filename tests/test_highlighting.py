@@ -7,21 +7,20 @@ def _search_highlight(q: str) -> str | None:
     query = EntitiesQuery(SearchQueryParser(args, None))
     res = query.search()
     for hit in res["hits"]["hits"]:
-        for values in hit.get("highlight", {}).values():
-            return " ".join(values)
+        return " ".join(
+            v for values in hit.get("highlight", {}).values() for v in values
+        )
 
 
 def test_highlighting(index_entities):
     highlight = _search_highlight("search wikipedia")
-    assert highlight is not None
     assert "<em>search</em>" in highlight.lower()
     assert "<em>wikipedia</em>" in highlight.lower()
 
     # FIXME ?
-    highlight = _search_highlight("'search wikipedia'")
+    highlight = _search_highlight('"paul manafort"')
     assert highlight is not None
-    assert "<em>search</em>" in highlight.lower()
-    assert "<em>wikipedia</em>" in highlight.lower()
+    assert "<em>paul manafort</em>" in highlight.lower()
 
     highlight = _search_highlight("Українська")
     assert highlight is not None

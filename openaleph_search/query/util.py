@@ -39,7 +39,7 @@ def field_filter_query(field: str, values: str | Iterable[str]) -> SDict:
     if field in ["_id", "id"]:
         return {"ids": {"values": values}}
     if field in ["names"]:
-        field = Field.NAME_PARTS
+        field = Field.NAMES
     if len(values) == 1:
         # if field in ['addresses']:
         #     field = '%s.text' % field

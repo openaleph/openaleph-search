@@ -1,5 +1,7 @@
 from unittest import TestCase
 
+import pytest
+
 from openaleph_search.parse.parser import SearchQueryParser
 from openaleph_search.query.queries import Query
 
@@ -121,8 +123,13 @@ class QueryTestCase(TestCase):
             q.get_highlight(),
             {
                 "encoder": "html",
+                "require_field_match": False,
                 "fields": {
                     "text": {
+                        "type": "plain",
+                        "fragment_size": 150,
+                        "number_of_fragments": 1,
+                        "max_analyzed_offset": 999999,
                         "highlight_query": {
                             "query_string": {
                                 "query": "foo",
@@ -130,17 +137,21 @@ class QueryTestCase(TestCase):
                                 "fields": ["text"],
                                 "default_operator": "AND",
                                 "minimum_should_match": "66%",
-                            },
+                            }
                         },
-                        "require_field_match": False,
+                    },
+                    "names": {
+                        "type": "plain",
                         "number_of_fragments": 3,
-                        "fragment_size": 120,
-                        "max_analyzed_offset": 999999,
+                        "max_analyzed_offset": 1000,
+                        "pre_tags": [""],
+                        "post_tags": [""],
                     },
                 },
             },
         )
 
+    @pytest.mark.skip("Not supported anymore")
     def test_highlight_text(self):
         q = query([("q", "foo"), ("highlight", "true"), ("highlight_text", "bar")])
         highlight = q.get_highlight()

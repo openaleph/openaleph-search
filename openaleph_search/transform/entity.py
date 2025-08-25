@@ -12,12 +12,16 @@ from anystore.logging import get_logger
 from anystore.util import Took
 from banal import ensure_list, first
 from followthemoney import EntityProxy, model, registry
-from ftmq.util import get_name_symbols, get_symbols
 
 from openaleph_search.index.indexer import Action, Actions
-from openaleph_search.index.indexes import entities_write_index
+from openaleph_search.index.indexes import entities_write_index, schema_bucket
 from openaleph_search.index.mapping import NUMERIC_TYPES, Field
 from openaleph_search.settings import Settings, __version__
+from openaleph_search.transform.tagging import (
+    get_name_symbols,
+    get_symbols,
+    select_symbols,
+)
 from openaleph_search.transform.util import (
     get_geopoints,
     index_name_keys,
@@ -35,12 +39,24 @@ def _numeric_values(type_, values) -> list[float]:
     return [v for v in values if v is not None]
 
 
+def _caption_names(entity: EntityProxy) -> set[str]:
+    names: set[str] = set()
+    for prop_ in entity.schema.caption:
+        # prop = entity.schema.properties[prop_]
+        # if prop.type == registry.name:
+        names.update(entity.get(prop_))
+    return names
+
+
 def _get_symbols(entity: EntityProxy) -> set[str]:
+    symbols = select_symbols(entity)  # pre-computed in earlier stage
+    if symbols:
+        return symbols
     if entity.schema.is_a("LegalEntity"):
-        return get_symbols(entity)
+        return {str(s) for s in get_symbols(entity)}
     symbols: set[str] = set()
-    symbols.update(get_name_symbols(model["Person"], entity.names))
-    symbols.update(get_name_symbols(model["Organization"], entity.names))
+    symbols.update(map(str, get_name_symbols(model["Person"], *entity.names)))
+    symbols.update(map(str, get_name_symbols(model["Organization"], *entity.names)))
     return symbols
 
 
@@ -64,6 +80,9 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
     data[Field.SCHEMATA] = list(entity.schema.names)
     data[Field.CAPTION] = entity.caption
 
+    # actual displayable entity names
+    data[Field.NAME] = list(_caption_names(entity))
+    # all names, including mentioned ones, for lookups
     names = list(entity.names)
     data[Field.NAME_SYMBOLS] = list(_get_symbols(entity))
     data[Field.NAME_KEYS] = list(index_name_keys(entity.schema, names))
@@ -73,7 +92,7 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
     # Slight hack: a magic property in followthemoney that gets taken out
     # of the properties and added straight to the index text.
     properties = data.get("properties", {})
-    data["text"] = properties.pop("indexText", [])
+    data[Field.CONTENT] = properties.pop("indexText", [])
 
     # length normalization
     data[Field.NUM_VALUES] = sum([len(v) for v in properties.values()])
@@ -95,7 +114,7 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
     # Context data - from aleph system, not followthemoney. Probably deprecated soon
     data[Field.ROLE] = first(data.get("role_id", []))
     data[Field.PROFILE] = first(data.get("profile_id", []))
-    data["mutable"] = False  # deprecated
+    data["mutable"] = kwargs.get("mutable", False)  # deprecated
     data[Field.ORIGIN] = ensure_list(data.get("origin"))
     # Logical simplifications of dates:
     created_at = ensure_list(data.get("created_at"))
@@ -105,6 +124,7 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
     if len(updated_at) > 0:
         data[Field.UPDATED_AT] = max(updated_at)
 
+    data[Field.INDEX_BUCKET] = schema_bucket(data["schema"])
     data[Field.INDEX_VERSION] = __version__
     data[Field.INDEX_TS] = datetime.now().isoformat()
 

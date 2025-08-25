@@ -20,8 +20,10 @@ def _create_query(url):
 
 
 def test_pages_mapping():
+    # pages special case: we store the content field
+
     mapping = make_schema_bucket_mapping("pages")
-    assert mapping["properties"]["text"]["store"] is True
+    assert mapping["properties"]["content"]["store"] is True
 
 
 def test_pages(fixture_pages, cleanup_after):
@@ -32,4 +34,4 @@ def test_pages(fixture_pages, cleanup_after):
     # no page but the parent pages
     assert len(result["hits"]["hits"]) == 1
     assert result["hits"]["hits"][0]["_source"]["schema"] == "Pages"
-    assert "<em>MIT</em>" in result["hits"]["hits"][0]["highlight"]["text"][0]
+    assert "<em>MIT</em>" in result["hits"]["hits"][0]["highlight"]["content"][0]

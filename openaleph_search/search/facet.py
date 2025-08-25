@@ -123,3 +123,13 @@ class CategoryFacet(Facet):
 
 class DatasetFacet(Facet):
     pass
+
+
+class CollectionFacet(Facet):
+    pass
+
+
+class NameFacet(Facet):
+    # make normalized names look nicer
+    def update(self, result, key: str):
+        result["label"] = key.title()

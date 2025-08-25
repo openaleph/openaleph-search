@@ -85,8 +85,8 @@ def names_query(schema: Schema, names: list[str]) -> Clauses:
     for phoneme in phonetic_names(schema, names):
         term = {Field.NAME_PHONETIC: {"value": phoneme, "boost": 0.8}}
         shoulds.append({"term": term})
-    for symbol in get_name_symbols(schema, names):
-        shoulds.append({"term": {Field.NAME_SYMBOLS: symbol}})
+    for symbol in get_name_symbols(schema, *names):
+        shoulds.append({"term": {Field.NAME_SYMBOLS: str(symbol)}})
 
     return shoulds
 

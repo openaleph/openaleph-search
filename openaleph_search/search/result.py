@@ -7,11 +7,13 @@ from openaleph_search.index.util import unpack_result
 from openaleph_search.parse.parser import QueryParser
 from openaleph_search.search.facet import (
     CategoryFacet,
+    CollectionFacet,
     CountryFacet,
     DatasetFacet,
     EntityFacet,
     Facet,
     LanguageFacet,
+    NameFacet,
     SchemaFacet,
 )
 
@@ -75,6 +77,7 @@ class QueryResult(object):
 class SearchQueryResult(QueryResult):
     FACETS = {
         "dataset": DatasetFacet,
+        "collection": CollectionFacet,
         "match_dataset": DatasetFacet,
         "languages": LanguageFacet,
         "language": LanguageFacet,
@@ -84,6 +87,7 @@ class SearchQueryResult(QueryResult):
         "schema": SchemaFacet,
         "schemata": SchemaFacet,
         "entity": EntityFacet,
+        "names": NameFacet,
     }
 
     def __init__(self, request, query):

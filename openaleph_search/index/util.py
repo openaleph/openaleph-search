@@ -42,9 +42,10 @@ def unpack_result(res: SDict) -> SDict | None:
         data["score"] = _score
 
     if "highlight" in res:
-        data["highlight"] = []
-        for value in res.get("highlight", {}).values():
-            data["highlight"].extend(value)
+        data["highlight"] = res["highlight"]
+        # data["highlight"] = []
+        # for value in res.get("highlight", {}).values():
+        #     data["highlight"].extend(value)
 
     data["_sort"] = ensure_list(res.get("sort"))
     return data

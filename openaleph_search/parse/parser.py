@@ -153,12 +153,17 @@ class SearchQueryParser(QueryParser):
         self.facet_names = set(self.getlist("facet"))
 
         # Query to use for highlighting, defaults to the search query
-        self.highlight_text = self.get("highlight_text", self.text)
+        if self.get("highlight_text"):
+            raise RuntimeError("Custom highlight text not supported")
+        self.highlight_text = self.text
+        # self.highlight_text = self.get("highlight_text", self.text)
         # Include highlighted fragments of matching text in the result.
         self.highlight = self.getbool("highlight", False)
-        self.highlight = self.highlight and self.highlight_text
+        # self.highlight = self.highlight and self.highlight_text
         # Length of each snippet in characters
-        self.highlight_length = self.getint("highlight_length", 120)
+        if self.get("highlight_length"):
+            raise RuntimeError("Custom highlight length not supported")
+        self.highlight_length = 200
         # Number of snippets per document, 0 = return full document text.
         self.highlight_count = self.getint("highlight_count", 3)
         # By default, the maximum number of characters analyzed for a highlight

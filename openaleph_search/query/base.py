@@ -8,11 +8,13 @@ from followthemoney.types import registry
 from openaleph_search.core import get_es
 from openaleph_search.index.mapping import (
     DATE_FORMAT,
+    GROUPS,
     NUMERIC_TYPES,
     Field,
     get_field_type,
 )
 from openaleph_search.parse.parser import SearchQueryParser
+from openaleph_search.query.highlight import get_highlighter
 from openaleph_search.query.util import (
     BoolQuery,
     bool_query,
@@ -29,7 +31,7 @@ settings = Settings()
 
 class Query:
     TEXT_FIELDS: ClassVar[list[str]] = [Field.TEXT]
-    PREFIX_FIELD: ClassVar[str] = "name"
+    PREFIX_FIELD: ClassVar[str] = Field.NAME
     SKIP_FILTERS: ClassVar[list[str]] = []
     AUTHZ_FIELD: ClassVar[str | None] = settings.search_auth_field
     HIGHLIGHT_FIELD: ClassVar[str] = Field.TEXT
@@ -43,10 +45,9 @@ class Query:
     def __init__(self, parser: SearchQueryParser) -> None:
         self.parser = parser
 
-    def get_text_query(self) -> list[dict[str, Any]]:
-        query = []
+    def get_query_string(self) -> dict[str, Any] | None:
         if self.parser.text:
-            qs = {
+            return {
                 "query_string": {
                     "query": self.parser.text,
                     "lenient": True,
@@ -55,7 +56,11 @@ class Query:
                     "minimum_should_match": "66%",
                 }
             }
-            query.append(qs)
+
+    def get_text_query(self) -> list[dict[str, Any]]:
+        query = []
+        if self.parser.text:
+            query.append(self.get_query_string())
         if self.parser.prefix:
             query.append({"prefix": {self.PREFIX_FIELD: self.parser.prefix}})
         if not len(query):
@@ -88,6 +93,7 @@ class Query:
         skip = {*self.SKIP_FILTERS, *self.parser.facet_names}
         # important as we don't have schema indexes anymore:
         skip.discard("schema")
+        skip.discard("schemata")
 
         filters = self.get_filters_list(skip)
 
@@ -269,9 +275,9 @@ class Query:
         sort_fields = ["_score"]
         for field, direction in self.parser.sorts:
             field = self.SORT_FIELDS.get(field, field)
-            type_ = get_field_type(field)
+            type_ = get_field_type(field, to_numeric=True)
             config = {"order": direction, "missing": "_last"}
-            es_type = get_field_type(type_)
+            es_type = get_field_type(type_, to_numeric=True)
             if es_type:
                 config["unmapped_type"] = es_type
             if field == registry.date.group:
@@ -285,23 +291,34 @@ class Query:
     def get_highlight(self) -> dict[str, Any]:
         if not self.parser.highlight:
             return {}
+        query = self.get_query_string()
+        if self.parser.filters:
+            query = bool_query()
+            if self.get_query_string():
+                query["bool"]["should"] = [self.get_query_string()]
+            for key, values in self.parser.filters.items():
+                if key in GROUPS or key == Field.NAME:
+                    for value in values:
+                        query["bool"]["should"].append(
+                            {
+                                "multi_match": {
+                                    "fields": [Field.CONTENT, Field.TEXT, Field.NAME],
+                                    "query": value,
+                                    "operator": "AND",
+                                }
+                            }
+                        )
         return {
             "encoder": "html",
+            # "max_fragment_length": 1000,
+            "require_field_match": False,
             "fields": {
-                self.HIGHLIGHT_FIELD: {
-                    "highlight_query": {
-                        "query_string": {
-                            "query": self.parser.highlight_text,
-                            "lenient": True,
-                            "default_operator": "AND",
-                            "minimum_should_match": "66%",
-                        }
-                    },
-                    "require_field_match": False,
-                    "number_of_fragments": self.parser.highlight_count,
-                    "fragment_size": self.parser.highlight_length,
-                    "max_analyzed_offset": self.parser.max_highlight_analyzed_offset,
-                }
+                self.HIGHLIGHT_FIELD: get_highlighter(
+                    self.HIGHLIGHT_FIELD, query, self.parser.highlight_count
+                ),
+                Field.NAMES: get_highlighter(Field.NAME),
+                Field.NAMES: get_highlighter(Field.NAMES),
+                Field.TEXT: get_highlighter(Field.TEXT, query),
             },
         }
 
@@ -366,7 +383,7 @@ class Query:
 
     def search(self) -> ObjectApiResponse:
         """Execute the query as assmbled."""
-        log.debug("Search index: %s", self.get_index())
+        log.debug("Search index: %s" % self.get_index())
         es = get_es()
         result = es.search(
             index=self.get_index(),
