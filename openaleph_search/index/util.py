@@ -75,7 +75,7 @@ def index_settings(
         "index": {
             "number_of_shards": str(shards),
             "number_of_replicas": str(replicas),
-            # "refresh_interval": refresh,
+            "refresh_interval": "100ms" if settings.testing else "5s",
             "similarity": {
                 # We use this for names, to avoid over-penalizing entities with many names.
                 "weak_length_norm": {

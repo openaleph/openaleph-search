@@ -7,7 +7,7 @@ from anystore.decorators import error_handler
 from anystore.io import logged_items
 from anystore.logging import get_logger
 from elasticsearch import AsyncElasticsearch
-from elasticsearch.helpers import async_bulk
+from elasticsearch.helpers import async_bulk, bulk
 
 from openaleph_search.core import get_async_es, get_es
 from openaleph_search.index.util import (
@@ -42,7 +42,7 @@ def query_delete(index, query, sync=False, **kwargs):
         index=index,
         body={"query": query},
         # _source=False,
-        slices="auto",
+        # slices="auto",
         conflicts="proceed",
         wait_for_completion=sync,
         refresh=refresh_sync(sync),
@@ -61,6 +61,11 @@ def bulk_actions(
 ):
     """Bulk indexing with parallel async processing - entry point for sync
     applications"""
+    # shortcut for 1 worker
+    if max_concurrency == 1:
+        es = get_es()
+        return bulk(es, actions, max_retries=settings.elasticsearch_max_retries)
+
     return asyncio.run(bulk_actions_async(actions, chunk_size, max_concurrency, sync))
 
 
@@ -90,9 +95,7 @@ async def bulk_actions_async(
     """Process chunks as they complete to limit memory usage."""
     start = datetime.now()
     es = await get_async_es()
-    actions = logged_items(
-        actions, "Start indexing", 10_000, item_name="action", logger=log
-    )
+    actions = logged_items(actions, "Indexing", 10_000, item_name="doc", logger=log)
     chunks = itertools.batched(actions, n=chunk_size or settings.indexer_chunk_size)
     max_concurrency = max_concurrency or settings.indexer_concurrency
     semaphore = asyncio.Semaphore(max_concurrency)
@@ -187,7 +190,7 @@ def rewrite_mapping_safe(pending, existing):
 
 
 @error_handler(logger=log, max_retries=settings.elasticsearch_max_retries)
-def configure_index(index, mapping, settings):
+def configure_index(index, mapping, settings_):
     """Create or update a search index with the given mapping and
     SETTINGS. This will try to make a new index, or update an
     existing mapping with new properties.
@@ -201,10 +204,10 @@ def configure_index(index, mapping, settings):
             "master_timeout": MAX_TIMEOUT,
         }
         config = es.indices.get(index=index).get(index, {})
-        settings.get("index").pop("number_of_shards")
-        if check_settings_changed(settings, config.get("settings")):
+        settings_.get("index").pop("number_of_shards", settings.index_shards)
+        if check_settings_changed(settings_, config.get("settings")):
             res = es.indices.close(ignore_unavailable=True, **options)
-            res = es.indices.put_settings(body=settings, **options)
+            res = es.indices.put_settings(body=settings_, **options)
             if not check_response(index, res):
                 return False
         mapping = rewrite_mapping_safe(mapping, config.get("mappings"))
@@ -215,7 +218,7 @@ def configure_index(index, mapping, settings):
         return True
     else:
         log.info("Creating index: %s..." % index)
-        body = {"settings": settings, "mappings": mapping}
+        body = {"settings": settings_, "mappings": mapping}
         res = es.indices.create(index=index, body=body)
         if not check_response(index, res):
             return False
