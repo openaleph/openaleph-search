@@ -12,6 +12,7 @@ from openaleph_search.index.mapping import (
     NUMERIC_TYPES,
     Field,
     get_field_type,
+    get_index_field_type,
 )
 from openaleph_search.parse.parser import SearchQueryParser
 from openaleph_search.query.highlight import get_highlighter
@@ -275,9 +276,9 @@ class Query:
         sort_fields = ["_score"]
         for field, direction in self.parser.sorts:
             field = self.SORT_FIELDS.get(field, field)
-            type_ = get_field_type(field, to_numeric=True)
+            type_ = get_field_type(field)
             config = {"order": direction, "missing": "_last"}
-            es_type = get_field_type(type_, to_numeric=True)
+            es_type = get_index_field_type(type_, to_numeric=True)
             if es_type:
                 config["unmapped_type"] = es_type
             if field == registry.date.group:

@@ -104,7 +104,9 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
             values = entity.get(prop)
             numeric[prop.name] = _numeric_values(prop.type, values)
     # also cast group field for dates
-    numeric["dates"] = _numeric_values(registry.date, data.get("dates"))
+    numeric["dates"] = _numeric_values(
+        registry.date, entity.get_type_values(registry.date)
+    )
     data[Field.NUMERIC] = numeric
 
     # geo data if entity is an Address

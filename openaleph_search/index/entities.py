@@ -64,16 +64,6 @@ def _entities_query(
     return {"bool": {"filter": filters}}
 
 
-def get_field_type(field):
-    field = field.split(".")[-1]
-    if field in registry.groups:
-        return registry.groups[field]
-    for prop in model.properties:
-        if prop.name == field:
-            return prop.type
-    return registry.string
-
-
 def iter_entities(
     auth: SearchAuth | None = None,
     dataset: str | None = None,

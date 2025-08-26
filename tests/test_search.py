@@ -1,10 +1,13 @@
 from urllib.parse import parse_qsl, urlparse
 
 import pytest
+from ftmq.util import make_entity
 
+from openaleph_search.index.entities import index_bulk
 from openaleph_search.model import SearchAuth
 from openaleph_search.parse.parser import SearchQueryParser
 from openaleph_search.query.queries import EntitiesQuery
+from openaleph_search.transform.entity import format_entity
 
 
 def _url_to_args(url):
@@ -288,3 +291,40 @@ def test_search_significant():
     query = _create_query("/search?q=vlad*&facet_significant:text=1")
     result = query.search()
     assert len(result["aggregations"]["significant_text"]["buckets"]) == 2
+
+
+def test_search_sort(cleanup_after):
+    e1 = make_entity(
+        {"id": "event1", "schema": "Event", "properties": {"date": ["2020"]}}
+    )
+    e2 = make_entity(
+        {"id": "event2", "schema": "Event", "properties": {"date": ["2021"]}}
+    )
+
+    # test numeric props
+    action = format_entity("test", e1)
+    assert action["_source"]["numeric"]["dates"] == [1577836800.0]
+    assert action["_source"]["numeric"]["date"] == [1577836800.0]
+
+    index_bulk("test_dates", [e1, e2], sync=True)
+
+    query = _create_query("/search?filter:dataset=test_dates&sort=dates")
+    result = query.search()
+    assert len(result["hits"]["hits"]) == 2
+    assert result["hits"]["hits"][0]["_id"] == "event1"
+
+    query = _create_query("/search?filter:dataset=test_dates&sort=dates%3Adesc")
+    assert query.get_sort() == [
+        {
+            "numeric.dates": {
+                "order": "desc",
+                "missing": "_last",
+                "unmapped_type": "keyword",
+                "mode": "min",
+            }
+        },
+        "_score",
+    ]
+    result = query.search()
+    assert len(result["hits"]["hits"]) == 2
+    assert result["hits"]["hits"][0]["_id"] == "event2"

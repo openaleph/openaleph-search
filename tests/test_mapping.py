@@ -8,6 +8,7 @@ from openaleph_search.index.indexes import entities_read_index, schema_index
 from openaleph_search.index.mapping import (
     BASE_MAPPING,
     GROUP_MAPPING,
+    make_mapping,
     make_schema_mapping,
 )
 
@@ -167,6 +168,13 @@ def test_mapping_spec():
     )
     assert "names" in mapping["name"]["copy_to"]
     assert "dates" in mapping["birthDate"]["copy_to"]
+
+    full_mapping = make_mapping(mapping)
+    assert "date" in full_mapping["properties"]["numeric"]["properties"]
+    assert "dates" in full_mapping["properties"]["numeric"]["properties"]
+    assert full_mapping["properties"]["numeric"]["properties"]["dates"] == {
+        "type": "double"
+    }
 
 
 def test_mapping_analyzer():

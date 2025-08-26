@@ -6,7 +6,7 @@ from collections import defaultdict as ddict
 from typing import Any, Iterable, TypeAlias
 
 from followthemoney import model
-from followthemoney.types import PropertyType, registry
+from followthemoney.types import registry
 
 from openaleph_search.util import SchemaType
 
@@ -175,7 +175,7 @@ TYPE_MAPPINGS = {
     registry.date: FieldType.PARTIAL_DATE,
 }
 
-GROUPS = {t.group for t in registry.groups.values()}
+GROUPS = {t.group for t in registry.groups.values() if t.group}
 
 # These fields will be pruned from the _source field after the document has been
 # indexed, but before the _source field is stored. We can still search on these
@@ -248,9 +248,16 @@ GROUP_MAPPING = {
 
 # used for efficient sorting
 NUMERIC_MAPPING = {
-    prop.name: FieldType.NUMERIC
-    for prop in model.properties
-    if prop.type in NUMERIC_TYPES
+    **{
+        prop.name: FieldType.NUMERIC
+        for prop in model.properties
+        if prop.type in NUMERIC_TYPES
+    },
+    **{
+        group: FieldType.NUMERIC
+        for group, type_ in registry.groups.items()
+        if type_ in NUMERIC_TYPES
+    },
 }
 
 
@@ -291,7 +298,7 @@ def make_schema_mapping(schemata: Iterable[SchemaType]) -> Mapping:
         for name, prop in schema.properties.items():
             if prop.stub:
                 continue
-            merged_props[name]["type"].add(get_field_type(prop.type))
+            merged_props[name]["type"].add(get_index_field_type(prop.type))
             if prop.type == registry.text:
                 merged_props[name]["copy_to"].add(Field.CONTENT)
             else:
@@ -313,9 +320,22 @@ def make_schema_mapping(schemata: Iterable[SchemaType]) -> Mapping:
     return properties
 
 
-def get_field_type(type_: PropertyType, to_numeric: bool | None = False) -> str:
-    """Given a FtM property type, return the corresponding ElasticSearch field type"""
-    if to_numeric:
-        if type_ in NUMERIC_TYPES:
-            return FieldType.NUMERIC["type"]
-    return TYPE_MAPPINGS.get(type_, FieldType.KEYWORD)["type"]
+def get_index_field_type(type_, to_numeric: bool | None = False) -> str:
+    """Given a FtM property type, return the corresponding ElasticSearch field
+    type (used for determining the sorting field)"""
+    es_type = TYPE_MAPPINGS.get(type_, FieldType.KEYWORD)
+    if to_numeric and type_ in NUMERIC_TYPES:
+        es_type = FieldType.NUMERIC
+    if es_type:
+        return es_type.get("type") or FieldType.KEYWORD["type"]
+    return FieldType.KEYWORD["type"]
+
+
+def get_field_type(field) -> str:
+    field = field.split(".")[-1]
+    if field in registry.groups:
+        return str(registry.groups[field])
+    for prop in model.properties:
+        if prop.name == field:
+            return str(prop.type)
+    return str(registry.string)
