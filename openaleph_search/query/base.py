@@ -23,7 +23,6 @@ from openaleph_search.query.util import (
     filter_text,
     range_filter_query,
 )
-from openaleph_search.search.result import SearchQueryResult
 from openaleph_search.settings import Settings
 
 log = get_logger(__name__)
@@ -401,12 +400,3 @@ class Query:
             hits=result.get("hits", {}).get("total", {}).get("value"),
         )
         return result
-
-    @classmethod
-    def handle(
-        cls, request: Any, parser: SearchQueryParser | None = None, **kwargs: Any
-    ) -> SearchQueryResult:
-        if parser is None:
-            parser = SearchQueryParser(request.args, request.authz.search_auth)
-        query = cls(parser, **kwargs)
-        return SearchQueryResult(request, query)
