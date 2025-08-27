@@ -152,6 +152,9 @@ class SearchQueryParser(QueryParser):
         # index.
         self.facet_names = set(self.getlist("facet"))
 
+        # Set of field names to use significant terms aggregation for
+        self.facet_significant_names = set(self.getlist("facet_significant"))
+
         # Query to use for highlighting, defaults to the search query
         if self.get("highlight_text"):
             raise RuntimeError("Custom highlight text not supported")
@@ -237,23 +240,55 @@ class SearchQueryParser(QueryParser):
         return self.get("facet_interval:%s" % name)
 
     def get_facet_significant(self, name: str) -> bool:
-        """Significant terms aggregation"""
-        return bool(self.get("facet_significant:%s" % name))
+        """Flag to use significant terms aggregation for a facet."""
+        return name in self.facet_significant_names
+
+    def get_facet_significant_size(self, name: str) -> int:
+        """Number of distinct values to be included for significant terms (i.e. top N)."""
+        facet_size = self.getint("facet_significant_size:%s" % name, 20) or 20
+        # Added to mitigate a DDoS by scripted facet bots (2020-11-24):
+        if self.auth:
+            if not self.auth.logged_in and name not in self.SMALL_FACETS:
+                facet_size = min(50, facet_size)
+        return facet_size
+
+    def get_facet_significant_total(self, name: str) -> bool:
+        """Flag to perform a count of the total number of distinct values for
+        significant terms."""
+        if self.auth:
+            if not self.auth.logged_in and name not in self.SMALL_FACETS:
+                return False
+        return self.getbool("facet_significant_total:%s" % name, False)
+
+    def get_facet_significant_values(self, name: str) -> bool:
+        """Flag to disable returning actual values for significant terms (i.e. count only)."""
+        # Added to mitigate a DDoS by scripted facet bots (2020-11-24):
+        if self.get_facet_significant_size(name) == 0:
+            return False
+        return self.getbool("facet_significant_values:%s" % name, True)
 
     def get_facet_significant_type(self, name: str) -> str | None:
-        """Significant terms aggregation type (nested, text)"""
-        if self.auth and not self.auth.logged_in:
-            return
-        if self.get_facet_significant(name):
-            return self.get("facet_significant:%s" % name)
+        return self.get("facet_significant_type:%s" % name)
 
-    def get_facet_significant_text(self) -> bool:
-        """Enable significant_text terms aggregation (expensive)"""
-        if self.auth and not self.auth.logged_in:
-            return False
-        return self.get_facet_significant(Field.TEXT)
+    def get_facet_significant_text(self) -> str | None:
+        """Field to use for significant text aggregation, or None if not specified."""
+        field = self.get("facet_significant_text")
+        return field or Field.CONTENT if field is not None else None
+
+    def get_facet_significant_text_size(self) -> int:
+        """Number of significant text terms to return."""
+        return self.getint("facet_significant_text_size", 5) or 5
+
+    def get_facet_significant_text_min_doc_count(self) -> int:
+        """Minimum document count for significant text terms."""
+        return self.getint("facet_significant_text_min_doc_count", 5) or 5
+
+    def get_facet_significant_text_shard_size(self) -> int:
+        """Shard size for significant text aggregation."""
+        return self.getint("facet_significant_text_shard_size", 200) or 200
 
     def to_dict(self) -> dict[str, Any]:
         parser = super().to_dict()
         parser["facet_names"] = list(self.facet_names)
+        parser["facet_significant_names"] = list(self.facet_significant_names)
         return parser

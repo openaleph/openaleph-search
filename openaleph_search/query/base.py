@@ -138,6 +138,8 @@ class Query:
     def get_aggregations(self) -> dict[str, Any]:
         """Aggregate the query in order to generate faceted results."""
         aggregations = {}
+
+        # Regular facet aggregations
         for facet_name in self.parser.facet_names:
             facet_aggregations = {}
             if self.parser.get_facet_values(facet_name):
@@ -184,62 +186,74 @@ class Query:
                         "extended_bounds"
                     ] = extended_bounds
 
-            significant = self.parser.get_facet_significant(facet_name)
-            if significant:
-                agg_name = "%s.significant_terms" % facet_name
-                facet_aggregations[agg_name] = {
-                    "significant_terms": {
-                        "field": facet_name,
-                        "background_filter": self.get_significant_background(),
-                        "size": 10,
-                        "min_doc_count": 3,
-                        "shard_size": 100,
-                        "execution_hint": "map",
+            if len(facet_aggregations):
+                # See here for an explanation of the whole post_filters and
+                # aggregation filters thing:
+                # https://www.elastic.co/guide/en/elasticsearch/reference/6.2/search-request-post-filter.html  # noqa: B950
+                other_filters = self.get_post_filters(exclude=facet_name)
+                if len(other_filters["bool"]["filter"]):
+                    agg_name = "%s.filtered" % facet_name
+                    aggregations[agg_name] = {
+                        "filter": other_filters,
+                        "aggregations": facet_aggregations,
                     }
+                else:
+                    aggregations.update(facet_aggregations)
+
+        # Significant terms aggregations
+        for facet_name in self.parser.facet_significant_names:
+            facet_aggregations = {}
+            if self.parser.get_facet_significant_values(facet_name):
+                agg_name = "%s.significant_terms" % facet_name
+                significant_terms_agg = {
+                    "field": facet_name,
+                    "background_filter": self.get_significant_background(),
+                    "size": self.parser.get_facet_significant_size(facet_name),
+                    "min_doc_count": 3,
+                    "shard_size": max(
+                        100, self.parser.get_facet_significant_size(facet_name) * 5
+                    ),
+                    "execution_hint": "map",
+                }
+                facet_aggregations[agg_name] = {
+                    "significant_terms": significant_terms_agg
                 }
 
                 if self.parser.get_facet_significant_type(facet_name) == "nested":
                     facet_aggregations[agg_name]["aggregations"] = {
-                        agg_name: {
-                            "significant_terms": {
-                                "field": facet_name,
-                                "background_filter": self.get_significant_background(),
-                                "size": 10,
-                                "min_doc_count": 3,
-                                "shard_size": 100,
-                                "execution_hint": "map",
-                            }
-                        },
+                        agg_name: {"significant_terms": significant_terms_agg}
                     }
 
-            if not len(facet_aggregations):
-                break
+            if self.parser.get_facet_significant_total(facet_name):
+                # Option to return total distinct value counts for significant terms
+                agg_name = "%s.significant_cardinality" % facet_name
+                facet_aggregations[agg_name] = {"cardinality": {"field": facet_name}}
 
-            # See here for an explanation of the whole post_filters and
-            # aggregation filters thing:
-            # https://www.elastic.co/guide/en/elasticsearch/reference/6.2/search-request-post-filter.html  # noqa: B950
-            other_filters = self.get_post_filters(exclude=facet_name)
-            if len(other_filters["bool"]["filter"]):
-                agg_name = "%s.filtered" % facet_name
-                aggregations[agg_name] = {
-                    "filter": other_filters,
-                    "aggregations": facet_aggregations,
-                }
-            else:
-                aggregations.update(facet_aggregations)
+            if len(facet_aggregations):
+                # Apply post-filters for significant terms aggregations
+                other_filters = self.get_post_filters(exclude=facet_name)
+                if len(other_filters["bool"]["filter"]):
+                    agg_name = "%s.significant_filtered" % facet_name
+                    aggregations[agg_name] = {
+                        "filter": other_filters,
+                        "aggregations": facet_aggregations,
+                    }
+                else:
+                    aggregations.update(facet_aggregations)
 
-        if self.parser.get_facet_significant_text():
+        significant_text_field = self.parser.get_facet_significant_text()
+        if significant_text_field:
             aggregations["significant_text"] = {
                 **self.get_significant_text_sampler(),
                 "aggs": {
                     "significant_text": {
                         "significant_text": {
-                            "field": Field.TEXT,
+                            "field": significant_text_field,
                             "background_filter": self.get_significant_background(),
                             "filter_duplicate_text": True,
-                            "size": 5,
-                            "min_doc_count": 5,
-                            "shard_size": 200,
+                            "size": self.parser.get_facet_significant_text_size(),
+                            "min_doc_count": self.parser.get_facet_significant_text_min_doc_count(),  # noqa: B950
+                            "shard_size": self.parser.get_facet_significant_text_shard_size(),
                         }
                     }
                 },
@@ -249,7 +263,11 @@ class Query:
 
     def get_significant_background(self) -> BoolQuery | None:
         query = bool_query()
-        if self.parser.datasets:
+        if self.parser.collection_ids:
+            query["bool"]["must"].append(
+                field_filter_query(Field.COLLECTION_ID, self.parser.collection_ids)
+            )
+        elif self.parser.datasets:
             query["bool"]["must"].append(
                 field_filter_query(Field.DATASET, self.parser.datasets)
             )
@@ -332,9 +350,8 @@ class Query:
             return True
 
         # Check for significant terms aggregations on facets
-        for facet_name in self.parser.facet_names:
-            if self.parser.get_facet_significant(facet_name):
-                return True
+        if self.parser.facet_significant_names:
+            return True
 
         return False
 
