@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     search_auth_field: str = "dataset"
     """Default field to filter/apply auth on"""
 
-    elasticsearch_url: HttpUrl | list[HttpUrl] = HttpUrl("http://localhost:9200")
+    elasticsearch_uri: HttpUrl | list[HttpUrl] = HttpUrl("http://localhost:9200")
     elasticsearch_timeout: int = 60
     elasticsearch_max_retries: int = 3
     elasticsearch_retry_on_timeout: bool = True

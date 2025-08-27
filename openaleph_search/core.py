@@ -14,7 +14,7 @@ log = get_logger(__name__)
 def _nodes() -> list[str]:
     nodes: set[str] = set()
     settings = Settings()
-    for node in ensure_list(settings.elasticsearch_url):
+    for node in ensure_list(settings.elasticsearch_uri):
         nodes.add(str(node))
     return list(nodes)
 
