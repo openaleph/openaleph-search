@@ -149,7 +149,7 @@ def entities_by_ids(
 
 def get_entity(entity_id, **kwargs):
     """Fetch an entity from the index."""
-    for entity in entities_by_ids(entity_id, cached=True, **kwargs):
+    for entity in entities_by_ids(entity_id, cached=False, **kwargs):
         return entity
 
 

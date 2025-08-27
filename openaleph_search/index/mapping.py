@@ -132,6 +132,9 @@ class Field:
     INDEX_TS = "indexed_at"
 
 
+FULLTEXTS = [Field.CONTENT, Field.TEXT]
+
+
 # FIELD TYPES #
 class FieldType:
     DATE = {"type": "date"}
