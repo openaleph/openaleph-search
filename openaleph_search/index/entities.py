@@ -172,7 +172,7 @@ def delete_entity(entity_id, exclude=None, sync=False):
         index = entity.get("_index")
         if index == exclude:
             continue
-        delete_safe(index, entity_id)
+        delete_safe(index, entity_id, routing=entity.get("_routing"))
 
 
 def checksums_count(checksums):

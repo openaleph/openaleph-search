@@ -183,9 +183,13 @@ def index_safe(index, id, body, sync=False, **kwargs):
 
 
 @error_handler(logger=log, max_retries=settings.elasticsearch_max_retries)
-def delete_safe(index, id, sync=False):
+def delete_safe(
+    index: str, id: str, sync: bool | None = False, routing: str | None = None
+):
     es = get_es()
-    es.delete(index=index, id=str(id), ignore=[404], refresh=refresh_sync(sync))
+    es.delete(
+        index=index, id=id, ignore=[404], refresh=refresh_sync(sync), routing=routing
+    )
 
 
 @error_handler(logger=log, max_retries=settings.elasticsearch_max_retries)
