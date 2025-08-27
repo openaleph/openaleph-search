@@ -7,7 +7,7 @@ from anystore.decorators import error_handler
 from anystore.io import logged_items
 from anystore.logging import get_logger
 from elasticsearch import AsyncElasticsearch
-from elasticsearch.helpers import async_bulk, bulk
+from elasticsearch.helpers import BulkIndexError, async_bulk, bulk
 
 from openaleph_search.core import get_async_es, get_es
 from openaleph_search.index.util import (
@@ -46,8 +46,7 @@ def query_delete(index, query, sync=False, **kwargs):
         conflicts="proceed",
         wait_for_completion=sync,
         refresh=refresh_sync(sync),
-        request_timeout=MAX_REQUEST_TIMEOUT,
-        timeout=MAX_TIMEOUT,
+        timeout=f"{MAX_REQUEST_TIMEOUT}s",
         scroll_size=settings.index_delete_by_query_batchsize,
         **kwargs,
     )
@@ -64,26 +63,48 @@ def bulk_actions(
     # shortcut for 1 worker
     if max_concurrency == 1:
         es = get_es()
-        return bulk(es, actions, max_retries=settings.elasticsearch_max_retries)
+        return bulk(
+            es,
+            actions,
+            max_retries=settings.elasticsearch_max_retries,
+            chunk_size=settings.indexer_chunk_size,
+            max_chunk_bytes=settings.indexer_max_chunk_bytes,
+        )
 
     return asyncio.run(bulk_actions_async(actions, chunk_size, max_concurrency, sync))
 
 
 @error_handler(logger=log, max_retries=settings.elasticsearch_max_retries)
 async def process_chunk(es: AsyncElasticsearch, chunk_actions, sync: bool):
-    result = await async_bulk(
-        es,
-        chunk_actions,
-        max_retries=settings.elasticsearch_max_retries,
-        refresh=refresh_sync(sync),
-        request_timeout=MAX_REQUEST_TIMEOUT,
-    )
-    success, failed = result
-    for failure in failed:
-        if failure.get("delete", {}).get("status") == 404:
-            continue
-        log.warning("Bulk index error: %r" % failure)
-    return success, failed
+    try:
+        result = await async_bulk(
+            es,
+            chunk_actions,
+            max_retries=settings.elasticsearch_max_retries,
+            refresh=refresh_sync(sync),
+            timeout=f"{MAX_REQUEST_TIMEOUT}s",
+            chunk_size=settings.indexer_chunk_size,
+            max_chunk_bytes=settings.indexer_max_chunk_bytes,
+        )
+        success, failed = result
+        for failure in failed:
+            if failure.get("delete", {}).get("status") == 404:
+                continue
+            log.warning("Bulk index error: %r" % failure)
+        return success, failed
+    except BulkIndexError as e:
+        log.error(f"BulkIndexError: {len(e.errors)} document(s) failed to index")
+        log.error(f"Error details: {e}")
+
+        # Log detailed information about each failed document
+        for i, error in enumerate(e.errors[:10]):  # Log first 10 errors to avoid spam
+            log.error(f"Document {i + 1} error: {error}")
+
+        if len(e.errors) > 10:
+            log.error(f"... and {len(e.errors) - 10} more errors (truncated)")
+
+        # Re-raise the exception to maintain existing error handling
+        raise
 
 
 async def bulk_actions_async(
@@ -95,7 +116,7 @@ async def bulk_actions_async(
     """Process chunks as they complete to limit memory usage."""
     start = datetime.now()
     es = await get_async_es()
-    actions = logged_items(actions, "Indexing", 10_000, item_name="doc", logger=log)
+    actions = logged_items(actions, "Loading", 10_000, item_name="doc", logger=log)
     chunks = itertools.batched(actions, n=chunk_size or settings.indexer_chunk_size)
     max_concurrency = max_concurrency or settings.indexer_concurrency
     semaphore = asyncio.Semaphore(max_concurrency)

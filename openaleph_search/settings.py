@@ -30,6 +30,7 @@ class Settings(BaseSettings):
 
     indexer_concurrency: int = 8
     indexer_chunk_size: int = 1000
+    indexer_max_chunk_bytes: int = 50 * 1024 * 1024
 
     index_shards: int = 25  # 4 indices with dataset routing
     index_replicas: int = 0
