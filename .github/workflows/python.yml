@@ -18,7 +18,7 @@ jobs:
         python-version: ["3.11", "3.12", "3.13"]
     services:
       elastic:
-        image: elasticsearch
+        image: ghcr.io/openaleph/elasticsearch
         ports:
           - 9200:9200
 
