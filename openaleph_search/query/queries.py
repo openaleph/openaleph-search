@@ -6,11 +6,12 @@ from banal import ensure_list
 from followthemoney import EntityProxy, model
 
 from openaleph_search.index.entities import ENTITY_SOURCE
-from openaleph_search.index.indexes import entities_read_index
+from openaleph_search.index.indexes import entities_read_index, schema_bucket
 from openaleph_search.index.mapping import Field
 from openaleph_search.query.base import Query
 from openaleph_search.query.matching import match_query
 from openaleph_search.query.util import field_filter_query
+from openaleph_search.settings import Settings
 
 log = logging.getLogger(__name__)
 
@@ -59,25 +60,62 @@ class EntitiesQuery(Query):
         filters.append(field_filter_query("schema", exclude_schemata))
         return filters
 
+    def get_index_weight_functions(self) -> list[dict[str, Any]]:
+        """Generate index weight functions based on schema bucket settings"""
+        settings = Settings()
+        functions = []
+
+        # Map bucket names to their boost settings
+        bucket_boosts = {
+            "pages": settings.index_boost_pages,
+            "documents": settings.index_boost_documents,
+            "intervals": settings.index_boost_intervals,
+            "things": settings.index_boost_things,
+        }
+
+        # Create boost functions for each schema in the query
+        for schema_name in self.schemata:
+            try:
+                bucket = schema_bucket(schema_name)
+                boost_value = bucket_boosts.get(bucket, 1)
+
+                if boost_value != 1:  # Only add function if boost differs from default
+                    functions.append(
+                        {
+                            "filter": {"term": {"schema": schema_name}},
+                            "weight": boost_value,
+                        }
+                    )
+            except (ValueError, KeyError):
+                # Skip invalid schemas
+                continue
+
+        return functions
+
     def wrap_query_function_score(self, query: dict[str, Any]) -> dict[str, Any]:
         # Wrap query in function_score to up-score important entities.
         # (thank you, OpenSanctions/yente :))
+        functions = [
+            {
+                "field_value_factor": {
+                    "field": Field.NUM_VALUES,
+                    # This is a bit of a jiggle factor. Currently, very
+                    # large documents (like Vladimir Putin) have a
+                    # num_values of ~200, so get a +10 boost.  The order
+                    # is modifier(factor * value)
+                    "factor": 0.5,
+                    "modifier": "sqrt",
+                }
+            }
+        ]
+
+        # Add index weight functions
+        functions.extend(self.get_index_weight_functions())
+
         return {
             "function_score": {
                 "query": query,
-                "functions": [
-                    {
-                        "field_value_factor": {
-                            "field": Field.NUM_VALUES,
-                            # This is a bit of a jiggle factor. Currently, very
-                            # large documents (like Vladimir Putin) have a
-                            # num_values of ~200, so get a +10 boost.  The order
-                            # is modifier(factor * value)
-                            "factor": 0.5,
-                            "modifier": "sqrt",
-                        }
-                    }
-                ],
+                "functions": functions,
                 "boost_mode": "sum",
             }
         }

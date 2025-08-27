@@ -40,3 +40,9 @@ class Settings(BaseSettings):
     index_expand_clause_limit: int = 10
     index_delete_by_query_batchsize: int = 100
     index_namespace_ids: bool = True
+
+    # configure different weights for indices
+    index_boost_intervals: int = 1
+    index_boost_things: int = 1
+    index_boost_documents: int = 1
+    index_boost_pages: int = 1
