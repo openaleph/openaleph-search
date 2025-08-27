@@ -12,3 +12,6 @@ __all__ = [
     "SearchQueryParser",
     "unpack_result",
 ]
+
+
+__version__ = "0.0.0"
