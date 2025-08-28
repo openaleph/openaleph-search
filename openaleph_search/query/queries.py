@@ -10,6 +10,7 @@ from openaleph_search.index.indexes import entities_read_index, schema_bucket
 from openaleph_search.index.mapping import Field
 from openaleph_search.query.base import Query
 from openaleph_search.query.matching import match_query
+from openaleph_search.query.more_like_this import more_like_this_query
 from openaleph_search.query.util import field_filter_query
 from openaleph_search.settings import Settings
 
@@ -159,6 +160,55 @@ class MatchQuery(EntitiesQuery):
             exclude = {"ids": {"values": self.exclude}}
             query["bool"]["must_not"].append(exclude)
         return query
+
+
+class MoreLikeThisQuery(EntitiesQuery):
+    """Given an entity, find similar documents/pages based on text content using
+    elasticsearch more_like_this query."""
+
+    def __init__(
+        self,
+        parser,
+        entity: EntityProxy | None = None,
+        exclude=None,
+        datasets=None,
+        collection_ids=None,
+    ):
+        self.entity = entity
+        self.exclude = ensure_list(exclude)
+        self.datasets = datasets
+        self.collection_ids = collection_ids
+        super(MoreLikeThisQuery, self).__init__(parser)
+
+    def get_index(self):
+        # Target only documents and pages buckets for more_like_this queries
+        schemata = []
+        for bucket in ["documents", "pages"]:
+            bucket_schemata = self._get_bucket_schemas(bucket)
+            schemata.extend(bucket_schemata)
+        return entities_read_index(schema=schemata)
+
+    def get_inner_query(self) -> dict[str, Any]:
+        if not self.entity:
+            return {"match_none": {}}
+        query = more_like_this_query(
+            self.entity,
+            datasets=self.datasets,
+            collection_ids=self.collection_ids,
+            parser=self.parser,
+        )
+        if len(self.exclude):
+            exclude = {"ids": {"values": self.exclude}}
+            query["bool"]["must_not"].append(exclude)
+        return query
+
+    def _get_bucket_schemas(self, bucket_name: str) -> list[str]:
+        """Get schema names for a specific bucket."""
+        schemas = []
+        for schema in model.schemata.values():
+            if not schema.abstract and schema_bucket(schema.name) == bucket_name:
+                schemas.append(schema.name)
+        return schemas
 
 
 class GeoDistanceQuery(EntitiesQuery):
