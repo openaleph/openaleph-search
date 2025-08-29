@@ -14,7 +14,7 @@ log = get_logger(__name__)
 def _nodes() -> list[str]:
     nodes: set[str] = set()
     settings = Settings()
-    for node in ensure_list(settings.elasticsearch_uri):
+    for node in ensure_list(settings.uri):
         nodes.add(str(node))
     return list(nodes)
 
@@ -25,9 +25,9 @@ def _get_client() -> Elasticsearch:
     urls = _nodes()
     es = Elasticsearch(
         hosts=urls,
-        request_timeout=settings.elasticsearch_timeout,
-        max_retries=settings.elasticsearch_max_retries,
-        retry_on_timeout=settings.elasticsearch_retry_on_timeout,
+        request_timeout=settings.timeout,
+        max_retries=settings.max_retries,
+        retry_on_timeout=settings.retry_on_timeout,
         retry_on_status=[502, 503, 504],
     )
     es.info()
@@ -42,9 +42,9 @@ async def _get_async_client() -> AsyncElasticsearch:
     urls = _nodes()
     es = AsyncElasticsearch(
         hosts=urls,
-        request_timeout=settings.elasticsearch_timeout,
-        max_retries=settings.elasticsearch_max_retries,
-        retry_on_timeout=settings.elasticsearch_retry_on_timeout,
+        request_timeout=settings.timeout,
+        max_retries=settings.max_retries,
+        retry_on_timeout=settings.retry_on_timeout,
         retry_on_status=[502, 503, 504],
     )
     await es.info()

@@ -34,7 +34,7 @@ class Action(TypedDict):
 Actions: TypeAlias = Generator[Action, None, None] | Iterable[Action]
 
 
-@error_handler(logger=log, max_retries=settings.elasticsearch_max_retries)
+@error_handler(logger=log, max_retries=settings.max_retries)
 def query_delete(index, query, sync=False, **kwargs):
     "Delete all documents matching the given query inside the index."
     es = get_es()
@@ -66,7 +66,7 @@ def bulk_actions(
         return bulk(
             es,
             actions,
-            max_retries=settings.elasticsearch_max_retries,
+            max_retries=settings.max_retries,
             chunk_size=settings.indexer_chunk_size,
             max_chunk_bytes=settings.indexer_max_chunk_bytes,
         )
@@ -74,13 +74,13 @@ def bulk_actions(
     return asyncio.run(bulk_actions_async(actions, chunk_size, max_concurrency, sync))
 
 
-@error_handler(logger=log, max_retries=settings.elasticsearch_max_retries)
+@error_handler(logger=log, max_retries=settings.max_retries)
 async def process_chunk(es: AsyncElasticsearch, chunk_actions, sync: bool):
     try:
         result = await async_bulk(
             es,
             chunk_actions,
-            max_retries=settings.elasticsearch_max_retries,
+            max_retries=settings.max_retries,
             refresh=refresh_sync(sync),
             timeout=f"{MAX_REQUEST_TIMEOUT}s",
             chunk_size=settings.indexer_chunk_size,
@@ -171,7 +171,7 @@ async def bulk_actions_async(
     )
 
 
-@error_handler(logger=log, max_retries=settings.elasticsearch_max_retries)
+@error_handler(logger=log, max_retries=settings.max_retries)
 def index_safe(index, id, body, sync=False, **kwargs):
     """Index a single document and retry until it has been stored."""
     es = get_es()
@@ -182,7 +182,7 @@ def index_safe(index, id, body, sync=False, **kwargs):
     return body
 
 
-@error_handler(logger=log, max_retries=settings.elasticsearch_max_retries)
+@error_handler(logger=log, max_retries=settings.max_retries)
 def delete_safe(
     index: str, id: str, sync: bool | None = False, routing: str | None = None
 ):
@@ -192,7 +192,7 @@ def delete_safe(
     )
 
 
-@error_handler(logger=log, max_retries=settings.elasticsearch_max_retries)
+@error_handler(logger=log, max_retries=settings.max_retries)
 def rewrite_mapping_safe(pending, existing):
     """This re-writes mappings for ElasticSearch in such a way that
     immutable values are kept to their existing setting, while other
@@ -214,7 +214,7 @@ def rewrite_mapping_safe(pending, existing):
     return pending
 
 
-@error_handler(logger=log, max_retries=settings.elasticsearch_max_retries)
+@error_handler(logger=log, max_retries=settings.max_retries)
 def configure_index(index, mapping, settings_):
     """Create or update a search index with the given mapping and
     SETTINGS. This will try to make a new index, or update an

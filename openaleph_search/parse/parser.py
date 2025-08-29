@@ -30,7 +30,7 @@ class QueryParser:
         limit: int | None = None,
         max_limit: int | None = MAX_PAGE,
     ):
-        if self.settings.search_auth and auth is None:
+        if self.settings.auth and auth is None:
             raise RuntimeError("An auth object is required.")
 
         if not isinstance(args, MultiDict):

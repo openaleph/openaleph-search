@@ -83,7 +83,7 @@ def filter_text(spec: Any, invert: bool = False) -> str | None:
 
 def auth_datasets_query(
     values: list[str],
-    field: str | None = settings.search_auth_field,
+    field: str | None = settings.auth_field,
     is_admin: bool | None = False,
 ) -> dict[str, Any]:
     """Generate a search query filter for the given datasets."""

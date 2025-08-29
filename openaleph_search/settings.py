@@ -10,23 +10,23 @@ BULK_PAGE = 1000
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env", env_prefix="openaleph_", extra="ignore"
+        env_file=".env", env_prefix="openaleph_search_", extra="ignore"
     )
 
     testing: bool = Field(
         default=False, validation_alias=AliasChoices("testing", "debug")
     )
 
-    search_auth: bool = False
+    auth: bool = False
     """Set to true when using with OpenAleph"""
 
-    search_auth_field: str = "dataset"
+    auth_field: str = "dataset"
     """Default field to filter/apply auth on"""
 
-    elasticsearch_uri: HttpUrl | list[HttpUrl] = HttpUrl("http://localhost:9200")
-    elasticsearch_timeout: int = 60
-    elasticsearch_max_retries: int = 3
-    elasticsearch_retry_on_timeout: bool = True
+    uri: HttpUrl | list[HttpUrl] = HttpUrl("http://localhost:9200")
+    timeout: int = 60
+    max_retries: int = 3
+    retry_on_timeout: bool = True
 
     indexer_concurrency: int = 8
     indexer_chunk_size: int = 1000

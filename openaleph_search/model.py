@@ -19,10 +19,8 @@ class SearchAuth(BaseModel):
     # deprecated
     collection_ids: set[int] = set()
 
-    def datasets_query(
-        self, field: str | None = settings.search_auth_field
-    ) -> dict[str, Any]:
-        field = field or settings.search_auth_field
+    def datasets_query(self, field: str | None = settings.auth_field) -> dict[str, Any]:
+        field = field or settings.auth_field
         if "collection" in field:
             return auth_datasets_query(
                 list(map(str, self.collection_ids)), field, self.is_admin

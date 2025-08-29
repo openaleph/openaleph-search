@@ -33,7 +33,7 @@ class Query:
     TEXT_FIELDS: ClassVar[list[str]] = [Field.TEXT]
     PREFIX_FIELD: ClassVar[str] = Field.NAME
     SKIP_FILTERS: ClassVar[list[str]] = []
-    AUTHZ_FIELD: ClassVar[str | None] = settings.search_auth_field
+    AUTHZ_FIELD: ClassVar[str | None] = settings.auth_field
     HIGHLIGHT_FIELD: ClassVar[str] = Field.TEXT
     SORT_FIELDS: ClassVar[dict[str, str]] = {
         "label": "label.kw",
