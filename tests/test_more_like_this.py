@@ -147,11 +147,11 @@ def test_more_like_this_query_function():
     assert "like" in mlt_query
     assert mlt_query["like"] == [{"_id": "doc1"}]
 
-    # Check default parameters
-    assert mlt_query["min_doc_freq"] == 0
-    assert mlt_query["minimum_should_match"] == "10%"
-    assert mlt_query["min_term_freq"] == 1
-    assert mlt_query["max_query_terms"] == 25
+    # Check default parameters (hardcoded in more_like_this.py when no parser)
+    assert mlt_query["min_doc_freq"] == 2
+    assert mlt_query["minimum_should_match"] == "20%"
+    assert mlt_query["min_term_freq"] == 2
+    assert mlt_query["max_query_terms"] == 50
 
     # Test with custom parser
     parser = SearchQueryParser(
@@ -224,8 +224,11 @@ def test_more_like_this_search_similar_documents(index_test_documents):
 
     assert source_entity is not None
 
-    # Create query to find similar documents
-    query = _create_mlt_query("/search", entity=source_entity)
+    # Create query with more permissive parameters for small test dataset
+    query = _create_mlt_query(
+        "/search?mlt_min_doc_freq=1&mlt_minimum_should_match=10%&mlt_min_term_freq=1",
+        entity=source_entity,
+    )
     result = query.search()
 
     # Should find some results (the similar ML documents)
@@ -276,8 +279,12 @@ def test_more_like_this_with_dataset_filter(index_test_documents):
             source_entity = entity
             break
 
-    # Filter by specific dataset
-    query = _create_mlt_query("/search", entity=source_entity, datasets=["test_mlt"])
+    # Filter by specific dataset with more permissive parameters for small test dataset
+    query = _create_mlt_query(
+        "/search?mlt_min_doc_freq=1&mlt_minimum_should_match=10%&mlt_min_term_freq=1",
+        entity=source_entity,
+        datasets=["test_mlt"],
+    )
     result = query.search()
 
     # Should still find results from the test dataset
@@ -359,10 +366,10 @@ def test_more_like_this_configurable_parameters():
             break
 
     assert mlt_query_default is not None
-    assert mlt_query_default["min_doc_freq"] == 0  # default
-    assert mlt_query_default["minimum_should_match"] == "10%"  # default
-    assert mlt_query_default["min_term_freq"] == 1  # default
-    assert mlt_query_default["max_query_terms"] == 25  # default
+    assert mlt_query_default["min_doc_freq"] == 5  # parser default
+    assert mlt_query_default["minimum_should_match"] == "60%"  # parser default
+    assert mlt_query_default["min_term_freq"] == 5  # parser default
+    assert mlt_query_default["max_query_terms"] == 50  # parser default
 
 
 def test_more_like_this_bucket_filtering():
