@@ -23,7 +23,12 @@ class Settings(BaseSettings):
     auth_field: str = "dataset"
     """Default field to filter/apply auth on"""
 
-    uri: HttpUrl | list[HttpUrl] = HttpUrl("http://localhost:9200")
+    uri: HttpUrl | list[HttpUrl] = Field(
+        default=HttpUrl("http://localhost:9200"),
+        validation_alias=AliasChoices(
+            "aleph_elasticsearch_uri", "openaleph_elasticsearch_uri"
+        ),
+    )
     timeout: int = 60
     max_retries: int = 3
     retry_on_timeout: bool = True
