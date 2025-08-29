@@ -182,11 +182,7 @@ class MoreLikeThisQuery(EntitiesQuery):
 
     def get_index(self):
         # Target only documents and pages buckets for more_like_this queries
-        schemata = []
-        for bucket in ["documents", "pages"]:
-            bucket_schemata = self._get_bucket_schemas(bucket)
-            schemata.extend(bucket_schemata)
-        return entities_read_index(schema=schemata)
+        return entities_read_index(schema="Document")
 
     def get_inner_query(self) -> dict[str, Any]:
         if not self.entity:
@@ -201,14 +197,6 @@ class MoreLikeThisQuery(EntitiesQuery):
             exclude = {"ids": {"values": self.exclude}}
             query["bool"]["must_not"].append(exclude)
         return query
-
-    def _get_bucket_schemas(self, bucket_name: str) -> list[str]:
-        """Get schema names for a specific bucket."""
-        schemas = []
-        for schema in model.schemata.values():
-            if not schema.abstract and schema_bucket(schema.name) == bucket_name:
-                schemas.append(schema.name)
-        return schemas
 
 
 class GeoDistanceQuery(EntitiesQuery):

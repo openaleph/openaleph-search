@@ -289,19 +289,19 @@ class SearchQueryParser(QueryParser):
 
     def get_mlt_min_doc_freq(self) -> int:
         """Minimum document frequency for more_like_this query terms."""
-        return self.getint("mlt_min_doc_freq", 0) or 0
+        return self.getint("mlt_min_doc_freq", 5) or 5
 
     def get_mlt_minimum_should_match(self) -> str:
         """Minimum should match percentage for more_like_this query."""
-        return self.get("mlt_minimum_should_match", "10%") or "10%"
+        return self.get("mlt_minimum_should_match", "60%") or "60%"
 
     def get_mlt_min_term_freq(self) -> int:
         """Minimum term frequency for more_like_this query terms."""
-        return self.getint("mlt_min_term_freq", 1) or 1
+        return self.getint("mlt_min_term_freq", 5) or 5
 
     def get_mlt_max_query_terms(self) -> int:
         """Maximum number of query terms for more_like_this query."""
-        return self.getint("mlt_max_query_terms", 25) or 25
+        return self.getint("mlt_max_query_terms", 50) or 50
 
     def to_dict(self) -> dict[str, Any]:
         parser = super().to_dict()

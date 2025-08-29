@@ -2,13 +2,10 @@ import logging
 
 from followthemoney import EntityProxy
 
-from openaleph_search.index.indexes import schema_bucket
 from openaleph_search.index.mapping import Field
 from openaleph_search.query.util import BoolQuery, bool_query, none_query
 
 log = logging.getLogger(__name__)
-
-DOCUMENTS_BUCKETS = ["documents", "pages"]
 
 
 def more_like_this_query(
@@ -41,24 +38,11 @@ def more_like_this_query(
     elif datasets:
         query["bool"]["filter"].append({"terms": {"dataset": datasets}})
 
-    # Only search in documents and pages buckets
-    schema_filter = []
-    bucket = schema_bucket(entity.schema.name)
-    if bucket in DOCUMENTS_BUCKETS:
-        # Filter to only include documents and pages
-        for bucket_name in DOCUMENTS_BUCKETS:
-            bucket_schemas = _get_bucket_schemas(bucket_name)
-            if bucket_schemas:
-                schema_filter.extend(bucket_schemas)
-
-    if schema_filter:
-        query["bool"]["filter"].append({"terms": {"schema": schema_filter}})
-
     # Get configurable parameters from parser, with sensible defaults
-    min_doc_freq = 0
-    minimum_should_match = "10%"
-    min_term_freq = 1
-    max_query_terms = 25
+    min_doc_freq = 2
+    minimum_should_match = "20%"
+    min_term_freq = 2
+    max_query_terms = 50
 
     if parser is not None:
         min_doc_freq = parser.get_mlt_min_doc_freq()
@@ -81,17 +65,7 @@ def more_like_this_query(
     # Add the more_like_this query to the main query
     query["bool"]["must"].append(mlt_query)
 
+    # exclude Page entities
+    query["bool"]["must_not"].append({"term": {"schema": "Page"}})
+
     return query
-
-
-def _get_bucket_schemas(bucket_name: str) -> list[str]:
-    """Get schema names for a specific bucket."""
-    from followthemoney import model
-
-    from openaleph_search.index.indexes import schema_bucket
-
-    schemas = []
-    for schema in model.schemata.values():
-        if not schema.abstract and schema_bucket(schema.name) == bucket_name:
-            schemas.append(schema.name)
-    return schemas
