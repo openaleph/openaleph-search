@@ -39,7 +39,11 @@ class QueryParser:
         self.auth = auth
         self.offset = max(0, self.getint("offset", 0) or 0)
         if limit is None:
-            limit = min(max_limit or MAX_PAGE, max(0, self.getint("limit", 20) or 20))
+            parsed_limit = self.getint("limit", 20)
+            limit = min(
+                max_limit or MAX_PAGE,
+                max(0, 20 if parsed_limit is None else parsed_limit),
+            )
         self.limit = limit
         self.next_limit = self.getint("next_limit", limit)
         self.text = sanitize_text(self.get("q"))

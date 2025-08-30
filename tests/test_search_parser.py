@@ -74,3 +74,17 @@ class QueryParserTestCase(TestCase):
         self.assertEqual(set(parser_dict["filters"]["key1"]), set(["foo1", "foo2"]))
         self.assertEqual(set(parser_dict["filters"]["key2"]), set(["foo3", "foo5"]))
         self.assertEqual(set(parser_dict["filters"]["key3"]), set(["foo4"]))
+
+    def test_limit_zero(self):
+        """Test that limit=0 is preserved and not converted to default."""
+        # Test with limit=0 in query args
+        parser_with_zero_limit = QueryParser([("limit", "0")])
+        self.assertEqual(parser_with_zero_limit.limit, 0)
+
+        # Test with no limit specified (should default to 20)
+        parser_with_no_limit = QueryParser([])
+        self.assertEqual(parser_with_no_limit.limit, 20)
+
+        # Test with explicit limit=10
+        parser_with_limit_10 = QueryParser([("limit", "10")])
+        self.assertEqual(parser_with_limit_10.limit, 10)
