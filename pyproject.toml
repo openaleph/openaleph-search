@@ -1,6 +1,6 @@
 [project]
 name = "openaleph-search"
-version = "0.0.5"
+version = "0.0.6"
 description = "OpenAleph index & search module"
 authors = [
     { name = "Simon Wörpel", email = "simon.woerpel@pm.me" },
