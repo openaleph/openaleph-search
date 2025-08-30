@@ -48,6 +48,7 @@ async def _get_async_client() -> AsyncElasticsearch:
         retry_on_status=[502, 503, 504],
     )
     await es.info()
+    urls = [mask_uri(u) for u in urls]
     log.info("Connected to AsyncElasticsearch", nodes=urls)
     return es
 
