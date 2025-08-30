@@ -286,13 +286,6 @@ def test_search_nonlatin():
     assert result["hits"]["total"]["value"] == 1
 
 
-@pytest.mark.skip("tweak significancy bucket settings for testing")
-def test_search_significant():
-    query = _create_query("/search?q=vlad*&facet_significant:text=1")
-    result = query.search()
-    assert len(result["aggregations"]["significant_text"]["buckets"]) == 2
-
-
 def test_search_sort(cleanup_after):
     e1 = make_entity(
         {"id": "event1", "schema": "Event", "properties": {"date": ["2020"]}}

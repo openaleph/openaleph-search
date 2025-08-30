@@ -187,16 +187,23 @@ class MoreLikeThisQuery(EntitiesQuery):
     def get_inner_query(self) -> dict[str, Any]:
         if not self.entity:
             return {"match_none": {}}
-        query = more_like_this_query(
+
+        # Get base query with auth filters from parent class
+        base_query = super().get_inner_query()
+
+        # Apply more_like_this query
+        mlt_query = more_like_this_query(
             self.entity,
             datasets=self.datasets,
             collection_ids=self.collection_ids,
             parser=self.parser,
+            query=base_query,
         )
+
         if len(self.exclude):
             exclude = {"ids": {"values": self.exclude}}
-            query["bool"]["must_not"].append(exclude)
-        return query
+            mlt_query["bool"]["must_not"].append(exclude)
+        return mlt_query
 
 
 class GeoDistanceQuery(EntitiesQuery):
@@ -207,7 +214,7 @@ class GeoDistanceQuery(EntitiesQuery):
         self.entity = entity
         self.exclude = ensure_list(exclude)
         self.datasets = datasets
-        super(EntitiesQuery, self).__init__(parser)
+        super().__init__(parser)
 
     def is_valid(self) -> bool:
         return (

@@ -4,6 +4,7 @@ import pytest
 from ftmq.util import make_entity
 
 from openaleph_search.index.entities import index_bulk
+from openaleph_search.model import SearchAuth
 from openaleph_search.parse.parser import SearchQueryParser
 from openaleph_search.query.more_like_this import more_like_this_query
 from openaleph_search.query.queries import MoreLikeThisQuery
@@ -16,11 +17,11 @@ def _url_to_args(url):
 
 
 def _create_mlt_query(
-    url, entity=None, exclude=None, datasets=None, collection_ids=None
+    url, entity=None, exclude=None, datasets=None, collection_ids=None, auth=None
 ):
     """Create MoreLikeThisQuery from URL string"""
     args = _url_to_args(url)
-    parser = SearchQueryParser(args, None)
+    parser = SearchQueryParser(args, auth)
     return MoreLikeThisQuery(
         parser,
         entity=entity,
@@ -388,3 +389,139 @@ def test_more_like_this_bucket_filtering():
     # The inner query should still be generated properly
     inner_query = query.get_inner_query()
     assert "bool" in inner_query
+
+
+def _count(result) -> int:
+    return result["hits"]["total"]["value"]
+
+
+def test_more_like_this_auth(
+    monkeypatch, cleanup_after, auth_admin, auth_private, auth_public
+):
+    """Test that MoreLikeThisQuery respects authentication filters"""
+    monkeypatch.setenv("OPENALEPH_SEARCH_AUTH", "true")
+
+    # Create test documents for different datasets
+    public_docs = [
+        make_entity(
+            {
+                "id": "public_doc1",
+                "schema": "Document",
+                "properties": {
+                    "title": ["Public Machine Learning Paper"],
+                    "bodyText": [
+                        "This public document discusses machine learning algorithms, neural networks, and deep learning architectures for computer vision applications."
+                    ],
+                },
+            }
+        ),
+        make_entity(
+            {
+                "id": "public_doc2",
+                "schema": "Document",
+                "properties": {
+                    "title": ["Public AI Research"],
+                    "bodyText": [
+                        "Public research on artificial intelligence, machine learning models, and neural network optimization techniques."
+                    ],
+                },
+            }
+        ),
+    ]
+
+    private_docs = [
+        make_entity(
+            {
+                "id": "private_doc1",
+                "schema": "Document",
+                "properties": {
+                    "title": ["Private ML Study"],
+                    "bodyText": [
+                        "Private study on machine learning applications, deep neural networks, and computer vision algorithms."
+                    ],
+                },
+            }
+        ),
+        make_entity(
+            {
+                "id": "private_doc2",
+                "schema": "Document",
+                "properties": {
+                    "title": ["Private Data Science"],
+                    "bodyText": [
+                        "Confidential data science research involving machine learning techniques and neural network architectures."
+                    ],
+                },
+            }
+        ),
+    ]
+
+    # Index documents in different datasets
+    index_bulk("test_public", public_docs, sync=True)
+    index_bulk("test_private", private_docs, sync=True)
+
+    # Use first public doc as source for more-like-this
+    source_entity = public_docs[0]
+
+    unauthenticated = SearchAuth()
+
+    # Test that unauthenticated users get no results
+    mlt_query = _create_mlt_query(
+        "/search?mlt_min_doc_freq=1&mlt_minimum_should_match=10%&mlt_min_term_freq=1",
+        source_entity,
+        auth=unauthenticated,
+    )
+    result = mlt_query.search()
+    assert _count(result) == 0
+
+    # Test that public auth only sees public results
+    mlt_query = _create_mlt_query(
+        "/search?mlt_min_doc_freq=1&mlt_minimum_should_match=10%&mlt_min_term_freq=1",
+        source_entity,
+        auth=auth_public,
+    )
+    result = mlt_query.search()
+    public_hits = _count(result)
+
+    # Should find the other public document similar to source
+    assert public_hits >= 1
+    hit_ids = [hit["_id"] for hit in result["hits"]["hits"]]
+    # Should not include source document
+    assert "public_doc1" not in hit_ids
+    # Should only include public documents
+    for hit_id in hit_ids:
+        assert hit_id.startswith("public_")
+
+    # Test that private auth sees both public and private results
+    mlt_query = _create_mlt_query(
+        "/search?mlt_min_doc_freq=1&mlt_minimum_should_match=10%&mlt_min_term_freq=1",
+        source_entity,
+        auth=auth_private,
+    )
+    result = mlt_query.search()
+    private_hits = _count(result)
+    hit_ids = [hit["_id"] for hit in result["hits"]["hits"]]
+    # Should not include source document
+    assert "public_doc1" not in hit_ids
+    for hit_id in hit_ids:
+        assert hit_id.startswith("public_") or hit_id.startswith("private_")
+
+    # Private auth should see same or more results than public auth
+    assert private_hits >= public_hits
+
+    # Test that admin sees all results
+    mlt_query = _create_mlt_query(
+        "/search?mlt_min_doc_freq=1&mlt_minimum_should_match=10%&mlt_min_term_freq=1",
+        source_entity,
+        auth=auth_admin,
+    )
+    result = mlt_query.search()
+    admin_hits = _count(result)
+    hit_ids = [hit["_id"] for hit in result["hits"]["hits"]]
+    # Should not include source document
+    assert "public_doc1" not in hit_ids
+    for hit_id in hit_ids:
+        assert hit_id.startswith("public_") or hit_id.startswith("private_")
+
+    # Admin should see same or more results than private auth
+    assert admin_hits >= private_hits

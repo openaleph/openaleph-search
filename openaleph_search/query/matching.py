@@ -125,7 +125,7 @@ def match_query(
         query["bool"]["must_not"].extend(must_not)
 
     if collection_ids:
-        query["bool"]["filter"].append({"terms": {"collection_id": datasets}})
+        query["bool"]["filter"].append({"terms": {"collection_id": collection_ids}})
     elif datasets:
         query["bool"]["filter"].append({"terms": {"dataset": datasets}})
 
