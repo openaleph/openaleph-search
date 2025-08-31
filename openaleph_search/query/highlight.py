@@ -16,7 +16,9 @@ def get_highlighter(
             "phrase_limit": 256,
             "order": "score",  # Best fragments first
             "boundary_scanner": "sentence",  # Break at sentences
-            "boundary_max_scan": 50,
+            "boundary_max_scan": 100,  # better sentence detection
+            "boundary_chars": ".,!?;",  # Explicit sentence boundary characters
+            "no_match_size": 300,  # Hard limit when no boundary found
             # "pre_tags": ["<em class='highlight-content'>"],
             # "post_tags": ["</em>"],
             "max_analyzed_offset": 999999,  # Handle large documents
