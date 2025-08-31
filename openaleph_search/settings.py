@@ -2,7 +2,7 @@ from anystore.settings import BaseSettings
 from pydantic import AliasChoices, Field, HttpUrl
 from pydantic_settings import SettingsConfigDict
 
-__version__ = "0.0.6"
+__version__ = "0.0.7"
 
 MAX_PAGE = 9999
 BULK_PAGE = 1000
