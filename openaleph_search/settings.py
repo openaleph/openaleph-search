@@ -2,7 +2,7 @@ from anystore.settings import BaseSettings
 from pydantic import AliasChoices, Field, HttpUrl
 from pydantic_settings import SettingsConfigDict
 
-__version__ = "0.0.0"
+__version__ = "0.0.6"
 
 MAX_PAGE = 9999
 BULK_PAGE = 1000
@@ -24,11 +24,9 @@ class Settings(BaseSettings):
     """Default field to filter/apply auth on"""
 
     uri: HttpUrl | list[HttpUrl] = Field(
-        default=HttpUrl("http://localhost:9200"),
-        validation_alias=AliasChoices(
-            "aleph_elasticsearch_uri", "openaleph_elasticsearch_uri"
-        ),
+        default=HttpUrl("http://localhost:9200"), alias="openaleph_elasticsearch_uri"
     )
+
     timeout: int = 60
     max_retries: int = 3
     retry_on_timeout: bool = True
