@@ -3,6 +3,8 @@ name = "openaleph-search"
 version = "0.0.8"
 description = "OpenAleph index & search module"
 authors = [
+    { name = "OCCRP Data Team", email = "data@occrp.org" },
+    { name = "Friedrich Lindenberg", email = "friedrich@pudo.org"},
     { name = "Simon Wörpel", email = "simon.woerpel@pm.me" },
     { name = "Data and Research Center – DARC", email = "hi@dataresearchcenter.org" },
 ]
@@ -17,7 +19,7 @@ classifiers = [
 ]
 requires-python = ">=3.12,<4"
 dependencies = [
-    "ftmq (>=4.2.3,<5.0.0)",
+    "ftmq (>=4.2.4,<5.0.0)",
     "followthemoney (>=4.2.0,<5.0.0)",
     "rigour (>=1.3.0,<2.0.0)",
     "elasticsearch (>=9.1.0,<10.0.0)",
