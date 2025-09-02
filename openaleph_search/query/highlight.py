@@ -17,7 +17,7 @@ def get_highlighter(
             "order": "score",  # Best fragments first
             "boundary_scanner": "sentence",  # Break at sentences
             "boundary_max_scan": 300,  # better sentence detection
-            "boundary_chars": ".,!?;\n|,{}",  # Explicit boundary for csv/json raw text
+            "boundary_chars": r".,!?;\n|,{}\s",  # Explicit boundary for csv/json raw text
             "no_match_size": 300,  # Hard limit when no boundary found
             "fragmenter": "span",  # More precise fragment boundaries
             # "pre_tags": ["<em class='highlight-content'>"],
