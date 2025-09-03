@@ -6,10 +6,10 @@ from openaleph_search.index.mapping import Field
 def get_highlighter(
     field: str, query: dict[str, Any] | None = None, count: int | None = None
 ) -> dict[str, Any]:
-    # Content field - best UX with term vectors
+    # Content field - best UX with unified highlighter
     if field == Field.CONTENT:
         highlighter = {
-            "type": "fvh",
+            "type": "unified",
             "fragment_size": 400,
             "fragment_offset": 50,
             "number_of_fragments": count or 3,

@@ -20,7 +20,7 @@ def test_highlighting(index_entities):
     # FIXME ?
     highlight = _search_highlight('"paul manafort"')
     assert highlight is not None
-    assert "<em>paul manafort</em>" in highlight.lower()
+    assert "<em>paul</em> <em>manafort</em>" in highlight.lower()
 
     highlight = _search_highlight("Українська")
     assert highlight is not None
