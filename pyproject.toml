@@ -1,6 +1,6 @@
 [project]
 name = "openaleph-search"
-version = "5.0.4"
+version = "5.0.5"
 description = "OpenAleph index & search module"
 authors = [
     { name = "OCCRP Data Team", email = "data@occrp.org" },
