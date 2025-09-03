@@ -49,3 +49,6 @@ class Settings(BaseSettings):
     index_boost_things: int = 1
     index_boost_documents: int = 1
     index_boost_pages: int = 1
+
+    # enable/disable function_score wrapper for performance tuning
+    query_function_score: bool = False

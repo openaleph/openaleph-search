@@ -6,7 +6,7 @@ from banal import ensure_list
 from followthemoney import EntityProxy, model
 
 from openaleph_search.index.entities import ENTITY_SOURCE
-from openaleph_search.index.indexes import entities_read_index, schema_bucket
+from openaleph_search.index.indexes import entities_read_index
 from openaleph_search.index.mapping import Field
 from openaleph_search.query.base import Query
 from openaleph_search.query.matching import match_query
@@ -15,6 +15,8 @@ from openaleph_search.query.util import field_filter_query
 from openaleph_search.settings import Settings
 
 log = logging.getLogger(__name__)
+settings = Settings()
+
 
 EXCLUDE_SCHEMATA = [
     s.name for s in model.schemata.values() if s.hidden
@@ -49,7 +51,10 @@ class EntitiesQuery(Query):
         return entities_read_index(schema=self.schemata)
 
     def get_query(self) -> dict[str, Any]:
-        return self.wrap_query_function_score(self.get_inner_query())
+        query = self.get_inner_query()
+        if settings.query_function_score:
+            return self.wrap_query_function_score(query)
+        return query
 
     def get_inner_query(self) -> dict[str, Any]:
         return super().get_query()
@@ -62,8 +67,7 @@ class EntitiesQuery(Query):
         return filters
 
     def get_index_weight_functions(self) -> list[dict[str, Any]]:
-        """Generate index weight functions based on schema bucket settings"""
-        settings = Settings()
+        """Generate index weight functions based on index bucket settings"""
         functions = []
 
         # Map bucket names to their boost settings
@@ -74,22 +78,15 @@ class EntitiesQuery(Query):
             "things": settings.index_boost_things,
         }
 
-        # Create boost functions for each schema in the query
-        for schema_name in self.schemata:
-            try:
-                bucket = schema_bucket(schema_name)
-                boost_value = bucket_boosts.get(bucket, 1)
-
-                if boost_value != 1:  # Only add function if boost differs from default
-                    functions.append(
-                        {
-                            "filter": {"term": {"schema": schema_name}},
-                            "weight": boost_value,
-                        }
-                    )
-            except (ValueError, KeyError):
-                # Skip invalid schemas
-                continue
+        # Create boost functions for each bucket with non-default boost
+        for bucket_name, boost_value in bucket_boosts.items():
+            if boost_value != 1:  # Only add function if boost differs from default
+                functions.append(
+                    {
+                        "filter": {"wildcard": {"_index": f"*entity-{bucket_name}*"}},
+                        "weight": boost_value,
+                    }
+                )
 
         return functions
 
