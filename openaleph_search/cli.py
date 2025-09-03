@@ -128,11 +128,10 @@ def cli_search_body(
     output_uri: str = OPT_OUTPUT_URI,
     output_format: OPT_SEARCH_FORMAT = "raw",
     index: str | None = None,
-    routing: str | None = None,
 ):
     """Search with raw json body for query"""
     body = smart_read(input_uri, serialization_mode="json")
-    res = search_body(body, index, routing)
+    res = search_body(body, index)
     data = dump_json(dict(res), clean=True, newline=True)
     smart_write(output_uri, data)
 

@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     indexer_chunk_size: int = 1000
     indexer_max_chunk_bytes: int = 50 * 1024 * 1024
 
-    index_shards: int = 25  # 4 indices with dataset routing
+    index_shards: int = 10
     index_replicas: int = 0
     index_prefix: str = "openaleph"
     index_write: str = "v1"
@@ -52,3 +52,6 @@ class Settings(BaseSettings):
 
     # enable/disable function_score wrapper for performance tuning
     query_function_score: bool = False
+
+    # enable/disable term vectors and offsets for content field (used for highlighting)
+    content_term_vectors: bool = True

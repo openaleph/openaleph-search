@@ -201,14 +201,6 @@ class SearchQueryParser(QueryParser):
             datasets = datasets & set(self.auth.datasets)
         return {valid_dataset(d) for d in datasets}
 
-    @cached_property
-    def routing_key(self) -> str | None:
-        # get dataset routing if dataset filter is set
-        if self.collection_ids:
-            return ",".join(sorted(self.collection_ids))
-        if self.datasets:
-            return ",".join(sorted(self.datasets))
-
     def get_facet_size(self, name: str) -> int:
         """Number of distinct values to be included (i.e. top N)."""
         facet_size = self.getint("facet_size:%s" % name, 20) or 20

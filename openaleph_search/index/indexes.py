@@ -123,6 +123,19 @@ def make_schema_bucket_mapping(bucket: Bucket) -> dict[str, Any]:
     return mapping
 
 
+def get_bucket_shard_num(
+    bucket: Bucket, default_shards: int | None = settings.index_shards
+) -> int:
+    if settings.testing:
+        return 1
+    shards = default_shards or settings.index_shards
+    if bucket == "things":
+        return shards // 2
+    if bucket == "intervals":
+        return shards // 3
+    return shards  # documents, pages
+
+
 def configure_schema_bucket(bucket: Bucket, version: str):
     """
     Generate relevant type mappings for entity properties so that
@@ -130,5 +143,5 @@ def configure_schema_bucket(bucket: Bucket, version: str):
     """
     mapping = make_schema_bucket_mapping(bucket)
     index = bucket_index(bucket, version)
-    settings = index_settings()
+    settings = index_settings(shards=get_bucket_shard_num(bucket))
     return configure_index(index, mapping, settings)

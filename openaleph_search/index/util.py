@@ -36,7 +36,6 @@ def unpack_result(res: SDict) -> SDict | None:
     data = res.get("_source", {})
     data["id"] = res.get("_id")
     data["_index"] = res.get("_index")
-    data["_routing"] = res.get("_routing")
 
     _score = res.get("_score")
     if _score is not None and _score != 0.0 and "score" not in data:

@@ -402,15 +402,14 @@ class Query:
         """Execute the query as assmbled."""
         log.debug("Search index: %s" % self.get_index())
         es = get_es()
+
         result = es.search(
             index=self.get_index(),
             body=self.get_body(),
-            routing=self.parser.routing_key,
         )
         log.debug(
             f"Elasticsearch query [{self.to_text()}] took {result.get('took')}ms",
             query=self.to_text(),
-            routing=self.parser.routing_key,
             body=self.get_body(),
             filters=self.parser.filters,
             took=result.get("took"),

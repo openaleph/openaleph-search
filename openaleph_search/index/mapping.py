@@ -8,7 +8,10 @@ from typing import Any, Iterable, TypeAlias
 from followthemoney import model
 from followthemoney.types import registry
 
+from openaleph_search.settings import Settings
 from openaleph_search.util import SchemaType
+
+settings = Settings()
 
 MappingProperty: TypeAlias = dict[str, list[str] | str]
 Mapping: TypeAlias = dict[str, MappingProperty]
@@ -146,7 +149,9 @@ class FieldType:
         "analyzer": ICU_ANALYZER,
         "search_analyzer": ICU_ANALYZER,
         "index_phrases": True,  # shingles
-        "term_vector": "with_positions_offsets",
+        "term_vector": (
+            "with_positions_offsets" if settings.content_term_vectors else False
+        ),
     }
     # additional text copied over from other properties for arbitrary lookups,
     # default analyzer
@@ -179,6 +184,7 @@ TYPE_MAPPINGS = {
 }
 
 GROUPS = {t.group for t in registry.groups.values() if t.group}
+
 
 # These fields will be pruned from the _source field after the document has been
 # indexed, but before the _source field is stored. We can still search on these

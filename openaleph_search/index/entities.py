@@ -96,7 +96,6 @@ def iter_entities(
         preserve_order=preserve_order,
         scroll=es_scroll,
         size=es_scroll_size,
-        routing=collection_id,
     ):
         entity = unpack_result(res)
         if entity is not None:
@@ -172,7 +171,7 @@ def delete_entity(entity_id, exclude=None, sync=False):
         index = entity.get("_index")
         if index == exclude:
             continue
-        delete_safe(index, entity_id, routing=entity.get("_routing"))
+        delete_safe(index, entity_id)
 
 
 def checksums_count(checksums):

@@ -136,7 +136,6 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
         "_id": entity_id,
         "_index": entities_write_index(entity.schema),
         "_source": data,
-        "_routing": collection_id or dataset,
     }
 
 

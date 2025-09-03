@@ -27,7 +27,6 @@ MAX_REQUEST_TIMEOUT = 84600
 class Action(TypedDict):
     _id: str
     _index: str
-    _routing: str
     _source: dict[str, Any]
 
 
@@ -183,13 +182,9 @@ def index_safe(index, id, body, sync=False, **kwargs):
 
 
 @error_handler(logger=log, max_retries=settings.max_retries)
-def delete_safe(
-    index: str, id: str, sync: bool | None = False, routing: str | None = None
-):
+def delete_safe(index: str, id: str, sync: bool | None = False):
     es = get_es()
-    es.delete(
-        index=index, id=id, ignore=[404], refresh=refresh_sync(sync), routing=routing
-    )
+    es.delete(index=index, id=id, ignore=[404], refresh=refresh_sync(sync))
 
 
 @error_handler(logger=log, max_retries=settings.max_retries)

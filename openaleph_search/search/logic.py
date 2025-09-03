@@ -24,9 +24,7 @@ def search_query_string(q: str, args: str | None = None) -> ObjectApiResponse:
     return query.search()
 
 
-def search_body(
-    body: dict[str, Any], index: str | None = None, routing: str | None = None
-) -> ObjectApiResponse:
+def search_body(body: dict[str, Any], index: str | None = None) -> ObjectApiResponse:
     es = get_es()
     index = index or entities_read_index()
-    return es.search(index=index, body=body, routing=routing)
+    return es.search(index=index, body=body)
