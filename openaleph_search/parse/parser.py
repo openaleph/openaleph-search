@@ -42,7 +42,10 @@ class QueryParser:
             parsed_limit = self.getint("limit", 20)
             limit = min(
                 max_limit or MAX_PAGE,
-                max(0, 20 if parsed_limit is None else parsed_limit),
+                max(
+                    0,
+                    20 if (parsed_limit is None or parsed_limit == 0) else parsed_limit,
+                ),
             )
         self.limit = limit
         self.next_limit = self.getint("next_limit", limit)
