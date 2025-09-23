@@ -321,3 +321,48 @@ def test_search_sort(cleanup_after):
     result = query.search()
     assert len(result["hits"]["hits"]) == 2
     assert result["hits"]["hits"][0]["_id"] == "event2"
+
+
+def test_search_tag_filter(cleanup_after):
+    # Create entity with tags in context
+    entity_data = {
+        "id": "jane-doe-tagged",
+        "schema": "Person",
+        "properties": {"name": ["Jane Doe"], "birthDate": ["1980-01-01"]},
+    }
+    entity = make_entity(entity_data)
+    entity.context["tags"] = ["politician", "businessman", "controversial"]
+
+    index_bulk("test_tagged", [entity], sync=True)
+
+    # Test search with tag filter
+    query = _create_query("/search?filter:dataset=test_tagged&filter:tags=politician")
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] == 1
+    assert result["hits"]["hits"][0]["_id"] == "jane-doe-tagged"
+
+    # Test search with non-existent tag
+    query = _create_query("/search?filter:dataset=test_tagged&filter:tags=nonexistent")
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] == 0
+
+    # Test search with multiple tag values
+    query = _create_query("/search?filter:dataset=test_tagged&filter:tags=businessman")
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] == 1
+    assert result["hits"]["hits"][0]["_id"] == "jane-doe-tagged"
+
+    # Test tags facet aggregation
+    query = _create_query("/search?filter:dataset=test_tagged&facet=tags")
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] == 1
+    assert "aggregations" in result
+    assert result["aggregations"]["tags.values"]["buckets"] == [
+        {"key": "businessman", "doc_count": 1},
+        {"key": "controversial", "doc_count": 1},
+        {"key": "politician", "doc_count": 1},
+    ]
