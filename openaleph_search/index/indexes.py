@@ -11,21 +11,13 @@ from openaleph_search.index.indexer import configure_index
 from openaleph_search.index.mapping import Field, make_mapping, make_schema_mapping
 from openaleph_search.index.util import index_name, index_settings
 from openaleph_search.settings import Settings
-from openaleph_search.util import SchemaType
+from openaleph_search.util import SchemaType, ensure_schema
 
 log = logging.getLogger(__name__)
 settings = Settings()
 
 Bucket: TypeAlias = Literal["pages", "documents", "intervals", "things"]
 BUCKETS = ("pages", "documents", "intervals", "things")
-
-
-@cache
-def ensure_schema(schema: SchemaType) -> Schema:
-    schema_ = model.get(schema)
-    if schema_ is not None:
-        return schema_
-    raise ValueError(f"Invalid schema: `{schema}`")
 
 
 @cache

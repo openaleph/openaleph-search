@@ -4,6 +4,7 @@ import pytest
 
 from openaleph_search.parse.parser import SearchQueryParser
 from openaleph_search.query.queries import Query
+from openaleph_search.query.util import schema_query
 
 
 def query(args):
@@ -164,3 +165,14 @@ class QueryTestCase(TestCase):
     def test_schema_filter(self):
         q = query([("filter:schema", "Person")])
         assert q.get_filters() == [{"term": {"schema": "Person"}}]
+
+    def test_schema_query(self):
+        assert schema_query("Person") == {"terms": {"schema": ["Person"]}}
+        assert schema_query(["Person", "Company"]) == {
+            "terms": {"schema": ["Company", "Person"]}
+        }
+        assert schema_query(["Person", "Analyzable"]) == {
+            "terms": {"schema": ["Person"]}
+        }
+        assert schema_query([]) == {"match_none": {}}
+        assert schema_query(["Analyzable"]) == {"match_none": {}}

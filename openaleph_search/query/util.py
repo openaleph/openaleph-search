@@ -5,6 +5,7 @@ from banal import ensure_list, is_mapping
 
 from openaleph_search.index.mapping import Field
 from openaleph_search.settings import Settings
+from openaleph_search.util import SchemaType, ensure_schema
 
 settings = Settings()
 
@@ -93,3 +94,15 @@ def auth_datasets_query(
     if not len(values):
         return {"match_none": {}}
     return {"terms": {field: values}}
+
+
+def schema_query(schemata: SchemaType | list[SchemaType]) -> dict[str, Any]:
+    """Generate a filter query for the given schemata"""
+    values: set[str] = set()
+    for schema in ensure_list(schemata):
+        schema = ensure_schema(schema)
+        if not schema.abstract:
+            values.add(schema.name)
+    if not len(values):
+        return {"match_none": {}}
+    return {"terms": {Field.SCHEMA: list(sorted(values))}}
