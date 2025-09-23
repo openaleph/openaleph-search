@@ -176,3 +176,6 @@ class QueryTestCase(TestCase):
         }
         assert schema_query([]) == {"match_none": {}}
         assert schema_query(["Analyzable"]) == {"match_none": {}}
+        assert schema_query(["Organization"], include_descendants=True) == {
+            "terms": {"schema": ["Company", "Organization", "PublicBody"]}
+        }

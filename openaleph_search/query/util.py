@@ -96,13 +96,17 @@ def auth_datasets_query(
     return {"terms": {field: values}}
 
 
-def schema_query(schemata: SchemaType | list[SchemaType]) -> dict[str, Any]:
+def schema_query(
+    schemata: SchemaType | list[SchemaType], include_descendants: bool | None = False
+) -> dict[str, Any]:
     """Generate a filter query for the given schemata"""
     values: set[str] = set()
     for schema in ensure_list(schemata):
         schema = ensure_schema(schema)
         if not schema.abstract:
             values.add(schema.name)
+            if include_descendants:
+                values.update([s.name for s in schema.descendants])
     if not len(values):
         return {"match_none": {}}
     return {"terms": {Field.SCHEMA: list(sorted(values))}}
