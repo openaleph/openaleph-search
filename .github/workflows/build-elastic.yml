@@ -1,7 +1,10 @@
 name: Build elasticsearch
 
 on:
-  push: {}
+  push:
+    paths:
+      - Dockerfile
+      - .github/workflows/build-elastic.yml
 
 permissions:
   contents: read
