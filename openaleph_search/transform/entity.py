@@ -89,6 +89,9 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
     data[Field.NAME_PARTS] = list(index_name_parts(entity.schema, names))
     data[Field.NAME_PHONETIC] = list(phonetic_names(entity.schema, names))
 
+    # Add tags from EntityProxy.context (they are added from aleph db before indexing)
+    data[Field.TAGS] = ensure_list(entity.context.get("tags"))
+
     # Slight hack: a magic property in followthemoney that gets taken out
     # of the properties and added straight to the index text.
     properties = data.get("properties", {})

@@ -107,6 +107,7 @@ class Field:
     GEO_POINT = "geo_point"
     CONTENT = "content"
     TEXT = "text"
+    TAGS = "tags"
 
     NUMERIC = "numeric"
     PROPERTIES = "properties"
@@ -228,6 +229,8 @@ BASE_MAPPING = {
     # full text
     Field.CONTENT: FieldType.CONTENT,
     Field.TEXT: FieldType.TEXT,
+    # tagging
+    Field.TAGS: FieldType.KEYWORD,
     # processing metadata
     Field.UPDATED_AT: FieldType.DATE,
     Field.CREATED_AT: FieldType.DATE,

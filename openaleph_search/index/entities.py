@@ -28,6 +28,7 @@ PROXY_INCLUDES = [
     "caption",
     "schema",
     "properties",
+    "tags",
     "dataset",
     "collection_id",
     "profile_id",
