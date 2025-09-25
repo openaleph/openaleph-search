@@ -126,6 +126,7 @@ class Field:
     PROFILE = "profile_id"
     ORIGIN = "origin"
     COLLECTION_ID = "collection_id"
+    MUTABLE = "mutable"
 
     # length norm
     NUM_VALUES = "num_values"
@@ -163,6 +164,7 @@ class FieldType:
     NUMERIC = {"type": "double"}
     INTEGER = {"type": "integer"}
     GEOPOINT = {"type": "geo_point"}
+    BOOL = {"type": "boolean"}
 
     # No length normalization for names. Merged entities have a lot of names,
     # and we don't want to penalize them for that.
@@ -239,10 +241,11 @@ BASE_MAPPING = {
     Field.LAST_SEEN: FieldType.DATE,
     Field.FIRST_SEEN: FieldType.DATE,
     Field.ORIGIN: FieldType.KEYWORD,
-    # probably deprecated soon
+    # OpenAleph leaked context data probably deprecated soon
     Field.ROLE: FieldType.KEYWORD,
     Field.PROFILE: FieldType.KEYWORD,
     Field.COLLECTION_ID: FieldType.KEYWORD,
+    Field.MUTABLE: FieldType.BOOL,
     # length normalization
     Field.NUM_VALUES: FieldType.INTEGER,
     # index metadata

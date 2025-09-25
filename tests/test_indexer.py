@@ -50,3 +50,36 @@ def test_indexer_with_tags(cleanup_after):
     indexed_entity = indexed_entities[0]
     assert "tags" in indexed_entity
     assert indexed_entity["tags"] == ["politician", "businessman", "controversial"]
+
+
+def test_indexer_with_context(cleanup_after):
+    # clear
+    clear_index()
+
+    # Create entity with OpenAleph metadata in context
+    entity_data = {
+        "id": "test-person-with-tags",
+        "schema": "Person",
+        "properties": {"name": ["Jane Doe"], "birthDate": ["1980-01-01"]},
+    }
+    entity = make_entity(entity_data)
+    entity.context = {"role_id": 3, "mutable": True, "created_at": "2023-04-26"}
+
+    # Verify format_entity includes the context
+    formatted = format_entity("test_dataset", entity)
+    assert formatted is not None
+    assert formatted["_source"]["role_id"] == 3
+    assert formatted["_source"]["mutable"] is True
+    assert formatted["_source"]["created_at"] == "2023-04-26"
+
+    index_bulk("test_dataset", [entity])
+
+    # Verify entity was indexed
+    indexed_entities = list(iter_entities())
+    assert len(indexed_entities) == 1
+
+    # Verify context is in the indexed document
+    indexed_entity = indexed_entities[0]
+    assert indexed_entity["role_id"] == 3
+    assert indexed_entity["mutable"] is True
+    assert indexed_entity["created_at"] == "2023-04-26"

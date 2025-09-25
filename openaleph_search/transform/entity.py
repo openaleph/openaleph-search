@@ -10,7 +10,7 @@ from typing import Generator, Iterable
 
 from anystore.logging import get_logger
 from anystore.util import Took
-from banal import ensure_list, first
+from banal import ensure_list
 from followthemoney import EntityProxy, model, registry
 
 from openaleph_search.index.indexer import Action, Actions
@@ -117,17 +117,18 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
         data[Field.GEO_POINT] = get_geopoints(entity)
 
     # Context data - from aleph system, not followthemoney. Probably deprecated soon
-    data[Field.ROLE] = first(data.get("role_id", []))
-    data[Field.PROFILE] = first(data.get("profile_id", []))
-    data["mutable"] = kwargs.get("mutable", False)  # deprecated
-    data[Field.ORIGIN] = ensure_list(data.get("origin"))
-    # Logical simplifications of dates:
-    created_at = ensure_list(data.get("created_at"))
-    if len(created_at) > 0:
-        data[Field.CREATED_AT] = min(created_at)
-    updated_at = ensure_list(data.get("updated_at")) or created_at
-    if len(updated_at) > 0:
-        data[Field.UPDATED_AT] = max(updated_at)
+    if hasattr(entity, "context"):
+        data[Field.ROLE] = entity.context.get("role_id")
+        data[Field.PROFILE] = entity.context.get("profile_id")
+        data[Field.MUTABLE] = entity.context.get("mutable", False)
+        data[Field.ORIGIN] = ensure_list(entity.context.get("origin"))
+        # Logical simplifications of dates:
+        created_at = ensure_list(entity.context.get("created_at"))
+        if len(created_at) > 0:
+            data[Field.CREATED_AT] = min(created_at)
+        updated_at = ensure_list(entity.context.get("updated_at")) or created_at
+        if len(updated_at) > 0:
+            data[Field.UPDATED_AT] = max(updated_at)
 
     data[Field.INDEX_BUCKET] = schema_bucket(data["schema"])
     data[Field.INDEX_VERSION] = __version__
