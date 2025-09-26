@@ -9,16 +9,17 @@ def get_highlighter(
     # Content field - best UX with unified highlighter
     if field == Field.CONTENT:
         highlighter = {
-            "type": "unified",
-            "fragment_size": 400,
-            "fragment_offset": 50,
+            "type": "fvh",
+            "fragment_size": 200,
+            # "fragment_offset": 50,
             "number_of_fragments": count or 3,
-            "phrase_limit": 256,
+            "phrase_limit": 64,  # lower than default (256) for better memory performance
             "order": "score",  # Best fragments first
-            "boundary_scanner": "sentence",  # Break at sentences
-            "boundary_max_scan": 300,  # better sentence detection
-            "boundary_chars": r".,!?;\n|,{}\s",  # Explicit boundary for csv/json raw text
-            "no_match_size": 300,  # Hard limit when no boundary found
+            "boundary_scanner": "chars",  # FVH needs 'chars'
+            "boundary_max_scan": 100,  # better sentence detection
+            # Explicit boundary chars added for csv/json/html/code raw text
+            "boundary_chars": '.\t\n ,!?;_-=(){}[]<>|"',
+            "no_match_size": 300,  # Hard limit when no boundary/match found
             "fragmenter": "span",  # More precise fragment boundaries
             # "pre_tags": ["<em class='highlight-content'>"],
             # "post_tags": ["</em>"],
@@ -34,7 +35,6 @@ def get_highlighter(
             "fragment_size": 200,  # Longer to capture full names/titles
             "number_of_fragments": 3,
             "fragmenter": "simple",  # Don't break names awkwardly
-            "max_analyzed_offset": 999999,  # Handle large documents
             "pre_tags": [""],  # No markup
             "post_tags": [""],  # No markup
             # "pre_tags": ["<em class='highlight-name'>"],
@@ -46,7 +46,7 @@ def get_highlighter(
         return {
             "type": "plain",  # Fast for keyword fields
             "number_of_fragments": 3,
-            "max_analyzed_offset": 1000,  # Limit for keyword fields
+            "max_analyzed_offset": 999999,  # probably many names
             "pre_tags": [""],  # No markup
             "post_tags": [""],  # No markup
         }
@@ -55,7 +55,7 @@ def get_highlighter(
         "type": "plain",  # Fastest option
         "fragment_size": 150,  # Shorter since less important
         "number_of_fragments": 1,  # Just one fragment
-        "max_analyzed_offset": 999999,  # Handle large documents
+        # "max_analyzed_offset": 999999,  # Handle large documents
         # "pre_tags": ["<em class='highlight-text'>"],
         # "post_tags": ["</em>"],
     }

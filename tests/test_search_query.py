@@ -144,7 +144,7 @@ class QueryTestCase(TestCase):
                     "names": {
                         "type": "plain",
                         "number_of_fragments": 3,
-                        "max_analyzed_offset": 1000,
+                        "max_analyzed_offset": 999999,
                         "pre_tags": [""],
                         "post_tags": [""],
                     },
