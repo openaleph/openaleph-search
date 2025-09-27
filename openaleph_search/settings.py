@@ -33,7 +33,7 @@ class Settings(BaseSettings):
 
     indexer_concurrency: int = 8
     indexer_chunk_size: int = 1000
-    indexer_max_chunk_bytes: int = 50 * 1024 * 1024
+    indexer_max_chunk_bytes: int = 5 * 1024 * 1024  # 5mb
 
     index_shards: int = 10
     index_replicas: int = 0
