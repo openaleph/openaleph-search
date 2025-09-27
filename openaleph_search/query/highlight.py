@@ -1,30 +1,50 @@
 from typing import Any
 
 from openaleph_search.index.mapping import Field
+from openaleph_search.settings import Settings
+
+settings = Settings()
 
 
 def get_highlighter(
     field: str, query: dict[str, Any] | None = None, count: int | None = None
 ) -> dict[str, Any]:
-    # Content field - best UX with unified highlighter
+    # Content field - configurable highlighting
     if field == Field.CONTENT:
-        highlighter = {
-            "type": "fvh",
-            "fragment_size": 200,
-            # "fragment_offset": 50,
-            "number_of_fragments": count or 3,
-            "phrase_limit": 64,  # lower than default (256) for better memory performance
-            "order": "score",  # Best fragments first
-            "boundary_scanner": "chars",  # FVH needs 'chars'
-            "boundary_max_scan": 100,  # better sentence detection
-            # Explicit boundary chars added for csv/json/html/code raw text
-            "boundary_chars": '.\t\n ,!?;_-=(){}[]<>|"',
-            "no_match_size": 300,  # Hard limit when no boundary/match found
-            "fragmenter": "span",  # More precise fragment boundaries
-            # "pre_tags": ["<em class='highlight-content'>"],
-            # "post_tags": ["</em>"],
-            "max_analyzed_offset": 999999,  # Handle large documents
-        }
+        if settings.highlighter_fvh_enabled:
+            # FVH (Fast Vector Highlighter) configuration
+            highlighter = {
+                "type": "fvh",
+                "fragment_size": settings.highlighter_fragment_size,
+                # "fragment_offset": 50,
+                "number_of_fragments": count
+                or settings.highlighter_number_of_fragments,
+                "phrase_limit": settings.highlighter_phrase_limit,  # lower than default (256) for better memory performance  # noqa: B950
+                "order": "score",  # Best fragments first
+                "boundary_scanner": "chars",  # FVH needs 'chars'
+                "boundary_max_scan": settings.highlighter_boundary_max_scan,  # better sentence detection  # noqa: B950
+                # Explicit boundary chars added for csv/json/html/code raw text
+                "boundary_chars": '.\t\n ,!?;_-=(){}[]<>|"',
+                "no_match_size": settings.highlighter_no_match_size,  # Hard limit when no boundary/match found  # noqa: B950
+                "fragmenter": "span",  # More precise fragment boundaries
+                # "pre_tags": ["<em class='highlight-content'>"],
+                # "post_tags": ["</em>"],
+                "max_analyzed_offset": settings.highlighter_max_analyzed_offset,  # Handle large documents  # noqa: B950
+            }
+        else:
+            # Unified highlighter with sentence boundary scanner
+            highlighter = {
+                "type": "unified",
+                "fragment_size": settings.highlighter_fragment_size,
+                "number_of_fragments": count
+                or settings.highlighter_number_of_fragments,
+                "order": "score",
+                "boundary_scanner": "sentence",  # Use sentence boundary scanner
+                "no_match_size": settings.highlighter_no_match_size,
+                # "pre_tags": ["<em class='highlight-content'>"],
+                # "post_tags": ["</em>"],
+                "max_analyzed_offset": settings.highlighter_max_analyzed_offset,
+            }
         if query:
             highlighter["highlight_query"] = query
         return highlighter
