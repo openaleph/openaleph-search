@@ -31,19 +31,14 @@ NUMERIC_TYPES = (registry.number, registry.date)
 ANALYZE_SETTINGS = {
     "analysis": {
         "char_filter": {
-            "remove_special_chars": {
+            "remove_punctuation": {
                 "type": "pattern_replace",
-                "pattern": "[^\\p{L}\\p{N}\\s]",
-                "replacement": "",
+                "pattern": "[^\\p{L}\\p{N}]",
+                "replacement": " ",
             },
             "squash_spaces": {
                 "type": "pattern_replace",
-                "pattern": "[\\r\\n\\s]+",
-                "replacement": " ",
-            },
-            "remove_html_tags": {
-                "type": "pattern_replace",
-                "pattern": "<[^>]*>",
+                "pattern": "\\s+",
                 "replacement": " ",
             },
         },
@@ -54,19 +49,11 @@ ANALYZE_SETTINGS = {
             },
             NAME_KW_NORMALIZER: {
                 "type": "custom",
-                "char_filter": [
-                    "remove_special_chars",
-                    "squash_spaces",
-                    "remove_html_tags",
-                ],
+                "char_filter": ["remove_punctuation", "squash_spaces"],
                 "filter": ["lowercase", "asciifolding", "trim"],
             },
             KW_NORMALIZER: {
                 "type": "custom",
-                "char_filter": [
-                    "remove_html_tags",
-                    "squash_spaces",
-                ],
                 "filter": ["trim"],
             },
         },
@@ -81,7 +68,7 @@ ANALYZE_SETTINGS = {
             },
             HTML_ANALYZER: {
                 "tokenizer": "standard",
-                "char_filter": ["html_strip", "squash_spaces"],
+                "char_filter": ["html_strip"],
                 "filter": ["lowercase", "asciifolding", "trim"],
             },
         },

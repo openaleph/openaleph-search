@@ -192,6 +192,17 @@ def test_mapping_analyzer():
     )
     assert tokens == {"vladimir putin"}
 
+    # Test names field with punctuation and numbers - should preserve numbers, remove punctuation
+    tokens = _get_tokens(
+        es.indices.analyze(index=index, field="names", text="Agent 007!")
+    )
+    assert tokens == {"agent 007"}
+
+    tokens = _get_tokens(
+        es.indices.analyze(index=index, field="names", text="John O'Connor-Smith & Co.")
+    )
+    assert tokens == {"john o connor smith co"}
+
     # content field with ICU and html strip
     tokens = _get_tokens(
         es.indices.analyze(
