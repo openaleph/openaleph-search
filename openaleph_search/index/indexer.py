@@ -112,42 +112,53 @@ async def bulk_actions_async(
     max_concurrency: int | None = settings.indexer_concurrency,
     sync: bool | None = False,
 ):
-    """Process chunks as they complete with optimized memory usage and task management."""
+    """Process chunks as they complete to limit memory usage."""
     start = datetime.now()
+    es = await get_async_es()
     actions = logged_items(actions, "Loading", 10_000, item_name="doc", logger=log)
     chunks = itertools.batched(actions, n=chunk_size or settings.indexer_chunk_size)
     max_concurrency = max_concurrency or settings.indexer_concurrency
     semaphore = asyncio.Semaphore(max_concurrency)
 
-    # Single ES client with built-in round-robin load balancing
-    es = await get_async_es()
-
-    async def process_chunk_with_semaphore(chunk_list):
+    async def process_chunk_with_semaphore(chunk):
         async with semaphore:
-            return await process_chunk(es, chunk_list, sync)
+            return await process_chunk(es, chunk, sync)
 
     success = 0
     errors = 0
+    pending_tasks = set()
 
     try:
-        # Create all tasks upfront but process them as they complete
-        tasks = []
         for chunk in chunks:
-            # Convert chunk to list only once, avoiding repeated materialization
-            chunk_list = list(chunk)
-            if chunk_list:  # Only create task if chunk is not empty
-                task = asyncio.create_task(process_chunk_with_semaphore(chunk_list))
-                tasks.append(task)
+            # Create task
+            task = asyncio.create_task(process_chunk_with_semaphore(list(chunk)))
+            pending_tasks.add(task)
 
-        # Process tasks as they complete using asyncio.as_completed for better efficiency
-        for completed_task in asyncio.as_completed(tasks):
-            try:
-                result = await completed_task
-                success += result[0]
-                errors += len(result[1])
-            except Exception as e:
-                log.error(f"Chunk processing failed: {e}")
-                errors += 1
+            # Process completed tasks when we hit concurrency limit
+            if len(pending_tasks) >= max_concurrency:
+                done, pending_tasks = await asyncio.wait(
+                    pending_tasks, return_when=asyncio.FIRST_COMPLETED
+                )
+
+                for task in done:
+                    try:
+                        result = await task
+                        success += result[0]
+                        errors += len(result[1])
+                    except Exception as e:
+                        log.error(f"Chunk processing failed: {e}")
+                        errors += 1
+
+        # Process remaining tasks
+        if pending_tasks:
+            results = await asyncio.gather(*pending_tasks, return_exceptions=True)
+            for result in results:
+                if isinstance(result, Exception):
+                    log.error(f"Chunk processing failed: {result}")
+                    errors += 1
+                else:
+                    success += result[0]
+                    errors += len(result[1])
 
     finally:
         await es.close()
