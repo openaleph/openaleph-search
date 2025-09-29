@@ -66,16 +66,17 @@ def phonetic_names(schema: Schema, names: List[str]) -> Set[str]:
 def index_name_parts(schema: Schema, names: List[str]) -> Set[str]:
     """Generate a list of indexable name parts from the given names."""
     parts: Set[str] = set()
-    for name in names:
-        for token in clean_tokenize_name(schema, name):
-            if len(token) < 2:
-                continue
-            parts.add(token)
-            # TODO: put name and company symbol lookups here
-            if is_modern_alphabet(token):
-                ascii_token = ascii_text(token)
-                if ascii_token is not None and len(ascii_token) > 1:
-                    parts.add(ascii_token)
+    if schema.is_a("LegalEntity"):  # only include namy things
+        for name in names:
+            for token in clean_tokenize_name(schema, name):
+                if len(token) < 2:
+                    continue
+                parts.add(token)
+                # TODO: put name and company symbol lookups here
+                if is_modern_alphabet(token):
+                    ascii_token = ascii_text(token)
+                    if ascii_token is not None and len(ascii_token) > 1:
+                        parts.add(ascii_token)
     return parts
 
 

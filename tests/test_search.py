@@ -271,13 +271,13 @@ def test_search_name_parts():
     fp = "vladimir"
     query = _create_query(f"/search?filter:name_parts={fp}")
     result = query.search()
-    assert result["hits"]["total"]["value"] == 2
+    assert result["hits"]["total"]["value"] == 1
 
 
 def test_search_prefix():
     query = _create_query("/search?prefix=vla")
     result = query.search()
-    assert result["hits"]["total"]["value"] == 2
+    assert result["hits"]["total"]["value"] == 1
 
 
 def test_search_nonlatin():
