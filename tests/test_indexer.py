@@ -1,7 +1,10 @@
 from ftmq.util import make_entity
 
+from openaleph_search.core import get_es
 from openaleph_search.index.admin import clear_index
 from openaleph_search.index.entities import index_bulk, iter_entities
+from openaleph_search.index.util import bulk_indexing_mode
+from openaleph_search.settings import Settings
 from openaleph_search.transform.entity import format_entity
 
 
@@ -83,3 +86,50 @@ def test_indexer_with_context(cleanup_after):
     assert indexed_entity["role_id"] == 3
     assert indexed_entity["mutable"] is True
     assert indexed_entity["created_at"] == "2023-04-26"
+
+
+def test_temporary_refresh_interval(cleanup_after):
+    """Test temporarily setting refresh interval using bulk_indexing_mode."""
+    es = get_es()
+    settings = Settings()
+    index_pattern = f"{settings.index_prefix}-entity-*"
+
+    # Use bulk_indexing_mode to temporarily change interval
+    with bulk_indexing_mode(refresh_interval="15m"):
+        # Check that settings were changed inside the context
+        temp_settings = es.indices.get_settings(index=index_pattern)
+        for index_name, index_settings in temp_settings.items():
+            refresh_interval = index_settings["settings"]["index"]["refresh_interval"]
+            assert refresh_interval == "15m"
+
+    # Check that settings were restored to configured default (not the previous "2s")
+    restored_settings = es.indices.get_settings(index=index_pattern)
+    for index_name, index_settings in restored_settings.items():
+        refresh_interval = index_settings["settings"]["index"]["refresh_interval"]
+        assert refresh_interval == settings.index_refresh_interval
+
+
+def test_bulk_indexing_mode(cleanup_after):
+    """Test the bulk indexing mode context manager."""
+    es = get_es()
+    settings = Settings()
+    index_pattern = f"{settings.index_prefix}-entity-*"
+
+    # Use bulk indexing mode context manager
+    with bulk_indexing_mode("300s"):
+        # Check that bulk settings were applied inside the context
+        bulk_settings = es.indices.get_settings(index=index_pattern)
+        for index_name, index_settings in bulk_settings.items():
+            idx_settings = index_settings["settings"]["index"]
+            assert idx_settings["refresh_interval"] == "300s"
+            assert idx_settings["translog"]["durability"] == "async"
+            assert idx_settings["translog"]["sync_interval"] == "60s"
+            assert idx_settings["number_of_replicas"] == "0"
+
+    # Check that settings were restored to configured defaults
+    restored_settings = es.indices.get_settings(index=index_pattern)
+    for index_name, index_settings in restored_settings.items():
+        idx_settings = index_settings["settings"]["index"]
+        assert idx_settings["refresh_interval"] == settings.index_refresh_interval
+        assert idx_settings["translog"]["durability"] == "request"
+        assert idx_settings["number_of_replicas"] == str(settings.index_replicas)

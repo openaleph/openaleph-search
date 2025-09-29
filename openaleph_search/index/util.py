@@ -1,7 +1,10 @@
+import contextlib
+
 from anystore.logging import get_logger
 from anystore.types import SDict
 from banal import ensure_list
 
+from openaleph_search.core import get_es
 from openaleph_search.index.mapping import ANALYZE_SETTINGS
 from openaleph_search.settings import Settings
 
@@ -76,7 +79,9 @@ def index_settings(
         "index": {
             "number_of_shards": str(shards),
             "number_of_replicas": str(replicas),
-            "refresh_interval": "10ms" if settings.testing else "1s",
+            "refresh_interval": (
+                "10ms" if settings.testing else settings.index_refresh_interval
+            ),
             "similarity": {
                 # We use this for names, to avoid over-penalizing entities with many names.
                 "weak_length_norm": {
@@ -88,3 +93,80 @@ def index_settings(
             },
         },
     }
+
+
+@contextlib.contextmanager
+def bulk_indexing_mode(refresh_interval: str = "600s"):
+    """Context manager for bulk indexing with optimized settings.
+
+    Phase 1: Sets optimized settings for maximum bulk indexing performance:
+    - Async translog for better write performance
+    - Longer sync and refresh intervals
+    - No replicas during bulk load
+
+    Phase 2: Restores normal production settings after bulk operations complete:
+    - Request-level translog durability
+    - Normal refresh interval
+    - Configured number of replicas
+
+    Args:
+        refresh_interval: The refresh interval to use during bulk operations (default: "600s")
+
+    Example:
+        with bulk_indexing_mode():
+            # Perform bulk operations with optimized settings
+            bulk_index_entities(large_entity_batch)
+        # Settings are automatically restored to normal production values
+    """
+    es = get_es()
+    index_pattern = f"{settings.index_prefix}-entity-*"
+
+    log.info("Entering bulk indexing mode with optimized settings")
+
+    # Phase 1: Set bulk indexing settings
+    bulk_settings = {
+        "index": {
+            "translog.durability": "async",
+            "translog.sync_interval": "60s",
+            "refresh_interval": refresh_interval,
+            "number_of_replicas": 0,
+        }
+    }
+
+    try:
+        res = es.indices.put_settings(index=index_pattern, body=bulk_settings)
+        if not check_response(index_pattern, res):
+            raise RuntimeError("Failed to set bulk indexing settings")
+
+        log.info(f"Set bulk indexing settings for entity indices: {index_pattern}")
+        yield
+
+    except Exception as e:
+        log.error(
+            f"Failed to set bulk indexing settings for entity indices {index_pattern}: {e}"
+        )
+        raise
+    finally:
+        # Phase 2: Restore normal settings
+        log.info("Exiting bulk indexing mode, restoring normal settings")
+
+        normal_settings = {
+            "index": {
+                "translog.durability": "request",
+                "refresh_interval": settings.index_refresh_interval,
+                "number_of_replicas": settings.index_replicas,
+            }
+        }
+
+        try:
+            res = es.indices.put_settings(index=index_pattern, body=normal_settings)
+            if check_response(index_pattern, res):
+                log.info(
+                    f"Restored normal settings for entity indices: {index_pattern}"
+                )
+            else:
+                log.error("Failed to restore normal settings after bulk indexing")
+        except Exception as e:
+            log.error(
+                f"Failed to restore normal settings for entity indices {index_pattern}: {e}"
+            )

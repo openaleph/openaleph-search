@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     max_retries: int = 3
     retry_on_timeout: bool = True
 
+    # Connection pool settings for AsyncElasticsearch
+    connection_pool_limit_per_host: int = 25
+
     indexer_concurrency: int = 8
     indexer_chunk_size: int = 1000
     indexer_max_chunk_bytes: int = 5 * 1024 * 1024  # 5mb
@@ -43,6 +46,7 @@ class Settings(BaseSettings):
     index_expand_clause_limit: int = 10
     index_delete_by_query_batchsize: int = 100
     index_namespace_ids: bool = True
+    index_refresh_interval: str = "1s"
 
     # configure different weights for indices
     index_boost_intervals: int = 1

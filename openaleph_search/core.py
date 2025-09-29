@@ -46,10 +46,15 @@ async def _get_async_client() -> AsyncElasticsearch:
         max_retries=settings.max_retries,
         retry_on_timeout=settings.retry_on_timeout,
         retry_on_status=[502, 503, 504],
+        connections_per_node=settings.connection_pool_limit_per_host,
     )
     await es.info()
     urls = [mask_uri(u) for u in urls]
-    log.info("Connected to AsyncElasticsearch", nodes=urls)
+    log.info(
+        "Connected to AsyncElasticsearch",
+        nodes=urls,
+        connections_per_node=settings.connection_pool_limit_per_host,
+    )
     return es
 
 
