@@ -51,15 +51,16 @@ def clean_tokenize_name(schema: Schema, name: str) -> List[str]:
 def phonetic_names(schema: Schema, names: List[str]) -> Set[str]:
     """Generate phonetic forms of the given names."""
     phonemes: Set[str] = set()
-    for name in names:
-        for token in clean_tokenize_name(schema, name):
-            if len(token) < 3 or not is_modern_alphabet(token):
-                continue
-            if token.isnumeric():
-                continue
-            phoneme = metaphone(ascii_text(token))
-            if len(phoneme) > 2:
-                phonemes.add(phoneme)
+    if schema.is_a("LegalEntity"):  # only include namy things
+        for name in names:
+            for token in clean_tokenize_name(schema, name):
+                if len(token) < 3 or not is_modern_alphabet(token):
+                    continue
+                if token.isnumeric():
+                    continue
+                phoneme = metaphone(ascii_text(token))
+                if len(phoneme) > 2:
+                    phonemes.add(phoneme)
     return phonemes
 
 
