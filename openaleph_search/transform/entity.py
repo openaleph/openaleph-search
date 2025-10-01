@@ -65,7 +65,11 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
     # Abstract entities can appear when profile fragments for a missing entity
     # are present.
     if entity.schema.abstract:
-        log.warning("Tried to index an abstract-typed entity: %r", entity)
+        log.warning(
+            "Tried to index an abstract-typed entity!",
+            schema=entity.schema.name,
+            entity_id=entity.id,
+        )
         return None
 
     dataset = valid_dataset(dataset)
