@@ -27,6 +27,12 @@ class Settings(BaseSettings):
         default=HttpUrl("http://localhost:9200"), alias="openaleph_elasticsearch_uri"
     )
 
+    ingest_uri: HttpUrl | list[HttpUrl] | None = Field(
+        default=None, alias="openaleph_elasticsearch_ingest_uri"
+    )
+    """Optional dedicated URI(s) for index operations (nodes with dedicated
+    ingest role). Falls back to uri if not set."""
+
     timeout: int = 60
     max_retries: int = 3
     retry_on_timeout: bool = True

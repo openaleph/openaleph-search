@@ -9,7 +9,11 @@ from anystore.logging import get_logger
 from elasticsearch import AsyncElasticsearch
 from elasticsearch.helpers import BulkIndexError, async_bulk, bulk
 
-from openaleph_search.core import get_async_es, get_es
+from openaleph_search.core import (
+    get_async_ingest_es,
+    get_es,
+    get_ingest_es,
+)
 from openaleph_search.index.util import (
     check_response,
     check_settings_changed,
@@ -61,7 +65,7 @@ def bulk_actions(
     applications"""
     # shortcut for 1 worker
     if max_concurrency == 1:
-        es = get_es()
+        es = get_ingest_es()
         return bulk(
             es,
             actions,
@@ -114,7 +118,7 @@ async def bulk_actions_async(
 ):
     """Process chunks as they complete to limit memory usage."""
     start = datetime.now()
-    es = await get_async_es()
+    es = await get_async_ingest_es()
     actions = logged_items(actions, "Loading", 10_000, item_name="doc", logger=log)
     chunks = itertools.batched(actions, n=chunk_size or settings.indexer_chunk_size)
     max_concurrency = max_concurrency or settings.indexer_concurrency
@@ -173,7 +177,7 @@ async def bulk_actions_async(
 @error_handler(logger=log, max_retries=settings.max_retries)
 def index_safe(index, id, body, sync=False, **kwargs):
     """Index a single document and retry until it has been stored."""
-    es = get_es()
+    es = get_ingest_es()
     refresh = refresh_sync(sync)
     es.index(index=index, id=id, body=body, refresh=refresh, **kwargs)
     body["id"] = str(id)
