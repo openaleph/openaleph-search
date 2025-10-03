@@ -377,7 +377,7 @@ def test_more_like_this_bucket_filtering():
     """Test that MoreLikeThisQuery only targets documents and pages buckets"""
     # Create a non-document entity (Person)
     person_entity = make_entity(
-        {"id": "person1", "schema": "Person", "properties": {"name": ["John Doe"]}}
+        {"id": "person1", "schema": "Person", "properties": {"name": ["Jane Doe"]}}
     )
 
     query = _create_mlt_query("/search", entity=person_entity)

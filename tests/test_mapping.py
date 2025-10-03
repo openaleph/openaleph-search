@@ -169,6 +169,22 @@ def test_mapping_spec():
     assert "names" in mapping["name"]["copy_to"]
     assert "dates" in mapping["birthDate"]["copy_to"]
 
+    # Caption properties should copy to the name field
+    assert (
+        "name" in mapping["name"]["copy_to"]
+    ), "name property should copy to name field"
+    # Check Document schema caption properties (fileName and title)
+    doc_mapping = make_schema_mapping(["Document"])
+    assert (
+        "name" in doc_mapping["fileName"]["copy_to"]
+    ), "fileName should copy to name field"
+    assert "name" in doc_mapping["title"]["copy_to"], "title should copy to name field"
+    # Check Person schema caption property (name)
+    person_mapping = make_schema_mapping(["Person"])
+    assert (
+        "name" in person_mapping["name"]["copy_to"]
+    ), "Person name should copy to name field"
+
     full_mapping = make_mapping(mapping)
     assert "date" in full_mapping["properties"]["numeric"]["properties"]
     assert "dates" in full_mapping["properties"]["numeric"]["properties"]

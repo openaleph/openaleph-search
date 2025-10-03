@@ -39,15 +39,6 @@ def _numeric_values(type_, values) -> list[float]:
     return [v for v in values if v is not None]
 
 
-def _caption_names(entity: EntityProxy) -> set[str]:
-    names: set[str] = set()
-    for prop_ in entity.schema.caption:
-        # prop = entity.schema.properties[prop_]
-        # if prop.type == registry.name:
-        names.update(entity.get(prop_))
-    return names
-
-
 def _get_symbols(entity: EntityProxy) -> set[str]:
     symbols = select_symbols(entity)  # pre-computed in earlier stage
     if symbols:
@@ -84,10 +75,6 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
     data[Field.SCHEMATA] = list(entity.schema.names)
     data[Field.CAPTION] = entity.caption
 
-    # actual displayable entity names
-    captions = list(_caption_names(entity))
-    if captions:
-        data[Field.NAME] = captions
     # all names, including mentioned ones, for lookups
     names = list(entity.names)
     symbols = list(_get_symbols(entity))

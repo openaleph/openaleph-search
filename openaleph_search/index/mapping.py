@@ -307,6 +307,8 @@ def make_schema_mapping(schemata: Iterable[SchemaType]) -> Mapping:
                 merged_props[name]["copy_to"].add(Field.TEXT)
             if prop.type.group:
                 merged_props[name]["copy_to"].add(prop.type.group)
+            if name in schema.caption:
+                merged_props[name]["copy_to"].add(Field.NAME)
 
     # clean up properties type
     properties: dict[str, MappingProperty] = {}
