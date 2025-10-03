@@ -85,21 +85,35 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
     data[Field.CAPTION] = entity.caption
 
     # actual displayable entity names
-    data[Field.NAME] = list(_caption_names(entity))
+    captions = list(_caption_names(entity))
+    if captions:
+        data[Field.NAME] = captions
     # all names, including mentioned ones, for lookups
     names = list(entity.names)
-    data[Field.NAME_SYMBOLS] = list(_get_symbols(entity))
-    data[Field.NAME_KEYS] = list(index_name_keys(entity.schema, names))
-    data[Field.NAME_PARTS] = list(index_name_parts(entity.schema, names))
-    data[Field.NAME_PHONETIC] = list(phonetic_names(entity.schema, names))
+    symbols = list(_get_symbols(entity))
+    if symbols:
+        data[Field.NAME_SYMBOLS] = symbols
+    name_keys = list(index_name_keys(entity.schema, names))
+    if name_keys:
+        data[Field.NAME_KEYS] = name_keys
+    name_parts = list(index_name_parts(entity.schema, names))
+    if name_parts:
+        data[Field.NAME_PARTS] = name_parts
+    name_phonetics = list(phonetic_names(entity.schema, names))
+    if name_phonetics:
+        data[Field.NAME_PHONETIC] = name_phonetics
 
     # Add tags from EntityProxy.context (they are added from aleph db before indexing)
-    data[Field.TAGS] = ensure_list(entity.context.get("tags"))
+    tags = ensure_list(entity.context.get("tags"))
+    if tags:
+        data[Field.TAGS] = tags
 
     # Slight hack: a magic property in followthemoney that gets taken out
     # of the properties and added straight to the index text.
     properties = data.get("properties", {})
-    data[Field.CONTENT] = properties.pop("indexText", [])
+    text = properties.pop("indexText", [])
+    if text:
+        data[Field.CONTENT] = text
 
     # length normalization
     data[Field.NUM_VALUES] = sum([len(v) for v in properties.values()])
@@ -111,10 +125,11 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
             values = entity.get(prop)
             numeric[prop.name] = _numeric_values(prop.type, values)
     # also cast group field for dates
-    numeric["dates"] = _numeric_values(
-        registry.date, entity.get_type_values(registry.date)
-    )
-    data[Field.NUMERIC] = numeric
+    dates = _numeric_values(registry.date, entity.get_type_values(registry.date))
+    if dates:
+        numeric["dates"] = dates
+    if numeric:
+        data[Field.NUMERIC] = numeric
 
     # geo data if entity is an Address
     if "latitude" in entity.schema.properties:
@@ -122,10 +137,16 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
 
     # Context data - from aleph system, not followthemoney. Probably deprecated soon
     if hasattr(entity, "context"):
-        data[Field.ROLE] = entity.context.get("role_id")
-        data[Field.PROFILE] = entity.context.get("profile_id")
-        data[Field.MUTABLE] = entity.context.get("mutable", False)
-        data[Field.ORIGIN] = ensure_list(entity.context.get("origin"))
+        role_id = entity.context.get("role_id")
+        if role_id:
+            data[Field.ROLE] = role_id
+        profile_id = entity.context.get("profile_id")
+        if profile_id:
+            data[Field.PROFILE] = profile_id
+        origin = ensure_list(entity.context.get("origin"))
+        if origin:
+            data[Field.ORIGIN] = origin
+        data[Field.MUTABLE] = entity.context.get("mutable", False) or False
         # Logical simplifications of dates:
         created_at = ensure_list(entity.context.get("created_at"))
         if len(created_at) > 0:
