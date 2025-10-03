@@ -14,9 +14,9 @@ from anystore.util import Took, dump_json
 from ftmq.io import smart_read_proxies
 from rich import print
 
-from openaleph_search.index import admin, entities
+from openaleph_search.index import admin, entities, export
 from openaleph_search.index.indexer import bulk_actions
-from openaleph_search.search.logic import search_body, search_query_string
+from openaleph_search.search.logic import make_parser, search_body, search_query_string
 from openaleph_search.settings import Settings, __version__
 from openaleph_search.transform.entity import format_parallel
 
@@ -30,6 +30,16 @@ log = get_logger(__name__)
 OPT_INPUT_URI = typer.Option("-", "-i", help="Input uri, default stdin")
 OPT_OUTPUT_URI = typer.Option("-", "-o", help="Output uri, default stdout")
 OPT_DATASET = typer.Option(..., "-d", help="Dataset")
+
+OPT_SEARCH_ARGS = Annotated[
+    Optional[str],
+    typer.Option(
+        help="Query parser args and filters (e.g. `filter:dataset=my_dataset`)"
+    ),
+]
+OPT_SEARCH_FORMAT = Annotated[
+    Optional[str], typer.Option(help="Output format (raw, parsed)")
+]
 
 
 @cli.callback(invoke_without_command=True)
@@ -98,15 +108,20 @@ def cli_index_actions(input_uri: str = OPT_INPUT_URI):
         log.info("Index actions complete.", input_uri=input_uri, took=t.took)
 
 
-OPT_SEARCH_ARGS = Annotated[
-    Optional[str],
-    typer.Option(
-        help="Query parser args and filters (e.g. `filter:dataset=my_dataset`)"
-    ),
-]
-OPT_SEARCH_FORMAT = Annotated[
-    Optional[str], typer.Option(help="Output format (raw, parsed)")
-]
+@cli.command("dump-actions")
+def cli_dump_actions(
+    output_uri: str = OPT_OUTPUT_URI,
+    index: str | None = None,
+    args: OPT_SEARCH_ARGS = None,
+):
+    """Export index documents (Actions) by given criteria. For entity indexes,
+    this DOESN'T include all necessary data to re-index!"""
+    with ErrorHandler(log):
+        parser = make_parser(args=args)
+        actions = logged_items(
+            export.export_index_actions(index, parser), "Export", 10_000, "Action", log
+        )
+        smart_write_json(output_uri, actions)
 
 
 @cli_search.command("query-string")

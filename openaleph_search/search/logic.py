@@ -11,6 +11,17 @@ from openaleph_search.parse.parser import SearchQueryParser
 from openaleph_search.query.queries import EntitiesQuery
 
 
+def make_parser(q: str | None = None, args: str | None = None) -> SearchQueryParser:
+    """Build a parser object from arbitrary query string and url args"""
+    if args:
+        _args = parse_qsl(args, keep_blank_values=True)
+    else:
+        _args = []
+    if q:
+        _args.insert(0, ("q", q))
+    return SearchQueryParser(_args)
+
+
 def search_query_string(q: str, args: str | None = None) -> ObjectApiResponse:
     """Search using `query_string` with optional parser args"""
     _args = parse_qsl(args, keep_blank_values=True)
