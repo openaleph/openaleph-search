@@ -16,7 +16,12 @@ from rich import print
 
 from openaleph_search.index import admin, entities, export
 from openaleph_search.index.indexer import bulk_actions
-from openaleph_search.search.logic import make_parser, search_body, search_query_string
+from openaleph_search.search.logic import (
+    analyze_text,
+    make_parser,
+    search_body,
+    search_query_string,
+)
 from openaleph_search.settings import Settings, __version__
 from openaleph_search.transform.entity import format_parallel
 
@@ -162,3 +167,31 @@ def cli_match(
     res = search_query_string(q, args)
     data = dump_json(dict(res), clean=True, newline=True)
     smart_write(output_uri, data)
+
+
+@cli.command("analyze")
+def cli_analyze(
+    input_uri: str = OPT_INPUT_URI,
+    field: Annotated[
+        str,
+        typer.Option(
+            help="Field to analyze with (e.g. 'content', 'text', 'properties.bodyText')"
+        ),
+    ] = "content",
+    schema: Annotated[
+        str, typer.Option(help="Schema to use for field analysis")
+    ] = "LegalEntity",
+    tokens_only: Annotated[
+        bool, typer.Option(help="Return only unique token strings")
+    ] = False,
+    output_uri: str = OPT_OUTPUT_URI,
+):
+    """Analyze text using Elasticsearch analyzers from field mappings"""
+    with ErrorHandler(log):
+        text = smart_read(input_uri, mode="r")
+        res = analyze_text(text, field=field, schema=schema, tokens_only=tokens_only)
+        if tokens_only:
+            data = "\n".join(sorted(res)) + "\n"
+        else:
+            data = dump_json(dict(res), clean=True, newline=True)
+        smart_write(output_uri, data)
