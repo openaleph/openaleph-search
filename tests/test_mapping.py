@@ -4,7 +4,10 @@ from followthemoney import EntityProxy, model
 
 from openaleph_search.core import get_es
 from openaleph_search.index.entities import index_proxy
-from openaleph_search.index.indexes import entities_read_index, schema_index
+from openaleph_search.index.indexes import (
+    entities_read_index,
+    make_schema_bucket_mapping,
+)
 from openaleph_search.index.mapping import (
     BASE_MAPPING,
     GROUP_MAPPING,
@@ -193,59 +196,15 @@ def test_mapping_spec():
     }
 
 
-def test_mapping_analyzer():
-    def _get_tokens(res) -> set[str]:
-        return {t["token"] for t in res["tokens"]}
-
-    es = get_es()
-    index = schema_index("LegalEntity", "v1")
-    tokens = _get_tokens(
-        es.indices.analyze(index=index, field="name", text="Vladimir Putin")
-    )
-    assert tokens == {"vladimir", "putin"}
-    tokens = _get_tokens(
-        es.indices.analyze(index=index, field="names", text="Vladimir Putin")
-    )
-    assert tokens == {"vladimir putin"}
-
-    # Test names field with punctuation and numbers - should preserve numbers, remove punctuation
-    tokens = _get_tokens(
-        es.indices.analyze(index=index, field="names", text="Agent 007!")
-    )
-    assert tokens == {"agent 007"}
-
-    tokens = _get_tokens(
-        es.indices.analyze(index=index, field="names", text="John O'Connor-Smith & Co.")
-    )
-    assert tokens == {"john o connor smith co"}
-
-    # content field with ICU and html strip
-    tokens = _get_tokens(
-        es.indices.analyze(
-            index=index, field="content", text="Владимир Владимирович Путин"
-        )
-    )
-    assert tokens == {"владимир", "путин", "владимирович"}
-    tokens = _get_tokens(
-        es.indices.analyze(
-            index=index, field="content", text="hello <h1 class='foo'>Félix!</h1>"
-        )
-    )
-    assert tokens == {"hello", "felix"}
-    # text field with squash spaces, html strip
-    tokens = _get_tokens(
-        es.indices.analyze(
-            index=index, field="text", text="hello \t <h1 class='foo'>Félix!  </h1>"
-        )
-    )
-    assert tokens == {"hello", "felix"}
-
-    # e.g. bodyText property with html
-    tokens = _get_tokens(
-        es.indices.analyze(
-            index=index,
-            field="properties.bodyText",
-            text="hello \t <h1 class='foo'>Félix!  </h1>",
-        )
-    )
-    assert tokens == {"class", "félix", "hello", "foo", "h1"}
+def test_mapping_schema_bucket():
+    # full text is stored only for Pages entities
+    mapping = make_schema_bucket_mapping("pages")
+    assert mapping["properties"]["content"]["store"] is True
+    mapping = make_schema_bucket_mapping("page")
+    assert mapping["properties"]["content"]["store"] is False
+    mapping = make_schema_bucket_mapping("documents")
+    assert mapping["properties"]["content"]["store"] is False
+    mapping = make_schema_bucket_mapping("intervals")
+    assert mapping["properties"]["content"]["store"] is False
+    mapping = make_schema_bucket_mapping("things")
+    assert mapping["properties"]["content"]["store"] is False

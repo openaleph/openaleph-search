@@ -59,6 +59,16 @@ class EntitiesQuery(Query):
     def get_inner_query(self) -> dict[str, Any]:
         return super().get_query()
 
+    def get_query_string(self) -> dict[str, Any] | None:
+        query = super().get_query_string()
+        if self.schemata != ["Page"]:
+            return query
+        if query:
+            # special case for Page (children of Pages) queries, where filter
+            # syntax would not match (e.g. 'names:"Jane" foo')
+            query["query_string"]["default_operator"] = "OR"
+            return query
+
     def get_negative_filters(self) -> list[dict[str, Any]]:
         # exclude hidden schemata unless we explicitly want them
         filters = super().get_negative_filters()

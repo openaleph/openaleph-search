@@ -162,7 +162,7 @@ def test_export_with_stored_content(cleanup_after):
     # Create entity with indexText (maps to content field)
     entity_data = {
         "id": "test-with-content",
-        "schema": "PlainText",
+        "schema": "Pages",
         "properties": {
             "fileName": ["document.txt"],
             "indexText": ["This is the full text content that should be stored."],

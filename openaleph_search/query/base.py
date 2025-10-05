@@ -326,18 +326,20 @@ class Query:
                                 }
                             }
                         )
+        fields = {
+            self.HIGHLIGHT_FIELD: get_highlighter(
+                self.HIGHLIGHT_FIELD, query, self.parser.highlight_count
+            ),
+            Field.NAMES: get_highlighter(Field.NAME),
+            Field.NAMES: get_highlighter(Field.NAMES),
+        }
+        if Field.TEXT not in fields:
+            fields[Field.TEXT] = get_highlighter(Field.TEXT, query)
         return {
             "encoder": "html",
             # "max_fragment_length": 1000,
             "require_field_match": False,
-            "fields": {
-                self.HIGHLIGHT_FIELD: get_highlighter(
-                    self.HIGHLIGHT_FIELD, query, self.parser.highlight_count
-                ),
-                Field.NAMES: get_highlighter(Field.NAME),
-                Field.NAMES: get_highlighter(Field.NAMES),
-                Field.TEXT: get_highlighter(Field.TEXT, query),
-            },
+            "fields": fields,
         }
 
     def get_source(self) -> dict[str, Any]:

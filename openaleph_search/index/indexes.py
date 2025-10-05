@@ -16,15 +16,17 @@ from openaleph_search.util import SchemaType, ensure_schema
 log = logging.getLogger(__name__)
 settings = Settings()
 
-Bucket: TypeAlias = Literal["pages", "documents", "intervals", "things"]
-BUCKETS = ("pages", "documents", "intervals", "things")
+Bucket: TypeAlias = Literal["page", "pages", "documents", "intervals", "things"]
+BUCKETS = ("page", "pages", "documents", "intervals", "things")
 
 
 @cache
 def schema_bucket(schema: SchemaType) -> Bucket:
     """Convert a schema to its index bucket"""
     schema = ensure_schema(schema)
-    if schema.name in ("Page", "Pages"):
+    if schema.name == "Page":
+        return "page"
+    if schema.name == "Pages":
         return "pages"
     if schema.is_a("Document"):
         return "documents"
@@ -112,6 +114,8 @@ def make_schema_bucket_mapping(bucket: Bucket) -> dict[str, Any]:
     if bucket == "pages":
         # store full text for highlighting
         mapping["properties"][Field.CONTENT]["store"] = True
+    else:
+        mapping["properties"][Field.CONTENT]["store"] = False
     return mapping
 
 

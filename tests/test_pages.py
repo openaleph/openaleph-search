@@ -25,6 +25,9 @@ def test_pages_mapping():
     mapping = make_schema_bucket_mapping("pages")
     assert mapping["properties"]["content"]["store"] is True
 
+    mapping = make_schema_bucket_mapping("page")
+    assert mapping["properties"]["content"]["store"] is False
+
 
 def test_pages(fixture_pages, cleanup_after):
     index_bulk("test_pages", fixture_pages)

@@ -142,8 +142,7 @@ class FieldType:
             "with_positions_offsets" if settings.content_term_vectors else False
         ),
     }
-    # additional text copied over from other properties for arbitrary lookups,
-    # default analyzer
+    # additional text copied over from other properties for arbitrary lookups
     TEXT = {"type": "text", "analyzer": HTML_ANALYZER, "search_analyzer": HTML_ANALYZER}
 
     KEYWORD = {"type": "keyword", "normalizer": KW_NORMALIZER}
