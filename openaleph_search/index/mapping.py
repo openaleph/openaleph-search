@@ -238,7 +238,10 @@ BASE_MAPPING = {
     # index metadata
     Field.INDEX_BUCKET: {**FieldType.KEYWORD, "index": False},
     Field.INDEX_VERSION: {**FieldType.KEYWORD, "index": False},
-    Field.INDEX_TS: {**FieldType.DATE, "index": False},
+    Field.INDEX_TS: {
+        **FieldType.DATE,
+        "index": True,
+    },  # we might want to filter on this
 }
 
 # combined fields for emails, countries, ...
