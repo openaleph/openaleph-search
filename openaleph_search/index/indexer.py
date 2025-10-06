@@ -1,19 +1,12 @@
-import asyncio
-import itertools
 from datetime import datetime
 from typing import Any, Generator, Iterable, TypeAlias, TypedDict
 
 from anystore.decorators import error_handler
 from anystore.io import logged_items
 from anystore.logging import get_logger
-from elasticsearch import AsyncElasticsearch
-from elasticsearch.helpers import BulkIndexError, async_bulk, bulk
+from elasticsearch.helpers import BulkIndexError, parallel_bulk
 
-from openaleph_search.core import (
-    get_async_ingest_es,
-    get_es,
-    get_ingest_es,
-)
+from openaleph_search.core import get_es, get_ingest_es
 from openaleph_search.index.util import (
     check_response,
     check_settings_changed,
@@ -61,40 +54,44 @@ def bulk_actions(
     max_concurrency: int | None = settings.indexer_concurrency,
     sync: bool | None = False,
 ):
-    """Bulk indexing with parallel async processing - entry point for sync
-    applications"""
-    # shortcut for 1 worker
-    if max_concurrency == 1:
-        es = get_ingest_es()
-        return bulk(
+    """Bulk indexing with parallel processing using thread pool.
+
+    Uses elasticsearch.helpers.parallel_bulk for efficient parallel indexing
+    with controlled concurrency via thread pool.
+    """
+    start = datetime.now()
+    es = get_ingest_es()
+    chunk_size = chunk_size or settings.indexer_chunk_size
+    max_concurrency = max_concurrency or settings.indexer_concurrency
+
+    # Add logging wrapper
+    actions = logged_items(actions, "Loading", 10_000, item_name="doc", logger=log)
+
+    success = 0
+    errors = 0
+
+    try:
+        # parallel_bulk yields (success, info) tuples for each action
+        for ok, info in parallel_bulk(
             es,
             actions,
-            max_retries=settings.max_retries,
-            chunk_size=settings.indexer_chunk_size,
+            thread_count=max_concurrency,
+            chunk_size=chunk_size,
             max_chunk_bytes=settings.indexer_max_chunk_bytes,
-        )
-
-    return asyncio.run(bulk_actions_async(actions, chunk_size, max_concurrency, sync))
-
-
-@error_handler(logger=log, max_retries=settings.max_retries)
-async def process_chunk(es: AsyncElasticsearch, chunk_actions, sync: bool):
-    try:
-        result = await async_bulk(
-            es,
-            chunk_actions,
-            max_retries=settings.max_retries,
+            raise_on_error=False,
             refresh=refresh_sync(sync),
-            timeout=f"{MAX_REQUEST_TIMEOUT}s",
-            chunk_size=settings.indexer_chunk_size,
-            max_chunk_bytes=settings.indexer_max_chunk_bytes,
-        )
-        success, failed = result
-        for failure in failed:
-            if failure.get("delete", {}).get("status") == 404:
-                continue
-            log.warning("Bulk index error: %r" % failure)
-        return success, failed
+            request_timeout=MAX_REQUEST_TIMEOUT,
+        ):
+            if ok:
+                success += 1
+            else:
+                errors += 1
+                # info contains error details for failed operations
+                action, error_info = info.popitem()
+                # Skip 404 errors for delete operations
+                if action == "delete" and error_info.get("status") == 404:
+                    continue
+                log.warning("Bulk index error: %s - %r" % (action, error_info))
     except BulkIndexError as e:
         log.error(f"BulkIndexError: {len(e.errors)} document(s) failed to index")
         log.error(f"Error details: {e}")
@@ -106,72 +103,15 @@ async def process_chunk(es: AsyncElasticsearch, chunk_actions, sync: bool):
         if len(e.errors) > 10:
             log.error(f"... and {len(e.errors) - 10} more errors (truncated)")
 
-        # Re-raise the exception to maintain existing error handling
         raise
-
-
-async def bulk_actions_async(
-    actions: Actions,
-    chunk_size: int | None = settings.indexer_chunk_size,
-    max_concurrency: int | None = settings.indexer_concurrency,
-    sync: bool | None = False,
-):
-    """Process chunks as they complete to limit memory usage."""
-    start = datetime.now()
-    es = await get_async_ingest_es()
-    actions = logged_items(actions, "Loading", 10_000, item_name="doc", logger=log)
-    chunks = itertools.batched(actions, n=chunk_size or settings.indexer_chunk_size)
-    max_concurrency = max_concurrency or settings.indexer_concurrency
-    semaphore = asyncio.Semaphore(max_concurrency)
-
-    async def process_chunk_with_semaphore(chunk):
-        async with semaphore:
-            return await process_chunk(es, chunk, sync)
-
-    success = 0
-    errors = 0
-    pending_tasks = set()
-
-    try:
-        for chunk in chunks:
-            # Create task
-            task = asyncio.create_task(process_chunk_with_semaphore(list(chunk)))
-            pending_tasks.add(task)
-
-            # Process completed tasks when we hit concurrency limit
-            if len(pending_tasks) >= max_concurrency:
-                done, pending_tasks = await asyncio.wait(
-                    pending_tasks, return_when=asyncio.FIRST_COMPLETED
-                )
-
-                for task in done:
-                    try:
-                        result = await task
-                        success += result[0]
-                        errors += len(result[1])
-                    except Exception as e:
-                        log.error(f"Chunk processing failed: {e}")
-                        errors += 1
-
-        # Process remaining tasks
-        if pending_tasks:
-            results = await asyncio.gather(*pending_tasks, return_exceptions=True)
-            for result in results:
-                if isinstance(result, Exception):
-                    log.error(f"Chunk processing failed: {result}")
-                    errors += 1
-                else:
-                    success += result[0]
-                    errors += len(result[1])
-
-    finally:
-        await es.close()
 
     end = datetime.now()
     log.info(
         "Bulk indexing completed: %d successful, %d failed" % (success, errors),
         took=end - start,
     )
+
+    return success, errors
 
 
 @error_handler(logger=log, max_retries=settings.max_retries)
