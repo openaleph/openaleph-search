@@ -2,7 +2,7 @@ from ftmq.util import make_entity
 
 from openaleph_search.core import get_es
 from openaleph_search.index.admin import clear_index
-from openaleph_search.index.entities import index_bulk, iter_entities
+from openaleph_search.index.entities import index_bulk, iter_entities, iter_entity_ids
 from openaleph_search.index.util import bulk_indexing_mode
 from openaleph_search.settings import Settings
 from openaleph_search.transform.entity import format_entity
@@ -86,6 +86,47 @@ def test_indexer_with_context(cleanup_after):
     assert indexed_entity["role_id"] == 3
     assert indexed_entity["mutable"] is True
     assert indexed_entity["created_at"] == "2023-04-26"
+
+
+def test_iter_entity_ids(entities, cleanup_after):
+    # clear
+    clear_index()
+
+    # Index entities from fixture
+    index_bulk("test_dataset", entities)
+
+    # Get all entity IDs
+    entity_ids = list(iter_entity_ids())
+    assert len(entity_ids) == 21
+
+    # Verify IDs match the indexed entities
+    expected_ids = {e.id for e in entities}
+    actual_ids = set(entity_ids)
+    assert actual_ids == expected_ids
+
+    # Test filtering by dataset
+    # Create separate entities for other dataset to avoid overwriting
+    other_entities = [
+        make_entity(
+            {
+                "id": f"other-{i}",
+                "schema": "Person",
+                "properties": {"name": [f"Person {i}"]},
+            }
+        )
+        for i in range(5)
+    ]
+    index_bulk("other_dataset", other_entities)
+
+    test_dataset_ids = list(iter_entity_ids(dataset="test_dataset"))
+    assert len(test_dataset_ids) == 21
+
+    other_dataset_ids = list(iter_entity_ids(dataset="other_dataset"))
+    assert len(other_dataset_ids) == 5
+
+    # Verify total count includes both datasets
+    all_ids = list(iter_entity_ids())
+    assert len(all_ids) == 26
 
 
 def test_temporary_refresh_interval(cleanup_after):

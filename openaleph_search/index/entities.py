@@ -103,6 +103,40 @@ def iter_entities(
             yield entity
 
 
+def iter_entity_ids(
+    auth: SearchAuth | None = None,
+    dataset: str | None = None,
+    collection_id: str | None = None,
+    schemata=None,
+    filters=None,
+    sort=None,
+    es_scroll="5m",
+    es_scroll_size=10000,
+):
+    """Scan entity IDs matching the given criteria (no source fields fetched)."""
+    query = {
+        "query": _entities_query(filters, auth, dataset, collection_id, schemata),
+        "_source": False,  # Don't fetch any source fields - much faster
+    }
+    preserve_order = False
+    if sort is not None:
+        query["sort"] = ensure_list(sort)
+        preserve_order = True
+    index = entities_read_index(schema=schemata)
+    es = get_es()
+    for res in scan(
+        es,
+        index=index,
+        query=query,
+        timeout=MAX_TIMEOUT,
+        request_timeout=MAX_REQUEST_TIMEOUT,
+        preserve_order=preserve_order,
+        scroll=es_scroll,
+        size=es_scroll_size,
+    ):
+        yield res["_id"]
+
+
 def iter_proxies(**kw):
     for data in iter_entities(**kw):
         schema = model.get(data.get("schema"))
