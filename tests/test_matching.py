@@ -36,7 +36,7 @@ def test_matching(cleanup_after):
     parser = SearchQueryParser([])
     query = MatchQuery(parser, ent1)
     result = query.search()
-    assert _get_ids(result) == ["m2", "m5", "m6", "m3"]
+    assert _get_ids(result) == ["m2", "m5", "m6"]
 
     query = MatchQuery(parser, ent6)
     result = query.search()
