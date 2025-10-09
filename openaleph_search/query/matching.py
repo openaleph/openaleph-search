@@ -76,17 +76,41 @@ def names_query(schema: Schema, names: list[str]) -> Clauses:
             }
         }
         shoulds.append({"match": match})
+
+    # For keys, parts, phonetics and symbols we should match more than 1 token:
+
+    name_keys_clauses = []
     for key in index_name_keys(schema, names):
         term = {Field.NAME_KEYS: {"value": key, "boost": 4.0}}
-        shoulds.append({"term": term})
+        name_keys_clauses.append({"term": term})
+    if name_keys_clauses:
+        shoulds.append(
+            {"bool": {"should": name_keys_clauses, "minimum_should_match": 2}}
+        )
+
+    name_parts_clauses = []
     for token in index_name_parts(schema, names):
         term = {Field.NAME_PARTS: {"value": token, "boost": 1.0}}
-        shoulds.append({"term": term})
+        name_parts_clauses.append({"term": term})
+    if name_parts_clauses:
+        shoulds.append(
+            {"bool": {"should": name_parts_clauses, "minimum_should_match": 2}}
+        )
+
+    name_phonetic_clauses = []
     for phoneme in phonetic_names(schema, names):
         term = {Field.NAME_PHONETIC: {"value": phoneme, "boost": 0.8}}
-        shoulds.append({"term": term})
+        name_phonetic_clauses.append({"term": term})
+    if name_phonetic_clauses:
+        shoulds.append(
+            {"bool": {"should": name_phonetic_clauses, "minimum_should_match": 2}}
+        )
+
+    symbols_clauses = []
     for symbol in get_name_symbols(schema, *names):
-        shoulds.append({"term": {Field.NAME_SYMBOLS: str(symbol)}})
+        symbols_clauses.append({"term": {Field.NAME_SYMBOLS: str(symbol)}})
+    if symbols_clauses:
+        shoulds.append({"bool": {"should": symbols_clauses, "minimum_should_match": 2}})
 
     return shoulds
 
