@@ -79,14 +79,9 @@ def names_query(schema: Schema, names: list[str]) -> Clauses:
 
     # For keys, parts, phonetics and symbols we should match more than 1 token:
 
-    name_keys_clauses = []
     for key in index_name_keys(schema, names):
-        term = {Field.NAME_KEYS: {"value": key, "boost": 4.0}}
-        name_keys_clauses.append({"term": term})
-    if name_keys_clauses:
-        shoulds.append(
-            {"bool": {"should": name_keys_clauses, "minimum_should_match": 2}}
-        )
+        term = {Field.NAME_KEYS: {"value": key, "boost": 2.5}}
+        shoulds.append({"term": term})
 
     name_parts_clauses = []
     for token in index_name_parts(schema, names):
