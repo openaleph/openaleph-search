@@ -18,13 +18,23 @@ from rigour.text.scripts import is_modern_alphabet
 log = get_logger(__name__)
 
 
+def _clean_number(val: str) -> str:
+    try:
+        return str(float(val))
+    except ValueError:
+        return str(float(val.replace(",", ".")))
+
+
 def get_geopoints(entity: EntityProxy) -> list[dict[str, str]]:
     """Get lon/lat pairs for indexing to `geo_point` field"""
     points = []
     lons = entity.get("longitude", quiet=True)
     lats = entity.get("latitude", quiet=True)
     for lon, lat in itertools.product(lons, lats):
-        points.append({"lon": lon, "lat": lat})
+        try:
+            points.append({"lon": _clean_number(lon), "lat": _clean_number(lat)})
+        except ValueError:
+            pass
     return points
 
 
