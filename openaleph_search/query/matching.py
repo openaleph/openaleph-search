@@ -77,35 +77,36 @@ def names_query(schema: Schema, names: list[str]) -> Clauses:
         }
         shoulds.append({"match": match})
 
-    # For keys, parts, phonetics and symbols we should match more than 1 token:
+    # For parts, phonetics and symbols we should match more than 1 token:
 
     for key in index_name_keys(schema, names):
         term = {Field.NAME_KEYS: {"value": key, "boost": 2.5}}
         shoulds.append({"term": term})
 
-    name_parts_clauses = []
+    parts = []
     for token in index_name_parts(schema, names):
         term = {Field.NAME_PARTS: {"value": token, "boost": 1.0}}
-        name_parts_clauses.append({"term": term})
-    if name_parts_clauses:
-        shoulds.append(
-            {"bool": {"should": name_parts_clauses, "minimum_should_match": 2}}
-        )
+        parts.append({"term": term})
+    if parts:
+        min_match = 2 if len(parts) >= 2 else 1
+        shoulds.append({"bool": {"should": parts, "minimum_should_match": min_match}})
 
-    name_phonetic_clauses = []
+    phonetics = []
     for phoneme in phonetic_names(schema, names):
         term = {Field.NAME_PHONETIC: {"value": phoneme, "boost": 0.8}}
-        name_phonetic_clauses.append({"term": term})
-    if name_phonetic_clauses:
+        phonetics.append({"term": term})
+    if phonetics:
+        min_match = 2 if len(phonetics) >= 2 else 1
         shoulds.append(
-            {"bool": {"should": name_phonetic_clauses, "minimum_should_match": 2}}
+            {"bool": {"should": phonetics, "minimum_should_match": min_match}}
         )
 
-    symbols_clauses = []
+    symbols = []
     for symbol in get_name_symbols(schema, *names):
-        symbols_clauses.append({"term": {Field.NAME_SYMBOLS: str(symbol)}})
-    if symbols_clauses:
-        shoulds.append({"bool": {"should": symbols_clauses, "minimum_should_match": 2}})
+        symbols.append({"term": {Field.NAME_SYMBOLS: str(symbol)}})
+    if symbols:
+        min_match = 2 if len(symbols) >= 2 else 1
+        shoulds.append({"bool": {"should": symbols, "minimum_should_match": min_match}})
 
     return shoulds
 
@@ -143,10 +144,14 @@ def match_query(
     if len(must_not):
         query["bool"]["must_not"].extend(must_not)
 
+    # Only matchable schemata:
+    schemata = [s.name for s in entity.schema.matchable_schemata]
+    query["bool"]["filter"].append({"terms": {Field.SCHEMA: schemata}})
+
     if collection_ids:
-        query["bool"]["filter"].append({"terms": {"collection_id": collection_ids}})
+        query["bool"]["filter"].append({"terms": {Field.COLLECTION_ID: collection_ids}})
     elif datasets:
-        query["bool"]["filter"].append({"terms": {"dataset": datasets}})
+        query["bool"]["filter"].append({"terms": {Field.DATASET: datasets}})
 
     # match on magic names
     names = entity.get_type_values(registry.name, matchable=True)

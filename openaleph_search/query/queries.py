@@ -147,12 +147,8 @@ class MatchQuery(EntitiesQuery):
         super(MatchQuery, self).__init__(parser)
 
     def get_index(self):
-        # Attempt to find only matches within the "matchable" set of
-        # entity schemata. For example, a Company and be matched to
-        # another company or a LegalEntity, but not a Person.
-        # Real estate is "unmatchable", i.e. even if two plots of land
-        # have almost the same name and criteria, it does not make
-        # sense to suggest they are the same.
+        # Attempt to find only matches within the "matchable" set of entity
+        # schemata. In practice this should always return the "things" index.
         schemata = list(self.entity.schema.matchable_schemata)
         return entities_read_index(schema=schemata)
 
