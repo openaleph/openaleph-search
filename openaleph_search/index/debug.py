@@ -355,7 +355,7 @@ async def bulk_actions_async_debug(
 
             # Process completed tasks when we hit concurrency limit
             if len(pending_tasks) >= max_concurrency:
-                log.debug(
+                log.info(
                     f"[Main Loop] Hit concurrency limit "
                     f"({len(pending_tasks)}/{max_concurrency}), "
                     f"waiting for completion..."
@@ -370,7 +370,10 @@ async def bulk_actions_async_debug(
                         timeout=chunk_timeout * 2,  # Allow 2x chunk timeout
                     )
 
-                    log.debug(
+                    # Update monitor's reference to the new pending_tasks set
+                    pending_tasks_ref["tasks"] = pending_tasks
+
+                    log.info(
                         f"[Main Loop] {len(done)} tasks completed, "
                         f"{len(pending_tasks)} still pending"
                     )
