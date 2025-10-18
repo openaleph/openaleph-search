@@ -108,6 +108,7 @@ async def process_chunk(es: AsyncElasticsearch, chunk_actions, sync: bool):
             max_retries=settings.max_retries,
             refresh=refresh_sync(sync),
             timeout=f"{MAX_REQUEST_TIMEOUT}s",
+            request_timeout=MAX_REQUEST_TIMEOUT,  # Client-side timeout
             chunk_size=settings.indexer_chunk_size,
             max_chunk_bytes=settings.indexer_max_chunk_bytes,
         )
