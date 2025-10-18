@@ -60,9 +60,23 @@ def bulk_actions(
     chunk_size: int | None = settings.indexer_chunk_size,
     max_concurrency: int | None = settings.indexer_concurrency,
     sync: bool | None = False,
+    debug: bool | None = None,
 ):
     """Bulk indexing with parallel async processing - entry point for sync
-    applications"""
+    applications
+
+    Args:
+        actions: Iterator/iterable of actions to index
+        chunk_size: Number of actions per chunk
+        max_concurrency: Maximum number of concurrent chunks
+        sync: Whether to refresh index after operations
+        debug: Enable instrumented debug version with extensive logging.
+               If None (default), uses settings.indexer_debug
+    """
+    # Use setting default if not explicitly specified
+    if debug is None:
+        debug = settings.indexer_debug
+
     # shortcut for 1 worker
     if max_concurrency == 1:
         es = get_ingest_es()
@@ -72,6 +86,14 @@ def bulk_actions(
             max_retries=settings.max_retries,
             chunk_size=settings.indexer_chunk_size,
             max_chunk_bytes=settings.indexer_max_chunk_bytes,
+        )
+
+    # Use debug version if requested
+    if debug:
+        from openaleph_search.index.debug import bulk_actions_async_debug
+
+        return asyncio.run(
+            bulk_actions_async_debug(actions, chunk_size, max_concurrency, sync)
         )
 
     return asyncio.run(bulk_actions_async(actions, chunk_size, max_concurrency, sync))
