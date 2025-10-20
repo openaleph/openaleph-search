@@ -176,17 +176,34 @@ def test_bulk_indexing_mode(cleanup_after):
         assert idx_settings["number_of_replicas"] == str(settings.index_replicas)
 
 
-def test_indexer_namespace():
+def test_indexer_namespace(monkeypatch):
+    import importlib
+
+    from openaleph_search.transform import entity as entity_module
+
     data = {
         "id": "jane",
         "schema": "Person",
         "properties": {"name": ["Jane Doe"], "birthDate": ["1980-01-01"]},
     }
     entity = make_entity(data)
-    action = format_entity("test", entity)
+    action = entity_module.format_entity("test", entity)
     assert action is not None
     assert action["_id"] == "jane"
 
-    action = format_entity("test", entity, namespace="test")
+    # Test with namespace enforcement enabled
+    monkeypatch.setenv("OPENALEPH_SEARCH_INDEX_NAMESPACE_IDS", "true")
+    # Reload the settings module first, then the entity module
+    from openaleph_search import settings as settings_module
+
+    importlib.reload(settings_module)
+    importlib.reload(entity_module)
+
+    action = entity_module.format_entity("test", entity)
     assert action is not None
     assert action["_id"] == "jane.0ab35dc935d0e27f7bafd9a98610fb635d730ef7"
+
+    # Clean up
+    monkeypatch.setenv("OPENALEPH_SEARCH_INDEX_NAMESPACE_IDS", "false")
+    importlib.reload(settings_module)
+    importlib.reload(entity_module)

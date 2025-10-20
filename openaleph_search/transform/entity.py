@@ -70,11 +70,9 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
         )
         return None
 
-    namespace = kwargs.get("namespace")
-    if settings.index_namespace_ids and namespace is None:
-        raise ValueError("No namespace given!")
-    if namespace is not None:
-        ns = _get_namespace(namespace)
+    if settings.index_namespace_ids:
+        # Enforce namespaced IDs
+        ns = _get_namespace(dataset)
         entity = ns.apply(entity)
 
     dataset = valid_dataset(dataset)
