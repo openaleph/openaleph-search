@@ -8,10 +8,12 @@ from datetime import datetime
 from multiprocessing import cpu_count
 from typing import Generator, Iterable
 
+from anystore.functools import weakref_cache
 from anystore.logging import get_logger
 from anystore.util import Took
 from banal import ensure_list
 from followthemoney import EntityProxy, model, registry
+from followthemoney.namespace import Namespace
 
 from openaleph_search.index.indexer import Action, Actions
 from openaleph_search.index.indexes import entities_write_index, schema_bucket
@@ -51,6 +53,11 @@ def _get_symbols(entity: EntityProxy) -> set[str]:
     return symbols
 
 
+@weakref_cache
+def _get_namespace(value: str) -> Namespace:
+    return Namespace(value)
+
+
 def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
     """Apply final denormalisations to the index."""
     # Abstract entities can appear when profile fragments for a missing entity
@@ -62,6 +69,13 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
             entity_id=entity.id,
         )
         return None
+
+    namespace = kwargs.get("namespace")
+    if settings.index_namespace_ids and namespace is None:
+        raise ValueError("No namespace given!")
+    if namespace is not None:
+        ns = _get_namespace(namespace)
+        entity = ns.apply(entity)
 
     dataset = valid_dataset(dataset)
 

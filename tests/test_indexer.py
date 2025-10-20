@@ -174,3 +174,19 @@ def test_bulk_indexing_mode(cleanup_after):
         assert idx_settings["refresh_interval"] == settings.index_refresh_interval
         assert idx_settings["translog"]["durability"] == "request"
         assert idx_settings["number_of_replicas"] == str(settings.index_replicas)
+
+
+def test_indexer_namespace():
+    data = {
+        "id": "jane",
+        "schema": "Person",
+        "properties": {"name": ["Jane Doe"], "birthDate": ["1980-01-01"]},
+    }
+    entity = make_entity(data)
+    action = format_entity("test", entity)
+    assert action is not None
+    assert action["_id"] == "jane"
+
+    action = format_entity("test", entity, namespace="test")
+    assert action is not None
+    assert action["_id"] == "jane.0ab35dc935d0e27f7bafd9a98610fb635d730ef7"

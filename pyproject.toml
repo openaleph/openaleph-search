@@ -64,3 +64,4 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.pytest_env]
 DEBUG = 1
+OPENALEPH_SEARCH_INDEX_NAMESPACE_IDS = 0
