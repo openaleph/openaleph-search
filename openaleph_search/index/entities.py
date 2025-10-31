@@ -113,28 +113,101 @@ def iter_entity_ids(
     es_scroll="5m",
     es_scroll_size=10000,
 ):
-    """Scan entity IDs matching the given criteria (no source fields fetched)."""
-    query = {
-        "query": _entities_query(filters, auth, dataset, collection_id, schemata),
-        "_source": False,  # Don't fetch any source fields - much faster
-    }
-    preserve_order = False
-    if sort is not None:
-        query["sort"] = ensure_list(sort)
-        preserve_order = True
+    """Scan entity IDs matching the given criteria (no source fields fetched).
+
+    When sorting by _id, uses search_after with PIT (Point in Time) API instead of
+    scroll, as _id sorting requires special handling in Elasticsearch.
+    """
     index = entities_read_index(schema=schemata)
     es = get_es()
-    for res in scan(
-        es,
-        index=index,
-        query=query,
-        timeout=MAX_TIMEOUT,
-        request_timeout=MAX_REQUEST_TIMEOUT,
-        preserve_order=preserve_order,
-        scroll=es_scroll,
-        size=es_scroll_size,
-    ):
-        yield res["_id"]
+
+    # Check if we're sorting by _id - this requires special handling
+    sort_list = ensure_list(sort) if sort is not None else None
+    uses_id_sort = sort_list and any(
+        "_id" in s if isinstance(s, dict) else s == "_id" for s in sort_list
+    )
+
+    if uses_id_sort:
+        # Use search_after with PIT for _id sorting
+        # _id sorting requires fetching docs and sorting in memory, as ES doesn't allow
+        # fielddata on _id. We do this in batches with search_after.
+
+        # Translate _id sort to use search_after without requiring fielddata
+        # We'll use _shard_doc for pagination and sort the results in memory
+        pit = es.open_point_in_time(index=index, keep_alive=es_scroll)
+        pit_id = pit["id"]
+
+        try:
+            # First, collect all IDs using _shard_doc for efficient pagination
+            all_ids = []
+            query_body = {
+                "query": _entities_query(
+                    filters, auth, dataset, collection_id, schemata
+                ),
+                "_source": False,
+                "size": es_scroll_size,
+                "sort": ["_shard_doc"],  # Use _shard_doc for efficient pagination
+                "pit": {"id": pit_id, "keep_alive": es_scroll},
+            }
+
+            while True:
+                response = es.search(
+                    **query_body,
+                    timeout=MAX_TIMEOUT,
+                    request_timeout=MAX_REQUEST_TIMEOUT,
+                )
+                hits = response["hits"]["hits"]
+
+                if not hits:
+                    break
+
+                for hit in hits:
+                    all_ids.append(hit["_id"])
+
+                # Update search_after for next page
+                query_body["search_after"] = hits[-1]["sort"]
+                # Update PIT ID (it may change between requests)
+                query_body["pit"]["id"] = response["pit_id"]
+
+            # Now sort the IDs based on the requested sort order
+            reverse = False
+            if isinstance(sort_list[0], dict):
+                # Handle {"_id": "desc"} format
+                reverse = list(sort_list[0].values())[0] == "desc"
+
+            all_ids.sort(reverse=reverse)
+
+            # Yield sorted IDs
+            for id in all_ids:
+                yield id
+        finally:
+            # Close the point in time
+            try:
+                es.close_point_in_time(id=pit_id)
+            except Exception as e:
+                log.warning(f"Failed to close point in time: {e}")
+    else:
+        # Use standard scroll API for other cases
+        query = {
+            "query": _entities_query(filters, auth, dataset, collection_id, schemata),
+            "_source": False,  # Don't fetch any source fields - much faster
+        }
+        preserve_order = False
+        if sort is not None:
+            query["sort"] = sort_list
+            preserve_order = True
+
+        for res in scan(
+            es,
+            index=index,
+            query=query,
+            timeout=MAX_TIMEOUT,
+            request_timeout=MAX_REQUEST_TIMEOUT,
+            preserve_order=preserve_order,
+            scroll=es_scroll,
+            size=es_scroll_size,
+        ):
+            yield res["_id"]
 
 
 def iter_proxies(**kw):

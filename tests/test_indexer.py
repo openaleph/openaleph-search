@@ -128,6 +128,20 @@ def test_iter_entity_ids(entities, cleanup_after):
     all_ids = list(iter_entity_ids())
     assert len(all_ids) == 26
 
+    # Test sorting by _id (ascending)
+    sorted_ids = list(iter_entity_ids(dataset="test_dataset", sort="_id"))
+    assert len(sorted_ids) == 21
+    assert sorted_ids == sorted(sorted_ids), "IDs should be sorted ascending"
+
+    # Test sorting by _id (descending)
+    desc_sorted_ids = list(
+        iter_entity_ids(dataset="test_dataset", sort={"_id": "desc"})
+    )
+    assert len(desc_sorted_ids) == 21
+    assert desc_sorted_ids == sorted(
+        desc_sorted_ids, reverse=True
+    ), "IDs should be sorted descending"
+
 
 def test_temporary_refresh_interval(cleanup_after):
     """Test temporarily setting refresh interval using bulk_indexing_mode."""
