@@ -30,8 +30,9 @@ class Settings(BaseSettings):
     ingest_uri: HttpUrl | list[HttpUrl] | None = Field(
         default=None, alias="openaleph_elasticsearch_ingest_uri"
     )
-    """Optional dedicated URI(s) for index operations (nodes with dedicated
-    ingest role). Falls back to uri if not set."""
+    """Optional dedicated URI(s) for ingest (pre-index) operations (nodes with
+    dedicated ingest role that might do some enrichment). Falls back to uri if
+    not set."""
 
     timeout: int = 60
     max_retries: int = 3
@@ -43,11 +44,6 @@ class Settings(BaseSettings):
     indexer_concurrency: int = 8
     indexer_chunk_size: int = 1000
     indexer_max_chunk_bytes: int = 5 * 1024 * 1024  # 5mb
-    indexer_debug: bool = False
-    """Enable instrumented debug mode for indexer.
-
-    Provides detailed logging, timeout detection, and task monitoring.
-    """
 
     index_shards: int = 10
     index_replicas: int = 0

@@ -5,7 +5,7 @@ from anystore.types import SDict
 from banal import ensure_list
 
 from openaleph_search.core import get_es
-from openaleph_search.index.mapping import ANALYZE_SETTINGS
+from openaleph_search.index.mapping import ANALYZE_SETTINGS  # , Field
 from openaleph_search.settings import Settings
 
 log = get_logger(__name__)
@@ -91,6 +91,11 @@ def index_settings(
                     "b": 0.25,
                 }
             },
+            # storage optimization to put similar docs together for better compression:
+            # https://www.elastic.co/docs/reference/elasticsearch/index-settings/sorting
+            # "sort": {
+            #     "field": [Field.SCHEMA, Field.DATASET]
+            # }
         },
     }
 
