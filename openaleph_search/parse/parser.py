@@ -185,6 +185,9 @@ class SearchQueryParser(QueryParser):
             "max_highlight_analyzed_offset", 999999
         )
 
+        # strip down entity payload for fast path search
+        self.dehydrate = self.getbool("dehydrate")
+
     @cached_property
     def collection_ids(self) -> set[str]:
         collections = self.filters.get("collection_id", set())

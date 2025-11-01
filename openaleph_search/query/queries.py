@@ -5,7 +5,7 @@ from typing import Any
 from banal import ensure_list
 from followthemoney import EntityProxy, model
 
-from openaleph_search.index.entities import ENTITY_SOURCE
+from openaleph_search.index.entities import ENTITY_SOURCE, PROXY_INCLUDES
 from openaleph_search.index.indexes import entities_read_index
 from openaleph_search.index.mapping import Field
 from openaleph_search.query.base import Query
@@ -21,6 +21,7 @@ settings = Settings()
 EXCLUDE_SCHEMATA = [
     s.name for s in model.schemata.values() if s.hidden
 ]  # Page, Mention
+EXCLUDE_DEHYDRATE = ["properties"]
 
 
 class EntitiesQuery(Query):
@@ -127,6 +128,16 @@ class EntitiesQuery(Query):
                 "boost_mode": "sum",
             }
         }
+
+    def get_source(self) -> dict[str, Any]:
+        """If the parser gets `dehydrate=true`, don't include properties payload
+        in the response. This is used in the search views where no detail data
+        is needed"""
+        if self.parser.dehydrate:
+            return {
+                "includes": [k for k in PROXY_INCLUDES if k not in EXCLUDE_DEHYDRATE]
+            }
+        return super().get_source()
 
 
 class MatchQuery(EntitiesQuery):

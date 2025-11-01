@@ -366,3 +366,61 @@ def test_search_tag_filter(cleanup_after):
         {"key": "controversial", "doc_count": 1},
         {"key": "politician", "doc_count": 1},
     ]
+
+
+def test_search_dehydrate(index_entities):
+    """Test that dehydrate=true excludes properties from response"""
+    # Test with dehydrate=true - properties should be excluded
+    query = _create_query("/search?q=banana&dehydrate=true")
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] >= 1
+    # Check that at least one hit exists
+    assert len(result["hits"]["hits"]) > 0
+
+    # Verify properties are excluded from all results
+    for hit in result["hits"]["hits"]:
+        assert "_source" in hit
+        assert (
+            "properties" not in hit["_source"]
+        ), "properties field should be excluded when dehydrate=true"
+        # Other fields should still be present
+        assert "schema" in hit["_source"]
+        assert "caption" in hit["_source"]
+        assert "dataset" in hit["_source"]
+
+
+def test_search_dehydrate_false(index_entities):
+    """Test that dehydrate=false (default) includes properties in response"""
+    # Test with explicit dehydrate=false
+    query = _create_query("/search?q=banana&dehydrate=false")
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] >= 1
+    assert len(result["hits"]["hits"]) > 0
+
+    # Verify properties are included in results
+    for hit in result["hits"]["hits"]:
+        assert "_source" in hit
+        assert (
+            "properties" in hit["_source"]
+        ), "properties field should be included when dehydrate=false"
+        assert "schema" in hit["_source"]
+
+
+def test_search_dehydrate_default(index_entities):
+    """Test that without dehydrate parameter, properties are included by default"""
+    # Test without dehydrate parameter (default behavior)
+    query = _create_query("/search?q=banana")
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] >= 1
+    assert len(result["hits"]["hits"]) > 0
+
+    # Verify properties are included by default
+    for hit in result["hits"]["hits"]:
+        assert "_source" in hit
+        assert (
+            "properties" in hit["_source"]
+        ), "properties field should be included by default"
+        assert "schema" in hit["_source"]
