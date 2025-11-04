@@ -74,7 +74,7 @@ def entities_index_list(
     """Combined index to run all queries against."""
     indexes: set[str] = set()
     for schema_ in schema_scope(schema, expand=expand):
-        for version in settings.index_read:
+        for version in ensure_list(settings.index_read):
             indexes.add(schema_index(schema_, version))
     return indexes
 
@@ -104,7 +104,7 @@ def make_schema_bucket_properties(bucket: Bucket) -> dict[str, Any]:
 def configure_entities():
     """Configure all the entity indexes"""
     for bucket in BUCKETS:
-        for version in settings.index_read:
+        for version in ensure_list(settings.index_read):
             configure_schema_bucket(bucket, version)
 
 

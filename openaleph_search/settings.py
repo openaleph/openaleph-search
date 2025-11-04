@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     index_replicas: int = 0
     index_prefix: str = "openaleph"
     index_write: str = "v1"
-    index_read: list[str] = ["v1"]
+    index_read: str | list[str] = ["v1"]
     index_expand_clause_limit: int = 10
     index_delete_by_query_batchsize: int = 100
     index_namespace_ids: bool = True
