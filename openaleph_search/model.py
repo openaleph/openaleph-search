@@ -16,7 +16,7 @@ class SearchAuth(BaseModel):
     is_admin: bool = False
     role: str | None = None
 
-    # deprecated
+    # leaked OpenAleph logic
     collection_ids: set[int] = set()
 
     def datasets_query(self, field: str | None = settings.auth_field) -> dict[str, Any]:

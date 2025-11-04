@@ -156,19 +156,6 @@ def cli_search_body(
     smart_write(output_uri, data)
 
 
-@cli_search.command("match")
-def cli_match(
-    q: str,
-    args: OPT_SEARCH_ARGS = None,
-    output_uri: str = OPT_OUTPUT_URI,
-    output_format: OPT_SEARCH_FORMAT = "raw",
-):
-    """Search using elastic 'match_query' using the `MatchQuery` class"""
-    res = search_query_string(q, args)
-    data = dump_json(dict(res), clean=True, newline=True)
-    smart_write(output_uri, data)
-
-
 @cli.command("analyze")
 def cli_analyze(
     input_uri: str = OPT_INPUT_URI,

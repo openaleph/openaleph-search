@@ -1,367 +1,372 @@
-# Elasticsearch Index Mapping
+# Index Mapping
 
-The index mapping in openaleph-search defines how documents are structured and indexed in Elasticsearch. The mapping is defined in `openaleph_search/index/mapping.py` and provides a comprehensive structure for entity-based search.
+Elasticsearch index structure, field types, and analyzers used in openaleph-search.
 
-## Overview
+## Index buckets
 
-The mapping system consists of several layers:
+Entities are organized into buckets based on schema type:
 
-1. **Base Mapping** - Core fields present in all documents
-2. **Group Mapping** - Combined fields for followthemoney property groups
-3. **Property Mapping** - Specific entity property fields
-4. **Numeric Mapping** - Optimized numeric fields for sorting and aggregation
+| Bucket | Schemas | Purpose |
+|--------|---------|---------|
+| `things` | [Thing and descendants](https://followthemoney.tech/explorer/schemata/Thing/) | Entities ([Person](https://followthemoney.tech/explorer/schemata/Person/), [Company](https://followthemoney.tech/explorer/schemata/Company/), ...) |
+| `intervals` | [Interval and descendants](https://followthemoney.tech/explorer/schemata/Interval/) | Time-based entity connections ([Ownership](https://followthemoney.tech/explorer/schemata/Ownership/), [Sanction](https://followthemoney.tech/explorer/schemata/Sanction/), ...) |
+| `documents` | [Document and descendants](https://followthemoney.tech/explorer/schemata/Document/) | File-like entities with full-text |
+| `pages` | [Pages](https://followthemoney.tech/explorer/schemata/Pages/) | Multi-page (Word/PDF) documents with full-text |
+| `page` | [Page](https://followthemoney.tech/explorer/schemata/Page/) | Single page entities (children of `Pages`) for page-level lookups |
 
-## Index Settings
+Index names follow the pattern: `{prefix}-entity-{bucket}-{version}`
 
-### Analysis Configuration
+Example: `openaleph-entity-things-v1`
 
-The index uses sophisticated text analysis with multiple analyzers and normalizers:
+### Shard distribution
 
-```json
-{
-    "analysis": {
-        "char_filter": {
-            "remove_special_chars": {
-                "type": "pattern_replace",
-                "pattern": "[^\\p{L}\\p{N}\\s]",
-                "replacement": ""
-            },
-            "squash_spaces": {
-                "type": "pattern_replace",
-                "pattern": "[\\r\\n\\s]+",
-                "replacement": " "
-            },
-            "remove_html_tags": {
-                "type": "pattern_replace",
-                "pattern": "<[^>]*>",
-                "replacement": " "
-            }
-        }
-    }
-}
-```
+Different buckets get different shard allocations:
 
-### Analyzers
+- `documents`, `pages`: Full configured shards (default: 10)
+- `things`: 50% of configured shards (default: 5)
+- `intervals`: 33% of configured shards (default: 3)
 
-| Analyzer | Purpose | Configuration |
-|----------|---------|---------------|
-| `icu-default` | Primary text analysis with Unicode support | ICU tokenizer + folding + normalization |
-| `strip-html` | HTML content processing | Standard tokenizer + HTML stripping |
-| `default` | Standard Elasticsearch analysis | Built-in default |
+Set via `OPENALEPH_SEARCH_INDEX_SHARDS` environment variable.
+
+!!! info "What's the best number here?"
+    It is hard to predict how many shards an index needs. Best practice is shard sizes between 15-50 GB. Monitor your cluster and adjust the number of shards. This requires re-indexing with the new sharding configuration.
+
+## Analyzers
+
+For the `content` (full-text) field, the [ICU analysis plugin](https://www.elastic.co/docs/reference/elasticsearch/plugins/analysis-icu) is used and needs to be installed. openaleph-search ships with a customized [docker image](https://github.com/openaleph/openaleph-search/pkgs/container/elasticsearch) that includes the plugin.
+
+### Text analyzers
+
+**icu-default** - Primary text analysis
+
+- Tokenizer: `icu_tokenizer`
+- Character filters: `html_strip`
+- Token filters: `icu_folding`, `icu_normalizer`
+- Purpose: Unicode-aware multilingual text analysis
+
+**strip-html** - HTML content analysis
+
+- Tokenizer: `standard`
+- Character filters: `html_strip`
+- Token filters: `lowercase`, `asciifolding`, `trim`
+- Purpose: HTML stripping with ASCII normalization
 
 ### Normalizers
 
-| Normalizer | Purpose | Configuration |
-|------------|---------|---------------|
-| `icu-default` | Unicode normalization | ICU folding |
-| `name-kw-normalizer` | Name keyword normalization | Special chars removal + lowercase + trim |
-| `kw-normalizer` | General keyword normalization | HTML removal + space squashing |
+**icu-default** - ICU folding
 
-## Base Mapping Fields
+- Filter: `icu_folding`
+- Purpose: Unicode normalization for keywords
 
-Core fields present in all indexed documents:
+**name-kw-normalizer** - Aggressive name normalization
 
-### Identity Fields
+- Character filters: Remove punctuation, collapse whitespace
+- Filters: `lowercase`, `asciifolding`, `trim`
+- Purpose: Name keyword normalization for aggregations
+
+**kw-normalizer** - Minimal normalization
+
+- Filter: `trim`
+- Purpose: Basic keyword cleanup
+
+### Character filters
+
+- **remove_punctuation**: Pattern `[^\p{L}\p{N}]` → space
+- **squash_spaces**: Pattern `\s+` → single space
+
+## Base fields
+
+Core fields present in all entities:
+
+### Identity
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `dataset` | keyword | Dataset identifier |
-| `schema` | keyword | Entity schema type |
-| `schemata` | keyword | All applicable schema types |
-| `caption` | keyword | Display label for entity |
+| `collection_id` | keyword | [OpenAleph](https://openaleph.org) Collection ID |
+| `schema` | keyword | Primary schema name |
+| `schemata` | keyword | All schema names (including ancestors) |
+| `caption` | keyword | Display label |
 
-### Name Fields
+### Names
 
-| Field | Type | Description | Purpose |
-|-------|------|-------------|---------|
-| `name` | text | Original entity names | Full-text matching |
-| `names` | keyword | Normalized name keywords | Exact matching and aggregation |
-| `name_keys` | keyword | Name normalization keys | Deduplication |
-| `name_parts` | keyword | Name components | Partial matching |
-| `name_symbols` | keyword | Name symbols/codes | Symbol-based lookup |
-| `name_phonetic` | keyword | Phonetic representations | Sound-alike matching |
+| Field | Type | Purpose |
+|-------|------|---------|
+| `name` | text | Original names (full-text search) |
+| `names` | keyword | Normalized keywords (aggregation) |
+| `name_keys` | keyword | Sorted tokens (deduplication) |
+| `name_parts` | keyword | Individual tokens (partial matching) |
+| `name_symbols` | keyword | Name symbols (cross-language) |
+| `name_phonetic` | keyword | Phonetic codes (sound-alike) |
 
-### Content Fields
+### Entity data / Content
 
-| Field | Type | Description | Purpose |
-|-------|------|-------------|---------|
-| `content` | text | Primary text content | Full-text search with highlighting |
-| `text` | text | Additional searchable text | Secondary text search |
+| Field | Type | Purpose |
+|-------|------|---------|
+| `properties.*` | mixed | _(see below)_ |
+| `content` | text | Primary text content |
+| `text` | text | Secondary text content |
 
-### Geographic Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `geo_point` | geo_point | Geographic coordinates |
-
-### Temporal Fields
+### Geographic
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `created_at` | date | Document creation time |
-| `updated_at` | date | Last modification time |
-| `first_seen` | date | First occurrence in dataset |
-| `last_seen` | date | Last occurrence in dataset |
+| `geo_point` | geo_point | Latitude/longitude coordinates |
+
+### Metadata
+
+| Field | Type | Indexed | Description |
+|-------|------|---------|-------------|
+| `referents` | keyword | yes | Entity references |
+| `origin` | keyword | yes | Data source origin |
+| `created_at` | date | Creation timestamp |
+| `updated_at` | date | Last modification |
+| `first_seen` | date | First occurrence |
+| `last_seen` | date | Last occurrence |
 | `last_change` | date | Last content change |
+| `num_values` | integer | yes | Property value count |
+| `index_bucket` | keyword | no | Bucket type |
+| `index_version` | keyword | no | Index version |
+| `indexed_at` | date | yes | Index timestamp |
 
-### Metadata Fields
+## Field type configurations
 
-| Field | Type | Description | Indexed |
-|-------|------|-------------|---------|
-| `referents` | keyword | Entity references | Yes |
-| `origin` | keyword | Data source origin | Yes |
-| `num_values` | integer | Value count for normalization | Yes |
-| `index_bucket` | keyword | Index bucket identifier | No |
-| `index_version` | keyword | Index version | No |
-| `indexed_at` | date | Index timestamp | No |
-
-### Legacy Fields (OpenAleph v5 compatibility)
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `role_id` | keyword | User role identifier |
-| `profile_id` | keyword | User profile identifier |
-| `collection_id` | keyword | Collection identifier |
-
-## Field Type Definitions
-
-### Specialized Field Types
-
-```python
-# Content field - optimized for highlighting and term vectors
-{
-    "type": "text",
-    "analyzer": "icu-default",
-    "search_analyzer": "icu-default",
-    "index_phrases": True,          # Enable shingle indexing
-    "term_vector": "with_positions_offsets"  # For highlighting
-}
-
-# Name field - no length normalization
-{
-    "type": "text",
-    "similarity": "weak_length_norm",  # Don't penalize long names
-    "store": True                     # Store for highlighting
-}
-
-# Name keyword - normalized for aggregation
-{
-    "type": "keyword",
-    "normalizer": "name-kw-normalizer",
-    "store": True
-}
-```
-
-### Date Formatting
-
-Flexible date format supporting various precisions:
-```
-yyyy-MM-dd'T'HH||yyyy-MM-dd'T'HH:mm||yyyy-MM-dd'T'HH:mm:ss||yyyy-MM-dd||yyyy-MM||yyyy||strict_date_optional_time
-```
-
-Supports:
-
-- Full timestamps: `2023-12-25T14:30:45`
-- Date only: `2023-12-25`
-- Month precision: `2023-12`
-- Year precision: `2023`
-
-## Property Mapping
-
-Entity properties are dynamically mapped based on FollowTheMoney schemas:
-
-### Property Field Structure
-
-Properties are stored under `properties.{property_name}`:
-
-- `properties.birthDate` - Birth date values
-- `properties.nationality` - Nationality values
-- `properties.address` - Address information
-
-### Copy-to Targets
-
-Properties are automatically copied to appropriate search fields:
-
-| Property Type | Copy Target | Purpose |
-|---------------|-------------|---------|
-| `text` | `content` | Full-text search in primary content field |
-| Other types | `text` | Full-text search in secondary text field |
-| Groups | `{group_name}` | Grouped field aggregation |
-
-Example:
-```python
-# A "nationality" property copies to:
-# 1. properties.nationality (exact field)
-# 2. text (searchable text)
-# 3. countries (grouped field for aggregation)
-```
-
-## Group Mapping
-
-FollowTheMoney property groups are mapped as unified fields:
-
-### Common Groups
-
-| Group | Type | Description | Example Properties |
-|-------|------|-------------|-------------------|
-| `countries` | keyword | Country codes | nationality, jurisdiction |
-| `languages` | keyword | Language codes | language |
-| `emails` | keyword | Email addresses | email |
-| `phones` | keyword | Phone numbers | phone |
-| `dates` | date | Date values | birthDate, startDate |
-| `addresses` | text | Address information | address |
-
-## Numeric Mapping
-
-Numeric fields are duplicated in the `numeric` object for efficient sorting:
+### Content field
 
 ```json
 {
-    "numeric": {
-        "properties": {
-            "dates": {"type": "double"},        // All date fields as timestamps
-            "birthDate": {"type": "double"},    // Specific date properties
-            "amount": {"type": "double"},       // Monetary amounts
-            "shares": {"type": "double"}        // Share counts
-        }
-    }
+  "type": "text",
+  "analyzer": "icu-default",
+  "index_phrases": true,
+  "term_vector": "with_positions_offsets",
+  "store": false
 }
 ```
 
-### Numeric Types
+- `index_phrases`: Enable phrase queries
+- `term_vector`: Required for fast vector highlighter (if enabled via settings)
+- `store`: true only for pages bucket
 
-Fields are considered numeric if they use these FollowTheMoney types:
+### Name field
 
-- `registry.number` - General numeric values
-- `registry.date` - Date/timestamp values
-
-## Source Field Configuration
-
-### Excluded Fields
-
-The following fields are excluded from the stored `_source` to save space:
-
-```python
-SOURCE_EXCLUDES = [
-    # Group fields (reconstructed from properties)
-    "countries", "languages", "emails", "phones", "dates", "addresses",
-    # Search-optimized fields (reconstructed from source)
-    "text", "content", "name", "name_keys", "name_parts",
-    "name_symbols", "name_phonetic"
-]
+```json
+{
+  "type": "text",
+  "analyzer": "icu-default",
+  "similarity": "weak_length_norm",
+  "store": true
+}
 ```
 
-These fields remain searchable but are not returned in search results, reducing storage requirements.
+- `similarity`: BM25 with `b=0.25` (reduced length penalty)
+- `store`: Enabled for highlighting on this field
 
-## Dynamic Mapping
+### Name keyword field
 
-### Schema-Based Generation
-
-Mappings are generated dynamically based on FollowTheMoney schemas:
-
-```python
-def make_schema_mapping(schemata):
-    """Generate mapping for specific entity schemas"""
-    # Analyzes all properties across schemas
-    # Resolves type conflicts (keyword takes precedence)
-    # Generates copy_to configurations
-    # Returns property mapping
+```json
+{
+  "type": "keyword",
+  "normalizer": "name-kw-normalizer",
+  "store": true
+}
 ```
 
-### Type Resolution
+### Date fields
 
-When multiple schemas define the same property:
-1. **Keyword** type takes precedence over **text**
-2. **Copy-to** targets are merged
-3. Group assignments are unified
+```json
+{
+  "type": "date",
+  "format": "yyyy-MM-dd'T'HH||yyyy-MM-dd'T'HH:mm||yyyy-MM-dd'T'HH:mm:ss||yyyy-MM-dd||yyyy-MM||yyyy||strict_date_optional_time"
+}
+```
+
+Supports multiple precisions:
+- Full timestamp: `2023-12-25T14:30:45`
+- Date: `2023-12-25`
+- Month: `2023-12`
+- Year: `2023`
+
+## Property fields
+
+Entity properties are stored under `properties.*`:
+
+- `properties.birthDate`
+- `properties.nationality`
+- `properties.address`
+
+### Property type mapping
+
+Follow the Money property types map to Elasticsearch types:
+
+| FtM Type | ES Type | Notes |
+|----------|---------|-------|
+| `text` | text | Not indexed |
+| `html` | text | Not indexed |
+| `json` | text | Not indexed |
+| `date` | date | With flexible format |
+| Others | keyword | Default |
+
+### Copy-to mechanism
+
+Properties are copied to aggregation fields:
+
+- `text` type properties → copied to `content`
+- Other properties → copied to `text`
+- Properties with type groups → copied to group field
 
 Example:
-```python
-# Schema A: "authority" as text field
-# Schema B: "authority" as entity reference (keyword)
-# Result: keyword field with copy_to both content and text
+```
+properties.nationality → text + countries (group field)
+properties.bodyText → content
+properties.email → text + emails (group field)
 ```
 
-## Mapping Generation Functions
+## Group fields
 
-### Core Functions
+Follow the Money type groups create unified aggregation fields:
 
-| Function | Purpose | Location |
-|----------|---------|----------|
-| `make_mapping(properties)` | Generate complete index mapping | mapping.py:272 |
-| `make_schema_mapping(schemata)` | Create property mapping for schemas | mapping.py:286 |
-| `get_index_field_type(type_)` | Get Elasticsearch field type | mapping.py:323 |
-| `property_field_name(prop)` | Generate property field name | mapping.py:264 |
+| Group | Type | Example Properties |
+|-------|------|-------------------|
+| `countries` | keyword | nationality, jurisdiction |
+| `languages` | keyword | language |
+| `emails` | keyword | email |
+| `phones` | keyword | phone |
+| `dates` | date | birthDate, startDate |
+| `addresses` | text | address |
 
-### Usage Example
+## Numeric fields
 
-```python
-from openaleph_search.index.mapping import make_schema_mapping, make_mapping
+Numeric properties are duplicated in the `numeric` object for efficient sorting:
 
-# Generate mapping for specific schemas
-schemata = ["Person", "Company", "Document"]
-properties = make_schema_mapping(schemata)
-complete_mapping = make_mapping(properties)
-```
-
-## Index Management
-
-### Index Settings
-
-```python
+```json
 {
-    "date_detection": False,        # Disable automatic date detection
-    "dynamic": False,              # Strict mapping enforcement
-    "_source": {
-        "excludes": SOURCE_EXCLUDES  # Optimize storage
+  "numeric": {
+    "properties": {
+      "dates": {"type": "double"},
+      "birthDate": {"type": "double"},
+      "amount": {"type": "double"}
     }
+  }
 }
 ```
 
-### Sharding and Replication
+Numeric types: `registry.number`, `registry.date`
 
-Configured through settings:
+Dates are stored as Unix timestamps (seconds since epoch).
 
-- Default: 25 shards (optimized for dataset routing)
-- Default: 0 replicas (single-node development)
-- Routing by dataset for performance
+## Similarity configuration
 
-## Field Usage Guidelines
+### weak_length_norm
 
-### Search Fields
+BM25 similarity with reduced length normalization:
 
-- Use `content` for primary full-text search
-- Use `text` for secondary/additional text search
-- Use `name` for entity name matching
+```json
+{
+  "similarity": {
+    "weak_length_norm": {
+      "type": "BM25",
+      "b": 0.25
+    }
+  }
+}
+```
 
-### Filtering Fields
+- Default BM25 `b`: 0.75
+- Reduced `b`: 0.25
+- Purpose: Don't penalize merged entities with many names
+- Applied to: `name` field only
 
-- Use keyword fields for exact matching
-- Use group fields for category aggregation
-- Use numeric fields for range queries
+## Index settings
 
-### Aggregation Fields
+### Source exclusion
 
-- Prefer keyword fields for term aggregations
-- Use group fields for cross-property aggregation
-- Use numeric fields for statistical aggregation
+Fields excluded from stored `_source` to reduce index size:
 
-## Performance Considerations
+Fields remain searchable but are not returned in results.
 
-### Field Storage
+```json
+{
+  "_source": {
+    "excludes": [
+      "content", "text", "name",
+      "name_keys", "name_parts", "name_symbols", "name_phonetic"
+    ]
+  }
+}
+```
 
-- Only essential fields are stored in `_source`
-- Search-optimized fields are reconstructed on query
-- Reduces index size by ~30-40%
+Also excludes all group fields (countries, emails, etc.).
 
-### Analysis Performance
 
-- ICU analyzer provides better Unicode support
-- Name normalization improves deduplication
-- Term vectors enable fast highlighting
+### Refresh interval
 
-### Query Optimization
+```json
+{
+  "index": {
+    "refresh_interval": "1s"
+  }
+}
+```
+
+Configurable via `OPENALEPH_SEARCH_INDEX_REFRESH_INTERVAL`.
+
+Set to `-1` during bulk indexing for better performance.
+
+## Derived fields
+
+When indexing, these fields are computed:
+
+| Field | Source | Processing |
+|-------|--------|-----------|
+| `name_keys` | Entity names | Sort ASCII tokens, concatenate (>5 chars) |
+| `name_parts` | Entity names | Tokenize, keep tokens ≥2 chars |
+| `name_phonetic` | Entity names | Metaphone encoding (≥3 chars) |
+| `name_symbols` | Entity schema | Pattern extraction |
+| `numeric.*` | Properties | Type-specific conversion |
+| `geo_point` | Properties | Lat/lon pair extraction |
+| `num_values` | All properties | Total value count |
+
+## Performance considerations
+
+Why are we indexing some properties in multiple fields via `copy_to` ?
+
+### Storage optimization
+
+- Source excludes reduce index size
+- Only essential fields stored
+- Search fields reconstructed on query
+
+### Query optimization
 
 - Numeric duplicates enable efficient sorting
 - Group fields reduce cross-property query complexity
-- Copy-to configuration eliminates multi-field queries
+- Copy-to eliminates multi-field queries
+
+### Analysis performance
+
+- ICU analyzer: Better Unicode support
+- Name normalization: Improved deduplication
+- Term vectors: Fast highlighting (if enabled) and better [more like this](../more_like_this.md)
+
+## Index management
+
+### Replication
+
+Default: 0 replicas. Replication allows node failure (if using more than 1 node) and improves search speed.
+
+Production: Set via `OPENALEPH_SEARCH_INDEX_REPLICAS`
+
+### Versioning
+
+Use `index_write` and `index_read` settings for rolling deployments:
+
+```bash
+# Phase 1: Write to v2, read from v1 and v2
+export OPENALEPH_SEARCH_INDEX_WRITE=v2
+export OPENALEPH_SEARCH_INDEX_READ=v1,v2
+
+# Phase 2: Switch to v2 only
+export OPENALEPH_SEARCH_INDEX_READ=v2
+```
+
+Enables zero-downtime migrations.

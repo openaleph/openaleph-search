@@ -1,372 +1,317 @@
-# Configuration Settings
+# Configuration
 
-OpenAleph-Search uses Pydantic Settings for configuration management, providing type-safe, environment-variable-based configuration with validation. The settings are defined in `openaleph_search/settings.py`.
+Configure openaleph-search via environment variables. All settings use the `OPENALEPH_SEARCH_` prefix.
 
-## Overview
+## Connection
 
-The `Settings` class inherits from `BaseSettings` (anystore.settings) and uses Pydantic for validation:
+### `uri`
 
-```python
-from openaleph_search.settings import Settings
+Elasticsearch server URL(s).
 
-settings = Settings()
-# Settings automatically loaded from environment variables
-```
-
-## Environment Configuration
-
-### Environment Variable Prefix
-
-All settings can be configured using environment variables with the `OPENALEPH_` prefix:
+- Type: `HttpUrl | list[HttpUrl]`
+- Default: `http://localhost:9200`
+- Environment: `OPENALEPH_SEARCH_URI` or `OPENALEPH_ELASTICSEARCH_URI`
 
 ```bash
-# Example environment variables
-export OPENALEPH_ELASTICSEARCH_URL=http://localhost:9200
-export OPENALEPH_INDEX_SHARDS=10
-export OPENALEPH_SEARCH_AUTH=true
-```
-
-### Configuration Files
-
-Settings can also be loaded from a `.env` file in the project root:
-
-```bash
-# .env file
-OPENALEPH_ELASTICSEARCH_URL=http://elasticsearch:9200
-OPENALEPH_INDEX_SHARDS=25
-OPENALEPH_TESTING=false
-```
-
-## Core Settings
-
-### Application Settings
-
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `testing` | bool | `False` | Enable testing mode |
-
-**Environment Variables:**
-
-- `OPENALEPH_TESTING` or `OPENALEPH_DEBUG`
-
-**Testing Mode Effects:**
-
-- Disables settings caching for test isolation
-- May affect other components' behavior
-
-## Search Authorization
-
-Controls access control and authentication integration:
-
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `search_auth` | bool | `False` | Enable search authorization |
-| `search_auth_field` | str | `"dataset"` | Field used for authorization filtering |
-
-### Usage
-
-When `search_auth=True`:
-
-- Queries require an `auth` object
-- Results filtered by user's accessible datasets/collections
-- Facet limits applied for unauthenticated users
-- Background filters respect user permissions
-
-```python
-# Authorization enabled
-settings.search_auth = True
-parser = SearchQueryParser(args, auth=user_auth)  # auth required
-
-# Authorization disabled
-settings.search_auth = False
-parser = SearchQueryParser(args)  # auth optional
-```
-
-## Elasticsearch Configuration
-
-### Connection Settings
-
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `elasticsearch_url` | HttpUrl \| list[HttpUrl] | `http://localhost:9200` | Elasticsearch cluster URLs |
-| `elasticsearch_timeout` | int | `60` | Request timeout in seconds |
-| `elasticsearch_max_retries` | int | `3` | Maximum retry attempts |
-| `elasticsearch_retry_on_timeout` | bool | `True` | Retry on timeout errors |
-
-### Multiple Elasticsearch Nodes
-
-```python
 # Single node
-OPENALEPH_ELASTICSEARCH_URL=http://localhost:9200
+export OPENALEPH_SEARCH_URI=http://localhost:9200
 
 # Multiple nodes
-OPENALEPH_ELASTICSEARCH_URL=["http://es1:9200", "http://es2:9200", "http://es3:9200"]
+export OPENALEPH_SEARCH_URI=http://es1:9200,http://es2:9200
 ```
 
-### Connection Examples
+### `ingest_uri`
+
+Optional dedicated URI(s) for ingest operations. Falls back to `uri` if not set.
+
+- Type: `HttpUrl | list[HttpUrl] | None`
+- Default: `None`
+- Environment: `OPENALEPH_SEARCH_INGEST_URI` or `OPENALEPH_ELASTICSEARCH_INGEST_URI`
+
+### `timeout`
+
+Request timeout in seconds.
+
+- Type: `int`
+- Default: `60`
+
+### `max_retries`
+
+Maximum retry attempts for failed requests.
+
+- Type: `int`
+- Default: `3`
+
+### `retry_on_timeout`
+
+Retry on timeout errors.
+
+- Type: `bool`
+- Default: `true`
+
+### `connection_pool_limit_per_host`
+
+Connection pool limit for AsyncElasticsearch.
+
+- Type: `int`
+- Default: `25`
+
+## Indexing
+
+### `indexer_concurrency`
+
+Number of concurrent indexing workers. For pre-processing entity data, python's `ProcessPoolExecuter` is used, as this is a cpu-bound computation. For indexing, `ThreadPoolExecutor` is used to make concurrent async network calls to the Elasticsearch cluster. Keep this in mind when allocating resources to multiple index workers.
+
+- Type: `int`
+- Default: `8`
+
+### `indexer_chunk_size`
+
+Documents per indexing batch.
+
+For document-heavy data (much full text payload) or when experiencing Elasticsearch time-outs, reduce this number.
+
+- Type: `int`
+- Default: `1000`
+
+### `indexer_max_chunk_bytes`
+
+Maximum batch size in bytes.
+
+- Type: `int`
+- Default: `5242880` (5 MB)
+
+## Index structure
+
+### `index_prefix`
+
+Prefix for index names.
+
+- Type: `str`
+- Default: `openaleph`
+
+Index names follow the pattern: `{prefix}-{type}-{version}`
+
+Example: `openaleph-entity-things-v1`
+
+### `index_write`
+
+Current write index version.
+
+- Type: `str`
+- Default: `v1`
+
+### `index_read`
+
+Read index version(s).
+
+- Type: `str | list[str]`
+- Default: `["v1"]`
+
+Accepts a json string for multiple values:
 
 ```bash
-# Local development
-export OPENALEPH_ELASTICSEARCH_URL=http://localhost:9200
-
-# Docker compose
-export OPENALEPH_ELASTICSEARCH_URL=http://elasticsearch:9200
-
-# Elastic Cloud
-export OPENALEPH_ELASTICSEARCH_URL=https://my-cluster.es.io:9243
-
-# Multiple nodes with authentication
-export OPENALEPH_ELASTICSEARCH_URL=https://user:pass@es1.example.com:9200,https://user:pass@es2.example.com:9200
+export OPENALEPH_SEARCH_INDEX_READ=["v1","v2"]
 ```
 
-## Indexing Configuration
+### `index_shards`
 
-### Concurrency and Performance
+Number of primary shards. [Read more about the different shard distributions for different indexes used](mapping.md#shard-distribution)
 
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `indexer_concurrency` | int | `8` | Number of concurrent indexing workers |
-| `indexer_chunk_size` | int | `1000` | Documents per indexing batch |
-| `indexer_max_chunk_bytes` | int | `52,428,800` | Maximum batch size in bytes (50MB) |
+- Type: `int`
+- Default: `10`
 
-### Tuning Guidelines
+### `index_replicas`
 
-**Indexer Concurrency:**
+Number of index replicas.
 
-- Increase for better indexing throughput
-- Decrease if experiencing memory pressure
-- Should not exceed available CPU cores
+- Type: `int`
+- Default: `0`
 
-**Chunk Size:**
+### `index_namespace_ids`
 
-- Larger chunks = better throughput, more memory usage
-- Smaller chunks = lower memory, more network overhead
-- Optimal range: 500-2000 documents
+Enable ID namespacing by dataset name. This appends a hash value to the original entity id. [OpenAleph](https://openaleph.org) relies on this currently with the strict dataset separation approach.
 
-**Max Chunk Bytes:**
-- Prevents oversized requests to Elasticsearch
-- Elasticsearch has default limits (~100MB)
-- Adjust based on document sizes
+- Type: `bool`
+- Default: `true`
+
+### `index_refresh_interval`
+
+Elasticsearch refresh interval for near-realtime search.
+
+- Type: `str`
+- Default: `1s`
+
+Valid values: time units like `1s`, `5s`, `1m`, or `-1` to disable.
 
 ```bash
-# High-performance indexing
-export OPENALEPH_INDEXER_CONCURRENCY=16
-export OPENALEPH_INDEXER_CHUNK_SIZE=2000
-export OPENALEPH_INDEXER_MAX_CHUNK_BYTES=104857600  # 100MB
+# Disable for bulk indexing performance
+export OPENALEPH_SEARCH_INDEX_REFRESH_INTERVAL=-1
 
-# Memory-constrained environment
-export OPENALEPH_INDEXER_CONCURRENCY=4
-export OPENALEPH_INDEXER_CHUNK_SIZE=500
-export OPENALEPH_INDEXER_MAX_CHUNK_BYTES=26214400   # 25MB
+# Re-enable after bulk operations
+export OPENALEPH_SEARCH_INDEX_REFRESH_INTERVAL=1s
 ```
 
-## Index Management
+### `index_expand_clause_limit`
 
-### Index Structure
+Maximum query clause expansion.
 
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `index_shards` | int | `25` | Number of primary shards |
-| `index_replicas` | int | `0` | Number of replica shards |
-| `index_prefix` | str | `"openaleph"` | Index name prefix |
-| `index_write` | str | `"v1"` | Current write index version |
-| `index_read` | list[str] | `["v1"]` | Read index versions |
+- Type: `int`
+- Default: `10`
 
-### Index Naming
+### `index_delete_by_query_batchsize`
 
-Indexes follow the pattern: `{prefix}-{type}-{version}`
+Batch size for delete operations.
 
-Examples:
-- `openaleph-entities-v1` - Main entities index
-- `openaleph-entities-v2` - New version during migration
+- Type: `int`
+- Default: `100`
 
-### Sharding Strategy
+## Index boosting
 
-**Default Configuration (25 shards):**
-- Designed for dataset-based routing
-- Supports large collections efficiently
-- Allows horizontal scaling
+Control scoring weights for different entity types. By default, no weights are applied.
 
-**Customization:**
-```bash
-# Small deployment
-export OPENALEPH_INDEX_SHARDS=5
-export OPENALEPH_INDEX_REPLICAS=1
+### `index_boost_intervals`
 
-# Large deployment
-export OPENALEPH_INDEX_SHARDS=50
-export OPENALEPH_INDEX_REPLICAS=2
-```
+Boost for interval entities.
 
-### Query Optimization
+- Type: `int`
+- Default: `1`
 
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `index_expand_clause_limit` | int | `10` | Maximum query clause expansion |
-| `index_delete_by_query_batchsize` | int | `100` | Batch size for delete operations |
-| `index_namespace_ids` | bool | `True` | Enable ID namespacing |
+### `index_boost_things`
 
-**Expand Clause Limit:**
-- Prevents query explosion with wildcard expansions
-- Protects against performance issues
-- Increase cautiously for complex queries
+Boost for Thing entities.
 
-**Delete Batch Size:**
-- Controls bulk delete operation size
-- Smaller batches = less resource usage
-- Larger batches = faster bulk operations
+- Type: `int`
+- Default: `1`
 
-## Index Boosting
+### `index_boost_documents`
 
-Control relative scoring weights for different index types:
+Boost for Document entities.
 
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `index_boost_intervals` | int | `1` | Boost for interval-based entities |
-| `index_boost_things` | int | `1` | Boost for Thing entities |
-| `index_boost_documents` | int | `1` | Boost for Document entities |
-| `index_boost_pages` | int | `1` | Boost for Page entities |
+- Type: `int`
+- Default: `1`
 
-### Boost Usage
+### `index_boost_pages`
 
-Adjust relative importance of different entity types in search results:
+Boost for Page entities.
+
+- Type: `int`
+- Default: `1`
 
 ```bash
-# Prioritize documents over other entity types
-export OPENALEPH_INDEX_BOOST_DOCUMENTS=2
-export OPENALEPH_INDEX_BOOST_THINGS=1
-
-# Equal weighting (default)
-export OPENALEPH_INDEX_BOOST_DOCUMENTS=1
-export OPENALEPH_INDEX_BOOST_THINGS=1
+# Prioritize documents in search results
+export OPENALEPH_SEARCH_INDEX_BOOST_DOCUMENTS=2
 ```
 
-## Constants and Limits
+## Search behavior
 
-### Application Constants
+### `query_function_score`
 
-| Constant | Value | Description |
-|----------|-------|-------------|
-| `MAX_PAGE` | `9999` | Maximum pagination offset + limit |
-| `BULK_PAGE` | `1000` | Default bulk operation page size |
+Enable function_score wrapper for scoring.
 
-These constants are used throughout the application and cannot be configured via environment variables.
+- Type: `bool`
+- Default: `false`
 
-## Configuration Examples
+When enabled, wraps queries with Elasticsearch function_score to apply a scoring that de-penalizes entity matches with many names. In practice this means, for a term "Jane Doe" Person entity results with this name are considered more relevant as mentions of that name in documents full-text. This has effect on search performance in big clusters.
 
-### Development Environment
+### `content_term_vectors`
+
+Enable term vectors and offsets for content field.
+
+- Type: `bool`
+- Default: `true`
+
+Required for [Fast Vector Highlighter](https://www.elastic.co/docs/reference/elasticsearch/rest-apis/highlighting#fast-vector-highlighter) and improves [more like this](../more_like_this.md) matching queries. Disable to reduce index storage size.
+
+## Highlighting
+
+[Read more](../highlighting.md)
+
+### `highlighter_fvh_enabled`
+
+Use Fast Vector Highlighter for content field.
+
+- Type: `bool`
+- Default: `true`
+
+When false, uses Unified Highlighter instead. FVH requires `content_term_vectors=true`.
+
+### `highlighter_fragment_size`
+
+Characters per highlight snippet.
+
+- Type: `int`
+- Default: `200`
+
+### `highlighter_number_of_fragments`
+
+Snippets per document.
+
+- Type: `int`
+- Default: `3`
+
+### `highlighter_phrase_limit`
+
+Maximum phrases to analyze per document.
+
+- Type: `int`
+- Default: `64`
+
+Prevents performance issues with documents containing many phrase matches.
+
+### `highlighter_boundary_max_scan`
+
+Characters to scan for sentence boundaries.
+
+- Type: `int`
+- Default: `100`
+
+### `highlighter_no_match_size`
+
+Fragment size when no match found.
+
+- Type: `int`
+- Default: `300`
+
+### `highlighter_max_analyzed_offset`
+
+Maximum characters to analyze for highlighting.
+
+- Type: `int`
+- Default: `999999`
+
+## Authorization
+
+[Read more](./authorization.md)
+
+### `auth`
+
+Enable authorization mode.
+
+- Type: `bool`
+- Default: `false`
+
+Set to `true` when using with [OpenAleph](https://openaleph.org) platform for dataset-based access control.
+
+### `auth_field`
+
+Field to filter/apply auth on.
+
+- Type: `str`
+- Default: `dataset`
+
+For OpenAleph, the auth field (currently) is `collection_id`.
+
+## Environment file
+
+Create a `.env` file in your project directory:
 
 ```bash
-# .env for local development
-OPENALEPH_TESTING=false
-OPENALEPH_ELASTICSEARCH_URL=http://localhost:9200
-OPENALEPH_INDEX_SHARDS=5
-OPENALEPH_INDEX_REPLICAS=0
-OPENALEPH_INDEXER_CONCURRENCY=4
-OPENALEPH_SEARCH_AUTH=false
+# .env
+OPENALEPH_SEARCH_URI=http://localhost:9200
+OPENALEPH_SEARCH_INDEX_PREFIX=myproject
+OPENALEPH_SEARCH_INDEX_SHARDS=5
+OPENALEPH_SEARCH_INDEXER_CONCURRENCY=4
 ```
 
-### Production Environment
-
-```bash
-# Production configuration
-OPENALEPH_ELASTICSEARCH_URL=https://es-cluster.internal:9200
-OPENALEPH_ELASTICSEARCH_TIMEOUT=120
-OPENALEPH_ELASTICSEARCH_MAX_RETRIES=5
-OPENALEPH_INDEX_SHARDS=25
-OPENALEPH_INDEX_REPLICAS=2
-OPENALEPH_INDEXER_CONCURRENCY=16
-OPENALEPH_INDEXER_CHUNK_SIZE=1500
-OPENALEPH_SEARCH_AUTH=true
-OPENALEPH_SEARCH_AUTH_FIELD=dataset
-```
-
-### Testing Environment
-
-```bash
-# Testing configuration
-OPENALEPH_TESTING=true
-OPENALEPH_ELASTICSEARCH_URL=http://localhost:9200
-OPENALEPH_INDEX_SHARDS=1
-OPENALEPH_INDEX_REPLICAS=0
-OPENALEPH_INDEXER_CONCURRENCY=2
-OPENALEPH_SEARCH_AUTH=false
-```
-
-## Validation and Type Safety
-
-### Pydantic Validation
-
-Settings use Pydantic for automatic validation:
-
-```python
-# Automatic type conversion
-OPENALEPH_INDEX_SHARDS=25        # string -> int
-OPENALEPH_SEARCH_AUTH=true       # string -> bool
-
-# URL validation
-OPENALEPH_ELASTICSEARCH_URL=http://localhost:9200  # validated as HttpUrl
-
-# List handling
-OPENALEPH_INDEX_READ=v1,v2       # string -> list[str]
-```
-
-### Validation Errors
-
-Invalid settings raise clear validation errors:
-
-```python
-# Invalid URL
-OPENALEPH_ELASTICSEARCH_URL=not-a-url
-# ValidationError: invalid URL format
-
-# Invalid integer
-OPENALEPH_INDEX_SHARDS=not-a-number
-# ValidationError: value is not a valid integer
-```
-
-## Accessing Settings
-
-### Application Usage
-
-```python
-from openaleph_search.settings import Settings
-
-# Get settings instance
-settings = Settings()
-
-# Access configuration
-es_url = settings.elasticsearch_url
-shard_count = settings.index_shards
-auth_enabled = settings.search_auth
-```
-
-### Testing Override
-
-In testing mode, settings are reloaded for each access:
-
-```python
-settings.testing = True
-# Settings will be refreshed from environment on each access
-# Allows test-specific configuration changes
-```
-
-## Migration and Versioning
-
-### Index Version Management
-
-Use `index_write` and `index_read` for rolling deployments:
-
-```bash
-# Phase 1: Prepare new version
-export OPENALEPH_INDEX_WRITE=v2
-export OPENALEPH_INDEX_READ=v1,v2
-
-# Phase 2: Switch to new version
-export OPENALEPH_INDEX_WRITE=v2
-export OPENALEPH_INDEX_READ=v2
-
-# Phase 3: Clean up old version (remove v1)
-```
-
-This enables zero-downtime index migrations and rollback capabilities.
+Settings are automatically loaded from `.env` files.

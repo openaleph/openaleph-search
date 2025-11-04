@@ -1,551 +1,243 @@
 # Entity Matching
 
-Find similar entities across datasets by comparing names, identifiers, and properties. The matching system helps identify potential duplicates and related entities using sophisticated name processing and multiple comparison strategies.
+Find similar entities across datasets to identify duplicates and related records. This is inspired and partly adopted from the great open source work by [OpenSanctions](https://github.com/opensanctions).
 
-## Quick Start
+[Read more in this OpenSanctions blog post](https://www.opensanctions.org/articles/2025-06-24-name-matching/)
 
-### Basic Usage
+[Blog post for OpenAleph](https://openaleph.org/blog/2025/09/A-Look-Inside-OpenAleph-5's-ElasticSearch-Improvements/412bfb6e-63ec-4d84-80f5-a1a3ace91520/)
 
-```python
-from openaleph_search.query.queries import MatchQuery
-from openaleph_search.parse.parser import SearchQueryParser
+## How it works
 
-# Create entity to match against
-entity = make_entity({
-    "id": "person-123",
-    "schema": "Person",
-    "properties": {
-        "name": ["John Smith"],
-        "nationality": ["us"],
-        "email": ["john@example.com"]
-    }
-})
+Entity matching compares multiple signals:
 
-# Find similar entities
-parser = SearchQueryParser([])
-query = MatchQuery(parser, entity)
-result = query.search()
+1. Names (with normalization and phonetic encoding)
+2. Identifiers (registration numbers, tax IDs, etc.)
+3. Properties (email, phone, address, etc.)
+
+The index stores multiple name representations to catch variations:
+
+- Normalized keywords (`names`)
+- Heavier normalized name keywords (`name_keys`)
+- Name symbols (cross-language and cross-alphabet matching) (`name_symbols`)
+- Phonetic codes (sound-alike matching) (`name_phonetics`)
+- Name parts (partial matching) (`name_parts`)
+
+
+## Name matching strategies
+
+### 1. Normalized keywords
+
+Names are normalized and matched with fuzzy search.
+
+Example:
 ```
-
-### Common Use Cases
-
-```bash
-# Find similar companies
-/search?facet_significant=names  # Use with company entities
-
-# Cross-language matching via name symbols
-# "Vladimir Putin" matches "Владимир Путин"
-
-# Sound-alike matching via phonetic encoding
-# "Smith" matches "Smythe"
-```
-
-## Name Field Types
-
-OpenAleph-Search uses four different name field types for comprehensive matching:
-
-### 1. `name` - Original Entity Names
-
-**Field Type:** `text`
-**Purpose:** Exact entity names and captions as they appear in source data
-
-```python
-# Example values
-"name": ["John Smith", "Mr. John Smith", "J. Smith"]
-```
-
-**Characteristics:**
-
-- Preserves original formatting and punctuation
-- Used for full-text search with boosting (`^4` in search)
-- Analyzed with ICU tokenizer for Unicode support
-- Stored for highlighting display
-
-### 2. `names` - Normalized Name Keywords
-
-**Field Type:** `keyword` with `name-kw-normalizer`
-**Purpose:** Normalized keywords for exact matching and aggregation
-
-```python
-# Example transformation
 "John Smith & Associates Ltd." → "john smith associates ltd"
 ```
 
-**Normalization Process:**
+Normalization:
+- Lowercase conversion
+- Special character removal
+- Whitespace collapsing
+- Diacritic folding
 
-- Convert to lowercase
-- Remove special characters and HTML
-- Collapse multiple spaces
-- ASCII folding for diacritics
+### 2. Name symbols
 
-**Usage:**
+Cross-language and cross-alphabet matching via symbolic representations. This can be considered as a synonyms search, but more precise and context specific than [a global synonyms file](https://www.elastic.co/docs/solutions/search/full-text/search-with-synonyms).
 
-- Facet aggregation
-- Exact name matching with fuzziness
-- High boost factor (`^3` in search)
+This uses [`rigour.names`](https://rigour.followthemoney.tech/names/). The example symbol used here from wikidata: [Vladimir](https://www.wikidata.org/wiki/Q47200243)
 
-### 3. `name_symbols` - Name Symbols from Rigour.Names
+The extracted symbols are indexed in the `name_symbols` keyword field.
 
-**Field Type:** `keyword`
-**Purpose:** Symbolic representations for cross-language matching
-
-Name symbols are generated using the [Rigour Names](http://rigour.followthemoney.tech/names/) library, which creates standardized symbolic representations:
-
-```python
-# Example symbol generation
+Example:
+```
 "Vladimir Putin" → [NAME:47200243]
-"Владимир Путин" → [NAME:47200243] # Same symbol!
+"Владимир Путин" → [NAME:47200243]
 ```
 
-**Features:**
+Same symbol = same entity name (part) across languages.
 
-- Cross-language entity matching
-- Consistent symbols for name variants
-- Language-independent matching
-- Generated from entity names using `ftmq.util.get_name_symbols()`
+### 3. Phonetic encoding
 
-### 4. `name_phonetic` - Metaphone Phonetic Encoding
+Sound-alike matching using Double Metaphone algorithm.
 
-**Field Type:** `keyword`
-**Purpose:** Sound-alike matching using Double Metaphone algorithm
+The phonetic representations are indexed in the `name_phonetics` keyword field.
 
-```python
-# Example phonetic encoding
+Example:
+```
 "Smith" → "SM0"
-"Smythe" → "SM0"  # Same phonetic code
-"John" → "JN"
-"Jon" → "JN"      # Same phonetic code
+"Smythe" → "SM0"
 ```
 
-**Implementation Details:**
-- Uses `rigour.text.metaphone` for encoding
-- Minimum 3 character tokens
-- Only modern alphabet characters
-- ASCII conversion before phonetic encoding
-- Boost factor of `0.8` (lower than exact matching)
+Catches alternate spellings and transcription variations.
 
-## Name Processing Pipeline
+### 4. Name parts
 
-The name processing pipeline in `openaleph_search/transform/util.py` handles multiple transformation stages:
+Individual name components for partial matching.
 
-### 1. Name Preprocessing (`preprocess_name`)
+Index field: `name_parts` (keyword)
 
-```python
-def preprocess_name(name: str) -> str:
-    """Preprocess a name for comparison."""
-    name = unicodedata.normalize("NFC", name)  # Unicode normalization
-    name = name.lower()                        # Lowercase conversion
-    return collapse_spaces(name)               # Space normalization
+Example:
 ```
-
-### 2. Schema-Aware Tokenization (`clean_tokenize_name`)
-
-Different processing based on entity schema:
-
-```python
-# Organization names
-if schema.name in ("Organization", "Company", "PublicBody"):
-    name = replace_org_types_compare(name)  # "Corp" → "Corporation"
-
-# Person names
-elif schema.name in ("Person"):
-    name = remove_person_prefixes(name)     # "Mr. John" → "John"
-
-return tokenize_name(name)  # Split into tokens
-```
-
-### 3. Name Keys Generation (`index_name_keys`)
-
-Creates sortable keys for deduplication:
-
-```python
-# Example process
-"John A. Smith Jr." → ["john", "smith", "jr"] → "jjrsmith"
-```
-
-**Features:**
-- Sorted ASCII tokens concatenated
-- Minimum 5 characters for indexing
-- Used for exact deduplication matching
-- Highest boost factor (`4.0`)
-
-### 4. Name Parts Generation (`index_name_parts`)
-
-Individual searchable components:
-
-```python
-# Example output
 "John Smith & Associates" → ["john", "smith", "associates"]
 ```
 
-**Features:**
-- Individual tokens for partial matching
-- ASCII variants for international names
-- Minimum 2 characters per part
-- Boost factor of `1.0`
+Matches entities sharing name components.
 
-### 5. Phonetic Generation (`phonetic_names`)
+### 5. Name keys
 
-Creates phonetic representations:
+Sorted token concatenation for exact deduplication.
 
-```python
-def phonetic_names(schema: Schema, names: List[str]) -> Set[str]:
-    phonemes = set()
-    for name in names:
-        for token in clean_tokenize_name(schema, name):
-            if len(token) >= 3 and is_modern_alphabet(token):
-                phoneme = metaphone(ascii_text(token))
-                if len(phoneme) > 2:
-                    phonemes.add(phoneme)
-    return phonemes
+Index field: `name_keys` (keyword)
+
+Example:
+```
+"John A. Smith Jr." → "jjrsmith"
 ```
 
-## MatchQuery Implementation
+Highest matching score when names contain the same tokens.
 
-### Basic Usage
 
-```python
-from openaleph_search.query.queries import MatchQuery
-from openaleph_search.parse.parser import SearchQueryParser
+## Identifier matching
 
-# Create entity to match against
-entity = make_entity({
-    "id": "person-123",
-    "schema": "Person",
-    "properties": {
-        "name": ["John Smith"],
-        "nationality": ["us"],
-        "email": ["john@example.com"]
-    }
-})
+Exact matching on unique identifiers:
 
-# Find similar entities
-parser = SearchQueryParser([])
-query = MatchQuery(parser, entity)
-result = query.search()
-```
-
-### Name-Based Matching Strategy
-
-The `names_query` function creates a comprehensive search strategy:
-
-```python
-def names_query(schema: Schema, names: list[str]) -> Clauses:
-    shoulds = []
-
-    # 1. Fuzzy matching on normalized names (boost: 3.0)
-    for name in pick_names(names, limit=5):
-        shoulds.append({
-            "match": {
-                Field.NAMES: {
-                    "query": name,
-                    "operator": "AND",
-                    "boost": 3.0,
-                    "fuzziness": "AUTO"  # Edit distance tolerance
-                }
-            }
-        })
-
-    # 2. Exact name key matching (boost: 4.0)
-    for key in index_name_keys(schema, names):
-        shoulds.append({
-            "term": {Field.NAME_KEYS: {"value": key, "boost": 4.0}}
-        })
-
-    # 3. Name parts matching (boost: 1.0)
-    for token in index_name_parts(schema, names):
-        shoulds.append({
-            "term": {Field.NAME_PARTS: {"value": token, "boost": 1.0}}
-        })
-
-    # 4. Phonetic matching (boost: 0.8)
-    for phoneme in phonetic_names(schema, names):
-        shoulds.append({
-            "term": {Field.NAME_PHONETIC: {"value": phoneme, "boost": 0.8}}
-        })
-
-    # 5. Symbol matching (no boost - exact match)
-    for symbol in get_name_symbols(schema, *names):
-        shoulds.append({
-            "term": {Field.NAME_SYMBOLS: str(symbol)}
-        })
-
-    return shoulds
-```
-
-### Name Selection Algorithm (`pick_names`)
-
-To prevent query explosion with entities having many aliases, the system intelligently selects representative names:
-
-```python
-def pick_names(names: list[str], limit: int = 3) -> list[str]:
-    # 1. Pick centroid name (most representative)
-    picked_name = registry.name.pick(names)
-
-    # 2. Pick most dissimilar names using Levenshtein distance
-    for _ in range(1, limit):
-        candidates = {}
-        for cand in names:
-            if cand not in picked:
-                # Calculate total distance from already picked names
-                candidates[cand] = sum(levenshtein(pick, cand) for pick in picked)
-
-        # Select name with maximum distance (most unique)
-        pick = max(candidates, key=candidates.get)
-        picked.append(pick)
-
-    return picked
-```
-
-## Identifier Matching
-
-Beyond names, the system matches on entity identifiers:
-
-```python
-def identifiers_query(entity: EntityProxy) -> Clauses:
-    shoulds = []
-    for prop, value in entity.itervalues():
-        if prop.type.group == registry.identifier.group:
-            shoulds.append({
-                "term": {
-                    f"properties.{prop.name}": {
-                        "value": value,
-                        "boost": 3.0
-                    }
-                }
-            })
-    return shoulds
-```
-
-**Identifier Types:**
 - Registration numbers
-- Tax identifiers
+- Tax IDs
 - Passport numbers
 - License numbers
-- Other unique identifiers
+- Other unique codes
 
-## Property-Based Scoring
+Identifiers have high matching weight (boost: 3.0).
 
-Additional properties provide scoring signals:
+## Property matching
 
-### High-Specificity Match Groups
+Additional signals from entity properties:
 
-Properties with high matching value (boost: `2.0`):
+### High-value properties (boost: 2.0)
 
-```python
-MATCH_GROUPS = [
-    registry.ip.group,     # IP addresses
-    registry.url.group,    # URLs
-    registry.email.group,  # Email addresses
-    registry.phone.group,  # Phone numbers
-]
-```
+- IP addresses
+- URLs
+- Email addresses
+- Phone numbers
 
-### General Property Scoring
+### General properties
 
-Other properties contribute to similarity score without boosting:
+All other properties contribute to similarity score without boosting.
 
-```python
-# Properties sorted by specificity
-filters = sorted(filters, key=lambda p: p[2], reverse=True)
+Properties are sorted by specificity - more unique values score higher.
 
-# Add to query based on specificity
-for type_, value, specificity in filters:
-    if specificity > 0 and num_clauses <= MAX_CLAUSES:
-        if type_.group not in MATCH_GROUPS:
-            scoring.append({
-                "term": {type_.group: {"value": value}}
-            })
-```
+## Schema compatibility
 
-## Schema Compatibility
+Matching respects entity type compatibility:
 
-Matching respects entity schema compatibility:
+- `Person` matches `Person` and `LegalEntity`
+- `Company` matches `Company`, `Organization`, and `LegalEntity`
+- Some other entity schemata like `Document` are not matchable
 
-```python
-def get_index(self):
-    # Only match within compatible schema types
-    schemata = list(self.entity.schema.matchable_schemata)
-    return entities_read_index(schema=schemata)
-```
+Only compatible schema types can match each other.
 
-**Examples:**
-- `Person` can match `Person` or `LegalEntity`
-- `Company` can match `Company`, `Organization`, or `LegalEntity`
-- `Document` cannot match entities (not matchable)
-- `RealEstate` is unmatchable (even similar properties don't indicate same entity)
+## Scoring
 
-## Query Structure
+Match scores combine multiple factors:
 
-A complete match query combines multiple strategies:
+| Signal | Boost | Index field |
+|--------|-------|-------------|
+| Names | 3.0 | `names` |
+| Identifiers | 3.0 | `properties.*` (for group type "identifier") |
+| Name keys (exact tokens) | 2.5 | `name_keys` |
+| High-value properties | 2.0 | `properties.*` (ip, url, email, phone) |
+| Name parts | 1.0 | `name_parts` |
+| Name symbols | 1.0 | `name_symbols` |
+| Other properties | 1.0 | `properties.*` |
+| Phonetic codes | 0.8 | `name_phonetics` |
 
-```python
+Higher boost = more important for matching.
+
+## Performance limits
+
+To prevent query explosion:
+
+- Maximum 500 query clauses
+- Maximum 5 names used per entity
+- Names selected by diversity (Levenshtein distance)
+
+Entities with many aliases use representative names only.
+
+## Name selection
+
+See `openaleph_search.query.matching:pick_names`
+
+For entities with many aliases, the system selects representative names:
+
+1. Pick centroid name (most representative)
+2. Pick most dissimilar names using Levenshtein distance
+3. Use up to 5 names total
+
+This prevents performance issues while maintaining matching quality.
+
+## Query structure
+
+A match query combines multiple strategies:
+
+```json
 {
-    "bool": {
-        "must": [
-            {
-                "bool": {
-                    "should": [
-                        # Name-based matching clauses
-                        {"match": {"names": {"query": "john smith", "boost": 3.0}}},
-                        {"term": {"name_keys": {"value": "johnsmith", "boost": 4.0}}},
-                        {"term": {"name_parts": {"value": "john", "boost": 1.0}}},
-                        {"term": {"name_phonetic": {"value": "JN", "boost": 0.8}}},
-                        {"term": {"name_symbols": "[NAME:12345]"}}
-                    ],
-                    "minimum_should_match": 1
-                }
-            },
-            {
-                "bool": {
-                    "should": [
-                        # Identifier-based matching
-                        {"term": {"properties.passportNumber": {"value": "A1234567", "boost": 3.0}}}
-                    ],
-                    "minimum_should_match": 0
-                }
-            }
-        ],
-        "should": [
-            # Property-based scoring
-            {"term": {"emails": {"value": "john@example.com", "boost": 2.0}}},
-            {"term": {"countries": {"value": "us"}}}
-        ],
-        "must_not": [
-            {"ids": {"values": ["person-123"]}}  # Exclude self
-        ],
-        "filter": [
-            {"terms": {"dataset": ["allowed_datasets"]}}
-        ]
-    }
+  "bool": {
+    "must": [
+      {
+        "bool": {
+          "should": [
+            // Name matching clauses
+            {"match": {"names": {"query": "john smith", "fuzziness": "AUTO"}}},
+            {"term": {"name_keys": "johnsmith"}},
+            {"term": {"name_parts": "john"}},
+            {"term": {"name_phonetic": "JN"}},
+            {"term": {"name_symbols": "[NAME:12345]"}}
+          ],
+          "minimum_should_match": 1
+        }
+      },
+      {
+        "bool": {
+          "should": [
+            // Identifier matching
+            {"term": {"properties.registrationNumber": "ABC123"}}
+          ],
+          "minimum_should_match": 0
+        }
+      }
+    ],
+    "should": [
+      // Property scoring
+      {"term": {"emails": "john@example.com"}},
+      {"term": {"countries": "us"}}
+    ]
+  }
 }
 ```
 
-## Performance Considerations
+## Optimization tips
 
-### Query Complexity Limits
+### For better matching
 
-```python
-MAX_CLAUSES = 500  # Prevent query explosion
-```
+- Include multiple name variants when available
+- Provide identifiers (registration numbers, tax IDs)
+- Add email, phone, address properties
+- Specify country/jurisdiction
 
-The system limits total query clauses to prevent performance degradation with entities having many properties.
+### For performance
 
-### Name Selection Optimization
+- Filter by dataset to reduce search space
+- Filter by schema to search specific entity types
+- Use specific identifiers to narrow results
 
-- Limits to 5 most representative names
-- Uses Levenshtein distance for diversity
-- Prevents queries with hundreds of name variants
+## Name processing pipeline
 
-### Schema-Specific Processing
+Names go through multiple processing stages:
 
-Different tokenization and normalization for:
-- **Organizations**: Company type normalization
-- **Persons**: Prefix removal
-- **General entities**: Standard processing
+- Unicode normalization (NFC), lowercase (if latinizable)
+- Schema-specific tokenization
+- Token sorting (for name keys)
+- Phonetic encoding (for phonetic field)
+- Symbol generation (for cross-language and cross-alphabet)
 
-## Function Score Integration
-
-Match results use function scoring to boost important entities:
-
-```python
-{
-    "function_score": {
-        "query": match_query,
-        "functions": [{
-            "field_value_factor": {
-                "field": "num_values",
-                "factor": 0.5,
-                "modifier": "sqrt"
-            }
-        }],
-        "boost_mode": "sum"
-    }
-}
-```
-
-This ensures entities with more complete information rank higher.
-
-## Usage Examples
-
-### Basic Entity Matching
-
-```python
-# Find similar companies
-company = make_entity({
-    "schema": "Company",
-    "properties": {
-        "name": ["Acme Corporation"],
-        "country": ["us"],
-        "registrationNumber": ["12345"]
-    }
-})
-
-query = MatchQuery(SearchQueryParser([]), company)
-results = query.search()
-```
-
-### Filtered Matching
-
-```python
-# Find matches within specific datasets
-parser = SearchQueryParser([
-    ("filter:dataset", "companies_dataset")
-])
-query = MatchQuery(parser, entity, datasets=["companies_dataset"])
-```
-
-### Cross-Language Matching
-
-```python
-# Entities with different language names but same symbols
-entity1 = {"name": ["Vladimir Putin"]}      # → [NAME:47200243]
-entity2 = {"name": ["Владимир Путин"]}      # → [NAME:47200243]
-# Will match via name_symbols field
-```
-
-## Testing and Validation
-
-The matching system includes comprehensive tests:
-
-```python
-def test_matching():
-    # Same name, different properties
-    jane_us = make_entity("Person", "Jane Doe", nationality="us")
-    jane_mt = make_entity("Person", "Jane Doe", nationality="mt")
-
-    # Similar names with diacritics
-    jane_plain = make_entity("Person", "Jane Doe", email="jane@foo.local")
-    jane_diacritic = make_entity("Person", "Jane Dö", email="jane@foo.local")
-
-    # Test matching finds similar entities
-    query = MatchQuery(parser, jane_us)
-    results = query.search()
-    # Should find jane_mt, jane_plain, jane_diacritic
-```
-
-The tests verify matching across name variants, diacritics, and property combinations while respecting schema compatibility constraints.
-
----
-
-## Technical Implementation
-
-### Overview
-
-Entity matching is implemented through the `MatchQuery` class in `openaleph_search/query/queries.py:86` and the `match_query` function in `openaleph_search/query/matching.py:103`. The system uses multiple name representations and property comparisons to find similar entities with high precision.
-
-### Implementation Details
-
-The matching system provides:
-- **Multi-field Name Processing**: Four different name representations for comprehensive matching
-- **Smart Name Selection**: Prevents query explosion using Levenshtein distance selection
-- **Schema Compatibility**: Only matches within compatible entity types
-- **Performance Limits**: MAX_CLAUSES (500) prevents complex query issues
-
-### Implementation Location
-
-Entity matching logic is in:
-- `openaleph_search/query/matching.py:103` - Core matching algorithm
-- `openaleph_search/query/queries.py:86` - MatchQuery class
-- `openaleph_search/transform/util.py` - Name processing utilities
-- `openaleph_search/query/matching.py:29` - Name selection algorithm
+Each stage creates different search representations optimized for specific matching scenarios.

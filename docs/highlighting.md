@@ -1,395 +1,283 @@
-# Search Result Highlighting
+# Highlighting
 
-Highlight search terms in your results to show users exactly where matches occur. OpenAleph-Search automatically selects the best highlighting method for each field type.
+Show where search terms appear in results with highlighted text snippets.
 
-## Quick Start
+[Elasticsearch documentation highlighters](https://www.elastic.co/docs/reference/elasticsearch/rest-apis/highlighting)
 
-### Basic Usage
+## Basic usage
+
+Enable highlighting via query parameters:
 
 ```bash
-# Enable highlighting for search results
-/search?q=corruption&highlight=true
-
-# Control number of highlight fragments per document
-/search?q=investigation&highlight=true&highlight_count=5
+openaleph-search search query-string "corruption" --args "highlight=true"
 ```
 
-### URL Parameters
+## Parameters
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `highlight` | bool | false | Enable search result highlighting |
-| `highlight_count` | int | 3 | Number of highlight fragments per document |
-| `max_highlight_analyzed_offset` | int | 999999 | Maximum characters to analyze for highlighting |
+### `highlight`
 
-## Highlighter Types
+Enable highlighting.
 
-OpenAleph-Search uses three different Elasticsearch highlighters, each optimized for specific field types:
+- Type: `bool`
+- Default: `false`
 
-### 1. Fast Vector Highlighter (FVH) - Content Field
+### `highlight_count`
 
-**Field:** `content` (primary document text)
-**Type:** `fvh` (Fast Vector Highlighter)
+Number of snippets per document.
 
-The content field uses the Fast Vector Highlighter, which is the most advanced option available:
+- Type: `int`
+- Default: `3`
+- Use `0` to return full highlighted text
 
-```python
-{
-    "type": "fvh",
-    "fragment_size": 400,
-    "fragment_offset": 50,
-    "number_of_fragments": 3,
-    "phrase_limit": 256,
-    "order": "score",
-    "boundary_scanner": "sentence",
-    "boundary_max_scan": 50,
-    "max_analyzed_offset": 999999
-}
+```bash
+--args "highlight=true&highlight_count=5"
 ```
 
-**Key Features:**
+### `max_highlight_analyzed_offset`
 
-- **Term Vectors Required**: Uses `term_vector: "with_positions_offsets"` from index mapping
-- **Best Quality**: Most accurate highlighting with phrase support
-- **Sentence Boundaries**: Breaks fragments at sentence boundaries for readability
-- **Score Ordering**: Returns highest-scoring fragments first
-- **Large Document Support**: Can handle documents up to ~1MB
+Maximum characters to analyze per document.
 
-**Performance Characteristics:**
+- Type: `int`
+- Default: `999999`
 
-- **Speed**: Fast due to pre-computed term vectors
-- **Memory**: Higher memory usage due to term vector storage
-- **Accuracy**: Highest accuracy for complex queries and phrases
+Reduce this value for better performance on large documents:
 
-### 2. Unified Highlighter - Name Field
-
-**Field:** `name` (entity names)
-**Type:** `unified`
-
-Entity names use the Unified Highlighter for mixed content handling:
-
-```python
-{
-    "type": "unified",
-    "fragment_size": 200,
-    "number_of_fragments": 3,
-    "fragmenter": "simple",
-    "max_analyzed_offset": 999999,
-    "pre_tags": [""],
-    "post_tags": [""]
-}
+```bash
+--args "highlight=true&max_highlight_analyzed_offset=500000"
 ```
 
-**Key Features:**
+## Highlighter types
 
-- **Mixed Content**: Good for both analyzed and non-analyzed content
-- **Name Preservation**: Simple fragmenter avoids breaking names awkwardly
-- **Longer Fragments**: 200 characters to capture full names/titles
-- **No Markup**: Currently configured without HTML tags
+The system uses different Elasticsearch highlighters optimized for each field type:
 
-### 3. Plain Highlighter - Other Fields
+### Fast Vector Highlighter (FVH)
 
-**Fields:** `names` (keywords), `text`, and other general fields
-**Type:** `plain`
+Used for: `content` field (full-text of source documents)
 
-For keyword fields and secondary content:
+Best for long text with accurate phrase highlighting. Requires term vectors to be stored in the index.
 
-```python
-{
-    "type": "plain",
-    "fragment_size": 150,
-    "number_of_fragments": 1,
-    "max_analyzed_offset": 999999
-}
+Configuration (via environment):
+
+- `OPENALEPH_SEARCH_HIGHLIGHTER_FVH_ENABLED=true` (default)
+- Requires `OPENALEPH_SEARCH_CONTENT_TERM_VECTORS=true` (default)
+
+If fast vector highlighting is disabled, the unified highlighter is used for the `content` field.
+
+### Unified Highlighter
+
+Used for: `name` field
+
+Balanced performance for entity names and titles.
+
+### Plain Highlighter
+
+Used for: `names` (keywords), `text`, and other fields
+
+Fast highlighting for simple matches.
+
+## Configuration
+
+Control highlighting behavior via environment variables:
+
+### `highlighter_fvh_enabled`
+
+Use Fast Vector Highlighter for content field.
+
+```bash
+export OPENALEPH_SEARCH_HIGHLIGHTER_FVH_ENABLED=true
 ```
 
-**Key Features:**
+When false, uses Unified Highlighter instead.
 
-- **Fastest Performance**: Minimal processing overhead
-- **Simple Highlighting**: Basic term matching
-- **Shorter Fragments**: Focused on essential matches
-- **Universal Compatibility**: Works with any field type
+### `highlighter_fragment_size`
 
-## Field-Specific Configuration
+Characters per snippet.
 
-### Content Field Optimization
-
-The content field is specially configured for optimal highlighting:
-
-**Index Mapping:**
-```python
-CONTENT = {
-    "type": "text",
-    "analyzer": "icu-default",
-    "search_analyzer": "icu-default",
-    "index_phrases": True,           # Enable phrase queries
-    "term_vector": "with_positions_offsets"  # Required for FVH
-}
+```bash
+export OPENALEPH_SEARCH_HIGHLIGHTER_FRAGMENT_SIZE=200
 ```
 
-**Highlighting Benefits:**
-- **Phrase Highlighting**: Accurate highlighting of multi-word phrases
-- **Position Awareness**: Precise term position tracking
-- **Offset Information**: Character-level highlight positioning
+Default: `200`
 
-### Name Field Configuration
+### `highlighter_number_of_fragments`
 
-Name fields balance accuracy with performance:
+Snippets per document.
 
-**Index Mapping:**
-```python
-NAME = {
-    "type": "text",
-    "similarity": "weak_length_norm",  # Don't penalize long names
-    "store": True                     # Store for highlighting
-}
+```bash
+export OPENALEPH_SEARCH_HIGHLIGHTER_NUMBER_OF_FRAGMENTS=3
 ```
 
-**Highlighting Benefits:**
-- **Full Name Display**: Longer fragments capture complete names
-- **Stored Field Access**: Fast retrieval from stored content
-- **Simple Fragmentation**: Preserves name integrity
+Default: `3`
 
-## Highlight Query Integration
+### `highlighter_phrase_limit`
 
-### Automatic Query Detection
+Maximum phrases to analyze per document.
 
-The highlighter automatically detects and uses the appropriate query:
-
-```python
-def get_highlight(self) -> dict[str, Any]:
-    query = self.get_query_string()
-    if self.parser.filters:
-        # Build complex highlight query including filters
-        query = bool_query()
-        if self.get_query_string():
-            query["bool"]["should"] = [self.get_query_string()]
-        # Add filter-based highlighting for names and groups
-        for key, values in self.parser.filters.items():
-            if key in GROUPS or key == Field.NAME:
-                for value in values:
-                    query["bool"]["should"].append({
-                        "multi_match": {
-                            "fields": [Field.CONTENT, Field.TEXT, Field.NAME],
-                            "query": value,
-                            "operator": "AND"
-                        }
-                    })
+```bash
+export OPENALEPH_SEARCH_HIGHLIGHTER_PHRASE_LIMIT=64
 ```
 
-### Filter-Based Highlighting
+Default: `64`
 
-When filters are applied, the system extends highlighting to include filter terms:
-- **Name Filters**: Highlight name matches in content
-- **Group Filters**: Highlight country names, organization names, etc.
-- **Multi-Field Matching**: Search across content, text, and name fields
+Lower values improve performance but may miss some matches.
 
-## Response Structure
+### `highlighter_boundary_max_scan`
 
-### Highlight Response Format
+Characters to scan for sentence boundaries.
+
+```bash
+export OPENALEPH_SEARCH_HIGHLIGHTER_BOUNDARY_MAX_SCAN=100
+```
+
+Default: `100`
+
+### `highlighter_no_match_size`
+
+Fragment size when no match found.
+
+```bash
+export OPENALEPH_SEARCH_HIGHLIGHTER_NO_MATCH_SIZE=300
+```
+
+Default: `300`
+
+### `highlighter_max_analyzed_offset`
+
+Maximum characters to analyze.
+
+```bash
+export OPENALEPH_SEARCH_HIGHLIGHTER_MAX_ANALYZED_OFFSET=999999
+```
+
+Default: `999999`
+
+## Response format
+
+Highlighted results appear in the `highlight` field:
 
 ```json
 {
-    "hits": {
-        "hits": [
-            {
-                "_id": "document-123",
-                "_source": {...},
-                "highlight": {
-                    "content": [
-                        "The <em>corruption</em> investigation revealed...",
-                        "Evidence of <em>money laundering</em> was found..."
-                    ],
-                    "names": [
-                        "<em>John Smith</em>"
-                    ],
-                    "text": [
-                        "Additional <em>evidence</em> suggests..."
-                    ]
-                }
-            }
-        ]
-    }
+  "hits": {
+    "hits": [
+      {
+        "_id": "doc-123",
+        "_source": {...},
+        "highlight": {
+          "content": [
+            "Evidence of <em>corruption</em> was found...",
+            "The <em>investigation</em> revealed..."
+          ],
+          "name": [
+            "<em>John Smith</em>"
+          ]
+        }
+      }
+    ]
+  }
 }
 ```
 
-### Highlighted Fields
+Matched terms are wrapped in `<em>` tags.
 
-The system highlights multiple fields simultaneously:
+## Fields highlighted
 
-| Field | Content | Highlighter | Purpose |
-|-------|---------|-------------|---------|
-| `content` | Primary document text | FVH | Main content highlighting |
-| `names` | Entity name keywords | Plain | Name matching |
-| `name` | Original entity names | Unified | Full name display |
-| `text` | Secondary text content | Plain | Additional context |
+Multiple fields are highlighted automatically:
 
-## Performance Considerations
+- `content` - Main document text
+- `name` - Entity names
+- `names` - Name keywords
+- `text` - Secondary text content
 
-### Term Vector Storage
+## Examples
 
-The content field's term vectors require additional storage:
-- **Index Size**: ~20-30% larger due to term vectors
-- **Query Speed**: Significantly faster highlighting
-- **Memory Usage**: Higher during indexing and highlighting
+### Basic highlighting
 
-### Boundary Scanning
-
-Sentence boundary detection improves readability:
-- **Processing Cost**: Minimal overhead for better UX
-- **Fragment Quality**: More coherent text snippets
-- **Max Scan Limit**: 50 characters to prevent performance issues
-
-### Large Document Handling
-
-All highlighters support large documents:
-- **Max Analyzed Offset**: 999,999 characters (~1MB)
-- **Fragment Prioritization**: Best matches first
-- **Memory Management**: Streaming analysis for large content
-
-## Configuration Examples
-
-### High-Performance Setup
-
-For maximum highlighting performance:
-
-```python
-# Increase fragment limits for detailed highlighting
-{
-    "highlight_count": 10,
-    "max_highlight_analyzed_offset": 2000000
-}
-```
-
-### Memory-Conscious Setup
-
-For memory-constrained environments:
-
-```python
-# Reduce fragment counts and analysis limits
-{
-    "highlight_count": 2,
-    "max_highlight_analyzed_offset": 500000
-}
-```
-
-## Advanced Features
-
-### Phrase Limit Control
-
-Content highlighting includes phrase limit protection:
-```python
-"phrase_limit": 256  # Maximum phrases to analyze
-```
-
-This prevents performance degradation on documents with excessive phrase matches.
-
-### Fragment Ordering
-
-Fragments are ordered by relevance score:
-```python
-"order": "score"  # Best matches first
-```
-
-Users see the most relevant highlighted content immediately.
-
-### HTML Tag Configuration
-
-Currently disabled but configurable:
-```python
-# Disabled tags
-"pre_tags": [""],
-"post_tags": [""]
-
-# Could be enabled with:
-"pre_tags": ["<em class='highlight'>"],
-"post_tags": ["</em>"]
-```
-
-## Integration with Search Queries
-
-### Query String Highlighting
-
-For simple text queries:
 ```bash
-/search?q=corruption investigation&highlight=true
+openaleph-search search query-string "money laundering" --args "highlight=true"
 ```
 
-Highlights both "corruption" and "investigation" terms.
+### More snippets
 
-### Boolean Query Highlighting
-
-For complex queries:
 ```bash
-/search?q=money AND laundering&highlight=true
+openaleph-search search query-string "investigation" \
+  --args "highlight=true&highlight_count=5"
 ```
 
-Highlights the complete phrase context.
+### Full text highlighting
 
-### Filter Integration
-
-Filters contribute to highlighting:
 ```bash
-/search?q=investigation&filter:names=John Smith&highlight=true
+openaleph-search search query-string "evidence" \
+  --args "highlight=true&highlight_count=0"
 ```
 
-Highlights both "investigation" and "John Smith" across relevant fields.
+### Limited document size
+
+```bash
+openaleph-search search query-string "report" \
+  --args "highlight=true&max_highlight_analyzed_offset=100000"
+```
+
+### With filters
+
+```bash
+openaleph-search search query-string "corruption" \
+  --args "filter:schema=Document&filter:countries=us&highlight=true"
+```
+
+## Performance considerations
+
+### Index size
+
+Fast Vector Highlighter requires term vectors, which increase index size by approximately 20-30%.
+
+Disable term vectors if index storage size is a serious concern:
+
+```bash
+export OPENALEPH_SEARCH_CONTENT_TERM_VECTORS=false
+```
+
+Requires reindexing to take effect.
+
+### Query performance
+
+- More snippets (`highlight_count`) = slower queries
+- Larger documents = slower highlighting
+- Lower `phrase_limit` = faster but less accurate
+- Reduce `max_highlight_analyzed_offset` for large documents
+
+### Optimization tips
+
+For better performance:
+
+```bash
+# Reduce snippets
+--args "highlight=true&highlight_count=2"
+
+# Limit analyzed text
+--args "highlight=true&max_highlight_analyzed_offset=500000"
+
+# Use dehydration with highlighting
+--args "highlight=true&dehydrate=true"
+```
 
 ## Troubleshooting
 
-### No Highlights Returned
+### No highlights returned
 
-Common causes:
-- `highlight=false` parameter
-- No matching terms in highlightable fields
-- Terms only in non-analyzed fields
+Check that:
+- `highlight=true` parameter is set
+- Query matches terms in highlightable fields
+- Terms exist in analyzed fields (not just keyword fields)
 
-### Incomplete Highlights
+### Incomplete highlights
 
-Potential issues:
-- `max_analyzed_offset` limit reached
-- Complex queries exceeding phrase limits
-- Memory constraints during highlighting
+- Document may exceed `max_highlight_analyzed_offset`
+- Query may exceed `phrase_limit`
+- Field may not have term vectors enabled
 
-### Performance Issues
+### Slow highlighting
 
-Optimization strategies:
-- Reduce `highlight_count` for faster queries
-- Lower `max_analyzed_offset` for memory savings
-- Consider disabling highlighting for bulk operations
-
-## Testing Highlighting
-
-The test suite includes highlighting verification:
-
-```python
-def test_highlighting():
-    # Basic term highlighting
-    result = search_with_highlight("corruption")
-    assert "<em>corruption</em>" in result
-
-    # Phrase highlighting
-    result = search_with_highlight('"money laundering"')
-    assert "<em>money laundering</em>" in result
-
-    # Unicode support
-    result = search_with_highlight("Українська")
-    assert "<em>Українська</em>" in result
-```
-
-This ensures highlighting works correctly across different languages and query types.
-
----
-
-## Technical Implementation
-
-### Overview
-
-Highlighting is implemented in `openaleph_search/query/highlight.py` using the `get_highlighter()` function. The system automatically selects the optimal highlighter type based on the field being highlighted, providing the best performance and user experience for each content type.
-
-### Implementation Location
-
-The highlighting system is implemented in:
-- `openaleph_search/query/highlight.py` - Core highlighting logic
-- `openaleph_search/query/base.py:309` - Query integration
-- `openaleph_search/index/mapping.py:146` - Term vector configuration
+- Reduce `highlight_count`
+- Lower `max_highlight_analyzed_offset`
+- Decrease `phrase_limit`
+- (Other than that the name suggests, the FVH seems to be _slower_ than the unified highlighter): Consider disabling FVH: `OPENALEPH_SEARCH_HIGHLIGHTER_FVH_ENABLED=false`

@@ -53,7 +53,7 @@ def more_like_this_query(
     # Build the more_like_this query using document ID
     mlt_query = {
         "more_like_this": {
-            "fields": [Field.CONTENT, Field.TEXT, Field.NAME, Field.NAMES],
+            "fields": [Field.CONTENT, Field.TEXT, Field.NAME],
             "like": [{"_id": entity.id}],
             "min_term_freq": min_term_freq,
             "max_query_terms": max_query_terms,

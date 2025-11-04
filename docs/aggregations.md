@@ -1,368 +1,286 @@
-# Aggregations
+# Facets & Aggregations
 
-Extract insights from your search results through faceting, statistical analysis, and significant term detection. Aggregations help you discover patterns and trends in your data.
+Analyze search results through aggregations to understand data distribution and patterns.
 
-## Quick Start
+See [significant terms aggregations](./significant_terms.md) as well.
 
-### Types of Aggregations
-
-OpenAleph-Search supports three main types of aggregations:
-
-1. **Regular Facet Aggregations** - Count distinct values in fields
-2. **Significant Terms Aggregations** - Find statistically unusual terms
-3. **Significant Text Aggregations** - Extract meaningful phrases from text content
-
-### Basic Usage
+## Basic usage
 
 ```bash
-# Regular facets
-/search?facet=dataset&facet=schema
+# Single facet
+openaleph-search search query-string "corruption" --args "facet=dataset"
 
-# Significant terms
-/search?facet_significant=names&facet_significant=countries
-
-# Significant text
-/search?facet_significant_text=content&facet_significant_text_size=10
+# Multiple facets
+openaleph-search search query-string "investigation" \
+  --args "facet=dataset&facet=schema&facet=countries"
 ```
 
-## Regular Facet Aggregations
+## Types
 
-### Terms Aggregations
+### Terms aggregations
 
-Terms aggregations provide counts of distinct values for a field:
+Count distinct values in keyword fields.
 
-```python
-# URL parameter
-/search?facet=dataset&facet=schema
-
-# Generated Elasticsearch aggregation
-{
-    "dataset.values": {
-        "terms": {
-            "field": "dataset",
-            "size": 20,
-            "execution_hint": "map"
-        }
-    },
-    "schema.values": {
-        "terms": {
-            "field": "schema",
-            "size": 20,
-            "execution_hint": "map"
-        }
-    }
-}
+```bash
+openaleph-search search query-string "corruption" \
+  --args "facet=dataset&facet=schema"
 ```
 
-### Cardinality Aggregations
+### Cardinality aggregations
 
-Get total count of distinct values for a field:
+Get total count of distinct values.
 
-```python
-# URL parameter
-/search?facet=countries&facet_total:countries=true
-
-# Generated aggregation
-{
-    "countries.cardinality": {
-        "cardinality": {
-            "field": "countries"
-        }
-    }
-}
+```bash
+openaleph-search search query-string "investigation" \
+  --args "facet=countries&facet_total:countries=true"
 ```
 
-### Date Histogram Aggregations
+### Date histogram aggregations
 
-For date fields, you can create time-based histograms:
+Group results by time intervals.
 
-```python
-# URL parameter
-/search?facet=created_at&facet_interval:created_at=month
-
-# Generated aggregation
-{
-    "created_at.intervals": {
-        "date_histogram": {
-            "field": "created_at",
-            "calendar_interval": "month",
-            "format": "yyyy-MM-dd'T'HH||yyyy-MM-dd'T'HH:mm||yyyy-MM-dd'T'HH:mm:ss||yyyy-MM-dd||yyyy-MM||yyyy||strict_date_optional_time",
-            "min_doc_count": 0
-        }
-    }
-}
+```bash
+openaleph-search search query-string "transaction" \
+  --args "facet=created_at&facet_interval:created_at=month"
 ```
 
-#### Extended Bounds
+## Parameters
 
-Date histograms support extended bounds to ensure empty buckets are returned within filtered ranges:
+### `facet`
 
-```python
-# URL with date range filters
-/search?facet=created_at&facet_interval:created_at=month&filter:gte:created_at=2023-01-01&filter:lte:created_at=2023-12-31
+Field name to facet on.
 
-# Adds extended_bounds to ensure all months in 2023 are included
-{
-    "created_at.intervals": {
-        "date_histogram": {
-            "field": "created_at",
-            "calendar_interval": "month",
-            "format": "...",
-            "min_doc_count": 0,
-            "extended_bounds": {
-                "min": "2023-01-01",
-                "max": "2023-12-31"
-            }
-        }
-    }
-}
+```bash
+--args "facet=schema"
 ```
 
-## Significant Terms Aggregations
+### `facet_size:FIELD`
 
-Significant terms aggregations identify terms that are statistically over-represented in your search results compared to the background dataset.
+Number of values to return (default: 20).
 
-```python
-# URL parameter
-/search?facet_significant=names&facet_significant_size:names=10
-
-# Generated aggregation
-{
-    "names.significant_terms": {
-        "significant_terms": {
-            "field": "names",
-            "background_filter": {
-                "bool": {
-                    "must": [
-                        {"terms": {"dataset": ["filtered_dataset"]}}
-                    ]
-                }
-            },
-            "size": 10,
-            "min_doc_count": 3,
-            "shard_size": 50,
-            "execution_hint": "map"
-        }
-    }
-}
+```bash
+--args "facet=countries&facet_size:countries=50"
 ```
 
-### Background Filter
+### `facet_total:FIELD`
 
-The background filter defines the comparison set for significance calculation. It uses:
+Include total distinct count.
 
-- Collection IDs if available (`collection_id` field)
-- Dataset names if collection IDs not available (`dataset` field)
-- Entire index if no filtering is applied
-
-### Nested Significant Terms
-
-For nested field types, significant terms can be configured with nested aggregations:
-
-```python
-# URL parameter
-/search?facet_significant=nested_field&facet_significant_type:nested_field=nested
-
-# Generates nested aggregation structure
+```bash
+--args "facet=languages&facet_total:languages=true"
 ```
 
-## Significant Text Aggregations
+### `facet_values:FIELD`
 
-Significant text aggregations extract meaningful phrases and terms from text content:
+Return actual values (default: true).
 
-```python
-# URL parameter
-/search?facet_significant_text=content&facet_significant_text_size=5
-
-# Generated aggregation
-{
-    "significant_text": {
-        "sampler": {
-            "shard_size": 200
-        },
-        "aggs": {
-            "significant_text": {
-                "significant_text": {
-                    "field": "content",
-                    "background_filter": {...},
-                    "filter_duplicate_text": true,
-                    "size": 5,
-                    "min_doc_count": 5,
-                    "shard_size": 200
-                }
-            }
-        }
-    }
-}
+```bash
+# Only counts, no values
+--args "facet=entities&facet_values:entities=false&facet_total:entities=true"
 ```
 
-### Sampling
+### `facet_interval:FIELD`
 
-Significant text aggregations use sampling to improve performance:
+Time interval for date fields.
 
-- **Diversified Sampling**: When no specific dataset filter is applied, samples across datasets using the auth field
-- **Regular Sampling**: When filtering by specific datasets/collections, uses regular sampling
-
-## Post-Filters and Facet Isolation
-
-Aggregations use post-filters to ensure each facet reflects the impact of all other filters except its own:
-
-```python
-# Example: faceting on 'schema' while filtering by 'dataset'
-# The schema facet will see all documents matching the dataset filter
-# but not any schema filters
-
-{
-    "schema.filtered": {
-        "filter": {
-            "bool": {
-                "filter": [
-                    {"terms": {"dataset": ["selected_dataset"]}}
-                    # Note: no schema filters here
-                ]
-            }
-        },
-        "aggregations": {
-            "schema.values": {
-                "terms": {"field": "schema", "size": 20}
-            }
-        }
-    }
-}
+```bash
+--args "facet=created_at&facet_interval:created_at=month"
 ```
 
-## Authentication and Authorization
+Intervals: `year`, `quarter`, `month`, `week`, `day`, `hour`, `minute`
 
-Aggregations respect authentication settings:
+### `facet_type:FIELD`
 
-### Unauthenticated Users
+Aggregation type for special fields.
 
-For unauthenticated users and large facets (not in `SMALL_FACETS`):
+```bash
+--args "facet=properties.entity&facet_type:properties.entity=entity"
+```
 
-- Maximum facet size limited to 50
-- Total counts disabled for performance
-- Applies to facets not in: `schema`, `schemata`, `dataset`, `countries`, `languages`
+## Response format
 
-### Dataset Filtering
-
-When authentication is enabled:
-
-- Background filters automatically include user's accessible datasets
-- Aggregation results filtered by user permissions
-- Uses `search_auth_field` (default: "dataset") for access control
-
-## Performance Optimizations
-
-### Execution Hints
-
-All term aggregations use `"execution_hint": "map"` for better performance on keyword fields.
-
-### Shard Sizing
-
-Significant terms and text aggregations use calculated shard sizes:
-- Significant terms: `max(100, requested_size * 5)`
-- Significant text: configurable via `facet_significant_text_shard_size` (default: 200)
-
-### Sampling
-
-Large-scale significant text analysis uses sampling to balance performance and accuracy:
-- Default shard size: 200 documents per shard
-- Diversified sampling when analyzing across multiple datasets
-
-## Field Type Considerations
-
-### Keyword Fields
-- Used for exact-match faceting
-- Suitable for: datasets, schema names, countries, languages
-
-### Text Fields
-- Used for significant text analysis
-- Analyzed content fields like `content` and `text`
-
-### Date Fields
-- Support histogram aggregations with calendar intervals
-- Automatic format handling for various date precisions
-
-### Numeric Fields
-- Can be used in range aggregations
-- Automatically handled in the numeric field mapping
-
-## Error Handling
-
-The aggregation system handles various edge cases:
-- Empty result sets return appropriate empty aggregation structures
-- Invalid interval specifications fall back to safe defaults
-- Missing fields return zero counts rather than errors
-- Authentication failures restrict aggregation scope rather than failing
-
-## Example Response Structure
+Aggregations appear in the `aggregations` section:
 
 ```json
 {
-    "aggregations": {
-        "dataset.values": {
-            "buckets": [
-                {"key": "collection1", "doc_count": 150},
-                {"key": "collection2", "doc_count": 75}
-            ]
-        },
-        "schema.cardinality": {
-            "value": 12
-        },
-        "dates.intervals": {
-            "buckets": [
-                {
-                    "key": 1609459200000,
-                    "key_as_string": "2021-01-01T00:00:00.000Z",
-                    "doc_count": 45
-                }
-            ]
-        },
-        "names.significant_terms": {
-            "buckets": [
-                {
-                    "key": "offshore",
-                    "doc_count": 25,
-                    "score": 0.8745,
-                    "bg_count": 100
-                }
-            ]
-        },
-        "significant_text": {
-            "significant_text": {
-                "buckets": [
-                    {
-                        "key": "money laundering",
-                        "doc_count": 15,
-                        "score": 0.9234,
-                        "bg_count": 50
-                    }
-                ]
-            }
+  "hits": {...},
+  "aggregations": {
+    "dataset.values": {
+      "buckets": [
+        {"key": "panama_papers", "doc_count": 1250},
+        {"key": "paradise_papers", "doc_count": 890}
+      ]
+    },
+    "schema.cardinality": {
+      "value": 12
+    },
+    "created_at.intervals": {
+      "buckets": [
+        {
+          "key": 1609459200000,
+          "key_as_string": "2021-01-01",
+          "doc_count": 145
         }
+      ]
+    },
+    "names.significant_terms": {
+      "buckets": [
+        {
+          "key": "mossack fonseca",
+          "doc_count": 25,
+          "score": 0.8745,
+          "bg_count": 100
+        }
+      ]
     }
+  }
 }
 ```
 
----
+## Common fields
 
-## Technical Implementation
+Apart from the common group fields, individual [FollowTheMoney](https://followthemoney.tech) properties can be used as well via `properties.<prop>`
 
-### Overview
+### Entity fields
 
-Aggregations in openaleph-search are implemented in the `Query.get_aggregations()` method in `openaleph_search/query/base.py:138`. The system provides sophisticated post-filtering, authorization controls, and performance optimizations.
+- `schema` - Entity schema type
+- `schemata` - Schema inheritance (e.g. `schemata=LegalEntity` includes all its descendants)
+- `dataset` - Dataset identifier
 
-### Implementation Details
+### Group fields
 
-The aggregation system handles:
-- **Post-filter isolation**: Each facet excludes its own filters
-- **Authorization integration**: Results respect user permissions
-- **Performance limits**: Query clause limits and sampling strategies
-- **Background filtering**: Significant analysis uses appropriate comparison datasets
+[FollowTheMoney property types](https://followthemoney.tech/explorer/types/)
 
-### Implementation Location
+These groups are part of the index as keyword fields:
 
-Core aggregation logic is in:
-- `openaleph_search/query/base.py:138` - Main aggregation implementation
-- `openaleph_search/query/base.py:264` - Background filter generation
-- `openaleph_search/query/base.py:276` - Sampling configuration
+- `addresses`
+- `checksums`
+- `countries`
+- `dates`
+- `emails`
+- `entities`
+- `genders`
+- `identifiers`
+- `ips`
+- `languages`
+- `mimetypes`
+- `names`
+- `phones`
+- `topics`
+- `urls`
+
+### Name fields
+
+- `names` - Normalized entity names (includes the NER mentions from [`Analyzable`](https://followthemoney.tech/explorer/schemata/Analyzable/) entities.)
+- `name_symbols` - Name symbols (extracted from `names`)
+
+## Date histograms
+
+[See allowed interval values](https://www.elastic.co/docs/reference/aggregations/search-aggregations-bucket-datehistogram-aggregation#calendar_intervals)
+
+### Calendar intervals
+
+```bash
+openaleph-search search query-string "transaction" \
+  --args "facet=dates&facet_interval:dates=month"
+```
+
+Example values: `year`, `quarter`, `month`, `week`, `day`
+
+### Fixed intervals
+
+```bash
+openaleph-search search query-string "activity" \
+  --args "facet=dates&facet_interval:dates=30d"
+```
+
+Examples: `1h`, `15m`, `7d`, `1M`
+
+### Date range with histogram
+
+```bash
+openaleph-search search query-string "event" \
+  --args "filter:gte:properties.startDate=2020-01-01&filter:lte:properties.startDate=2023-12-31&facet=properties.startDate&facet_interval:properties.startDate=quarter"
+```
+
+Includes empty buckets within range.
+
+## Post-filters
+
+Each facet excludes its own filters to show alternative options:
+
+```bash
+# Dataset facet shows ALL datasets, not just filtered ones
+openaleph-search search query-string "company" \
+  --args "filter:dataset=collection1&filter:dataset=collection2&facet=dataset"
+```
+
+This allows users to see alternative filter options.
+
+## Performance
+
+### Execution strategy
+
+All facets use `execution_hint: map` for keyword fields.
+
+### High cardinality
+
+Fields with many unique values:
+
+- Use facet size limits
+- Monitor query performance
+- Consider sampling for large datasets
+
+## Examples
+
+### Multi-facet analysis
+
+```bash
+openaleph-search search query-string "investigation" \
+  --args "facet=dataset&facet=schema&facet=countries&facet=created_at&facet_interval:created_at=month"
+```
+
+### Document classification
+
+```bash
+openaleph-search search query-string "*" \
+  --args "filter:schemata=Document&facet=properties.mimeType&facet=languages&facet_size:properties.mimeType=100"
+```
+
+### Entity network
+
+```bash
+openaleph-search search query-string "person" \
+  --args "filter:schema=Person&facet=dataset&facet=countries"
+```
+
+### Temporal trends
+
+```bash
+openaleph-search search query-string "company" \
+  --args "facet=schema&facet=created_at&facet_interval:created_at=year&facet_size:schema=50"
+```
+
+## Error handling
+
+### Invalid fields
+
+Non-existent fields return empty results:
+
+```json
+{
+  "aggregations": {
+    "nonexistent_field.values": {
+      "buckets": []
+    }
+  }
+}
+```
+
+### Type mismatches
+
+Requesting histograms on non-date fields falls back to term aggregation.
+
+### Authorization failures
+
+Restricted fields return empty results while maintaining query functionality.

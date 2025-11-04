@@ -27,8 +27,6 @@ def search_query_string(q: str, args: str | None = None) -> ObjectApiResponse:
     _args = parse_qsl(args, keep_blank_values=True)
     if "q" in dict(_args):
         raise RuntimeError("Invalid query, must not contain `q` in args")
-    if "highlight" not in dict(_args):
-        _args.append(("highlight", "true"))
     _args.insert(0, ("q", q))
     parser = SearchQueryParser(_args)
     query = EntitiesQuery(parser)

@@ -2,19 +2,19 @@ site_name: openaleph-search
 site_url: https://docs.investigraph.dev/lib/openaleph-search
 repo_url: https://github.com/openaleph/openaleph-search
 nav:
-  - Intro: index.md
-  - parser.md
-  - indexes.md
-  - matching.md
-  - more_like_this.md
-  - highlighting.md
-  - aggregations.md
-  - facets.md
-  - significant_terms.md
+  - Introduction: index.md
+  - Features:
+    - Matching: matching.md
+    - More Like This: more_like_this.md
+    - Significant Terms: significant_terms.md
+    - Facets & Aggregations: aggregations.md
+    - Highlighting: highlighting.md
   - Reference:
-    - command line: reference/cli.md
-    - mapping: reference/mapping.md
-    - settings: reference/settings.md
+    - Command line: reference/cli.md
+    - Settings: reference/settings.md
+    - Index Mapping: reference/mapping.md
+    - Query parameters: reference/parser.md
+    - Authorization: reference/authorization.md
 theme:
   name: material
   logo: https://openaleph.org/assets/Logo/RGB/Open-Aleph-Logo-RGB-Square-Neg.svg
