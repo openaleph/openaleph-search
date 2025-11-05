@@ -248,7 +248,7 @@ def test_search_query_parser_from_url():
     assert "dataset" in parser.facet_names
 
 
-def test_search_symbols():
+def test_search_symbols(index_entities):
     symbol = "[NAME:47200243]"  # vladimir
     query = _create_query(
         f"/search?filter:schemata=LegalEntity&filter:name_symbols={symbol}"
@@ -267,23 +267,81 @@ def test_search_symbols():
     assert result["hits"]["total"]["value"] == 1
 
 
-def test_search_name_parts():
+def test_search_name_parts(index_entities):
     fp = "vladimir"
     query = _create_query(f"/search?filter:name_parts={fp}")
     result = query.search()
     assert result["hits"]["total"]["value"] == 1
 
 
-def test_search_prefix():
+def test_search_prefix(index_entities):
     query = _create_query("/search?prefix=vla")
     result = query.search()
     assert result["hits"]["total"]["value"] == 1
 
 
-def test_search_nonlatin():
+def test_search_nonlatin(index_entities):
     query = _create_query("/search?q=Українська")
     result = query.search()
     assert result["hits"]["total"]["value"] == 1
+
+
+def test_search_dehydrate(index_entities):
+    """Test that dehydrate=true excludes properties from response"""
+    # Test with dehydrate=true - properties should be excluded
+    query = _create_query("/search?q=banana&dehydrate=true")
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] >= 1
+    # Check that at least one hit exists
+    assert len(result["hits"]["hits"]) > 0
+
+    # Verify properties are excluded from all results
+    for hit in result["hits"]["hits"]:
+        assert "_source" in hit
+        assert (
+            "properties" not in hit["_source"]
+        ), "properties field should be excluded when dehydrate=true"
+        # Other fields should still be present
+        assert "schema" in hit["_source"]
+        assert "caption" in hit["_source"]
+        assert "dataset" in hit["_source"]
+
+
+def test_search_dehydrate_false(index_entities):
+    """Test that dehydrate=false (default) includes properties in response"""
+    # Test with explicit dehydrate=false
+    query = _create_query("/search?q=banana&dehydrate=false")
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] >= 1
+    assert len(result["hits"]["hits"]) > 0
+
+    # Verify properties are included in results
+    for hit in result["hits"]["hits"]:
+        assert "_source" in hit
+        assert (
+            "properties" in hit["_source"]
+        ), "properties field should be included when dehydrate=false"
+        assert "schema" in hit["_source"]
+
+
+def test_search_dehydrate_default(index_entities):
+    """Test that without dehydrate parameter, properties are included by default"""
+    # Test without dehydrate parameter (default behavior)
+    query = _create_query("/search?q=banana")
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] >= 1
+    assert len(result["hits"]["hits"]) > 0
+
+    # Verify properties are included by default
+    for hit in result["hits"]["hits"]:
+        assert "_source" in hit
+        assert (
+            "properties" in hit["_source"]
+        ), "properties field should be included by default"
+        assert "schema" in hit["_source"]
 
 
 def test_search_sort(cleanup_after):
@@ -368,59 +426,85 @@ def test_search_tag_filter(cleanup_after):
     ]
 
 
-def test_search_dehydrate(index_entities):
-    """Test that dehydrate=true excludes properties from response"""
-    # Test with dehydrate=true - properties should be excluded
-    query = _create_query("/search?q=banana&dehydrate=true")
+def test_search_synonyms_arabic(cleanup_after):
+    """Test that synonyms=true enables cross-script name matching (Arabic)"""
+    # Create a Person entity with English name "Jane Doe"
+    entity = make_entity(
+        {
+            "id": "jane-doe-person",
+            "schema": "Person",
+            "properties": {"name": ["Jane Doe"], "birthDate": ["1985-05-15"]},
+        }
+    )
+
+    index_bulk("test_synonyms", [entity], sync=True)
+
+    # Test 1: Search without synonyms - Arabic name should not match
+    query = _create_query("/search?q=جين&filter:dataset=test_synonyms")
     result = query.search()
+    assert (
+        result["hits"]["total"]["value"] == 0
+    ), "Arabic search without synonyms should not match English name"
 
-    assert result["hits"]["total"]["value"] >= 1
-    # Check that at least one hit exists
-    assert len(result["hits"]["hits"]) > 0
-
-    # Verify properties are excluded from all results
-    for hit in result["hits"]["hits"]:
-        assert "_source" in hit
-        assert (
-            "properties" not in hit["_source"]
-        ), "properties field should be excluded when dehydrate=true"
-        # Other fields should still be present
-        assert "schema" in hit["_source"]
-        assert "caption" in hit["_source"]
-        assert "dataset" in hit["_source"]
-
-
-def test_search_dehydrate_false(index_entities):
-    """Test that dehydrate=false (default) includes properties in response"""
-    # Test with explicit dehydrate=false
-    query = _create_query("/search?q=banana&dehydrate=false")
+    # Test 2: Search with synonyms=true - Arabic name should match via name_symbols
+    query = _create_query("/search?q=جين&filter:dataset=test_synonyms&synonyms=true")
     result = query.search()
+    assert (
+        result["hits"]["total"]["value"] == 1
+    ), "Arabic search with synonyms=true should match English 'Jane' via name_symbols"
+    assert result["hits"]["hits"][0]["_id"] == "jane-doe-person"
+    assert result["hits"]["hits"][0]["_source"]["properties"]["name"] == ["Jane Doe"]
 
-    assert result["hits"]["total"]["value"] >= 1
-    assert len(result["hits"]["hits"]) > 0
-
-    # Verify properties are included in results
-    for hit in result["hits"]["hits"]:
-        assert "_source" in hit
-        assert (
-            "properties" in hit["_source"]
-        ), "properties field should be included when dehydrate=false"
-        assert "schema" in hit["_source"]
-
-
-def test_search_dehydrate_default(index_entities):
-    """Test that without dehydrate parameter, properties are included by default"""
-    # Test without dehydrate parameter (default behavior)
-    query = _create_query("/search?q=banana")
+    # Test 3: Verify the English name still works with synonyms
+    query = _create_query("/search?q=Jane&filter:dataset=test_synonyms&synonyms=true")
     result = query.search()
+    assert result["hits"]["total"]["value"] == 1
+    assert result["hits"]["hits"][0]["_id"] == "jane-doe-person"
 
-    assert result["hits"]["total"]["value"] >= 1
-    assert len(result["hits"]["hits"]) > 0
 
-    # Verify properties are included by default
-    for hit in result["hits"]["hits"]:
-        assert "_source" in hit
-        assert (
-            "properties" in hit["_source"]
-        ), "properties field should be included by default"
-        assert "schema" in hit["_source"]
+def test_search_synonyms_name_keys(cleanup_after):
+    """Test that synonyms=true enables name_keys n-gram matching"""
+    # Create a Company entity with name "DARC Limited"
+    entity = make_entity(
+        {
+            "id": "darc-limited-company",
+            "schema": "Company",
+            "properties": {
+                "name": ["DARC Limited"],
+                "jurisdiction": ["gb"],
+            },
+        }
+    )
+
+    index_bulk("test_name_keys", [entity], sync=True)
+
+    # Test 1: Search without synonyms - "DARC Ltd Berlin" should not match
+    query = _create_query("/search?q=DARC Ltd Berlin&filter:dataset=test_name_keys")
+    result = query.search()
+    assert (
+        result["hits"]["total"]["value"] == 0
+    ), "Query without synonyms should not match via name_keys"
+
+    # Test 2: Search with synonyms=true - should match via name_keys n-gram
+    # Query "DARC Ltd Berlin" generates n-gram "darcltd" which matches
+    # entity name_keys "darclimited" -> sorted tokens: "darc" + "limited"
+    # But the ngram logic should generate "darcltd" from "darc ltd"
+    query = _create_query(
+        "/search?q=DARC Ltd Berlin&filter:dataset=test_name_keys&synonyms=true"
+    )
+    result = query.search()
+    assert (
+        result["hits"]["total"]["value"] == 1
+    ), "Query with synonyms=true should match 'DARC Limited' via name_keys n-gram"
+    assert result["hits"]["hits"][0]["_id"] == "darc-limited-company"
+    assert result["hits"]["hits"][0]["_source"]["properties"]["name"] == [
+        "DARC Limited"
+    ]
+
+    # Test 3: Verify the original name still works
+    query = _create_query(
+        "/search?q=DARC Limited&filter:dataset=test_name_keys&synonyms=true"
+    )
+    result = query.search()
+    assert result["hits"]["total"]["value"] == 1
+    assert result["hits"]["hits"][0]["_id"] == "darc-limited-company"

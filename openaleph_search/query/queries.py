@@ -4,6 +4,7 @@ from typing import Any
 
 from banal import ensure_list
 from followthemoney import EntityProxy, model
+from ftmq.util import get_name_symbols
 
 from openaleph_search.index.entities import ENTITY_SOURCE, PROXY_INCLUDES
 from openaleph_search.index.indexes import entities_read_index
@@ -13,6 +14,7 @@ from openaleph_search.query.matching import match_query
 from openaleph_search.query.more_like_this import more_like_this_query
 from openaleph_search.query.util import field_filter_query
 from openaleph_search.settings import Settings
+from openaleph_search.transform.util import index_name_keys
 
 log = logging.getLogger(__name__)
 settings = Settings()
@@ -69,6 +71,72 @@ class EntitiesQuery(Query):
             # syntax would not match (e.g. 'names:"Jane" foo')
             query["query_string"]["default_operator"] = "OR"
             return query
+
+    def get_text_query(self) -> list[dict[str, Any]]:
+        query = super().get_text_query()
+
+        # Add optional name_symbols and name_keys matches if synonyms is enabled
+        if self.parser.synonyms and self.parser.text:
+            schema = model["LegalEntity"]
+            # Extract symbols and filter only NAME category symbols
+            symbols = get_name_symbols(schema, self.parser.text)
+            name_symbols = [str(s) for s in symbols if s.category.name == "NAME"]
+            if name_symbols:
+                query.append(
+                    {"terms": {Field.NAME_SYMBOLS: name_symbols, "boost": 0.5}}
+                )
+
+            # Generate name_keys from n-grams of query tokens
+            # For a query like "acme corporation corruption", we want to match
+            # entities with name_keys like "acmecorporation" (ACME Corporation)
+            name_keys = self._get_name_keys_ngrams(schema, self.parser.text)
+            if name_keys:
+                query.append(
+                    {"terms": {Field.NAME_KEYS: list(name_keys), "boost": 0.3}}
+                )
+
+        return query
+
+    def _get_name_keys_ngrams(self, schema, text: str) -> set[str]:
+        """Generate name_keys from n-grams of query tokens.
+
+        For query "acme corporation corruption", generates:
+        - "acmecorporation" (2-gram)
+        - "acmecorporationcorruption" (3-gram)
+        - "corporationcorruption" (2-gram)
+
+        This allows matching entity names that are subsets of the query.
+        We focus on 2-4 token combinations as single tokens are already
+        covered by name_parts field.
+        """
+        from openaleph_search.transform.util import clean_tokenize_name
+
+        tokens = clean_tokenize_name(schema, text)
+        if not tokens:
+            return set()
+
+        name_keys = set()
+
+        # Generate n-grams of length 2-4 tokens
+        for start_idx in range(len(tokens)):
+            for length in range(2, min(5, len(tokens) - start_idx + 1)):
+                end_idx = start_idx + length
+                ngram_tokens = tokens[start_idx:end_idx]
+
+                # Pre-check: ensure combined length is reasonable before calling
+                # index_name_keys. This avoids processing very short n-grams that
+                # won't pass index_name_keys filter
+                estimated_length = sum(len(t) for t in ngram_tokens)
+                if estimated_length < 6:
+                    continue
+
+                # Join tokens with space and use index_name_keys to get the key
+                # This ensures we use the same logic as the indexer
+                ngram_text = " ".join(ngram_tokens)
+                ngram_keys = index_name_keys(schema, [ngram_text])
+                name_keys.update(ngram_keys)
+
+        return name_keys
 
     def get_negative_filters(self) -> list[dict[str, Any]]:
         # exclude hidden schemata unless we explicitly want them

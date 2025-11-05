@@ -188,6 +188,9 @@ class SearchQueryParser(QueryParser):
         # strip down entity payload for fast path search
         self.dehydrate = self.getbool("dehydrate")
 
+        # expand query with name synonyms (name_symbols and name_keys)
+        self.synonyms = self.getbool("synonyms", False)
+
     @cached_property
     def collection_ids(self) -> set[str]:
         collections = self.filters.get("collection_id", set())
@@ -306,4 +309,5 @@ class SearchQueryParser(QueryParser):
         parser = super().to_dict()
         parser["facet_names"] = list(self.facet_names)
         parser["facet_significant_names"] = list(self.facet_significant_names)
+        parser["synonyms"] = self.synonyms
         return parser
