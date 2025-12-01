@@ -64,49 +64,79 @@ def pick_names(names: list[str], limit: int = 3) -> list[str]:
     return picked
 
 
+def _min_should_match_script(minimum: int = 2) -> dict[str, str]:
+    """Generate a script for minimum_should_match in terms_set queries."""
+    return {"source": f"Math.min({minimum}, params.num_terms)"}
+
+
 def names_query(schema: Schema, names: list[str]) -> Clauses:
+    """Build name matching clauses for scoring similar entities.
+
+    Uses specialized name fields for matching:
+    - names: exact name match with order preserved (highest boost)
+    - name_keys: normalized match, order-independent (sorted ASCII tokens)
+    - name_parts: partial token overlap (requires 2+ matching tokens)
+    - name_phonetic: spelling/transliteration variants
+    - name_symbols: synonyms, nicknames, company suffixes
+    """
     shoulds: Clauses = []
-    for name in pick_names(names, limit=5):
-        match = {
-            Field.NAMES: {
-                "query": name,
-                "operator": "AND",
-                "boost": 3.0,
-                "fuzziness": "AUTO",
-            }
-        }
-        shoulds.append({"match": match})
 
-    # For parts, phonetics and symbols we should match more than 1 token:
+    # 1. names: exact match with order preserved (keyword field with normalizer)
+    # "Jane Doe" scores higher than "Doe Jane" for a query of "Jane Doe"
+    picked = pick_names(names, limit=5)
+    if picked:
+        shoulds.append({"terms": {Field.NAMES: picked, "boost": 5.0}})
 
-    for key in index_name_keys(schema, names):
-        term = {Field.NAME_KEYS: {"value": key, "boost": 2.5}}
-        shoulds.append({"term": term})
+    # 2. name_keys: normalized match (order-independent)
+    # "Jane Doe" and "Doe Jane" both become "doejane"
+    keys = list(index_name_keys(schema, names))
+    if keys:
+        shoulds.append({"terms": {Field.NAME_KEYS: keys, "boost": 3.0}})
 
-    parts = []
-    for token in index_name_parts(schema, names):
-        term = {Field.NAME_PARTS: {"value": token, "boost": 1.0}}
-        parts.append({"term": term})
+    # 3. name_parts: partial token overlap (requires 2+ matching tokens)
+    parts = list(index_name_parts(schema, names))
     if parts:
-        min_match = 2 if len(parts) >= 2 else 1
-        shoulds.append({"bool": {"should": parts, "minimum_should_match": min_match}})
-
-    phonetics = []
-    for phoneme in phonetic_names(schema, names):
-        term = {Field.NAME_PHONETIC: {"value": phoneme, "boost": 0.8}}
-        phonetics.append({"term": term})
-    if phonetics:
-        min_match = 2 if len(phonetics) >= 2 else 1
         shoulds.append(
-            {"bool": {"should": phonetics, "minimum_should_match": min_match}}
+            {
+                "terms_set": {
+                    Field.NAME_PARTS: {
+                        "terms": parts,
+                        "minimum_should_match_script": _min_should_match_script(2),
+                        "boost": 1.0,
+                    }
+                }
+            }
         )
 
-    symbols = []
-    for symbol in get_name_symbols(schema, *names):
-        symbols.append({"term": {Field.NAME_SYMBOLS: str(symbol)}})
+    # 4. name_phonetic: spelling/transliteration variants
+    phonetics = list(phonetic_names(schema, names))
+    if phonetics:
+        shoulds.append(
+            {
+                "terms_set": {
+                    Field.NAME_PHONETIC: {
+                        "terms": phonetics,
+                        "minimum_should_match_script": _min_should_match_script(2),
+                        "boost": 0.8,
+                    }
+                }
+            }
+        )
+
+    # 5. name_symbols: synonyms, nicknames, company suffixes
+    symbols = [str(s) for s in get_name_symbols(schema, *names)]
     if symbols:
-        min_match = 2 if len(symbols) >= 2 else 1
-        shoulds.append({"bool": {"should": symbols, "minimum_should_match": min_match}})
+        shoulds.append(
+            {
+                "terms_set": {
+                    Field.NAME_SYMBOLS: {
+                        "terms": symbols,
+                        "minimum_should_match_script": _min_should_match_script(2),
+                        "boost": 0.8,
+                    }
+                }
+            }
+        )
 
     return shoulds
 
@@ -196,3 +226,84 @@ def match_query(
     query["bool"]["should"].extend(scoring)
 
     return query
+
+
+def blocking_query(
+    entity: EntityProxy,
+    datasets: list[str] | None = None,
+    collection_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    """Build an efficient blocking query for candidate retrieval.
+
+    This query is optimized for speed, not scoring. It uses filter context
+    (no scoring, cacheable) and minimal blocking keys to find potential
+    duplicates. Use this for bulk clustering operations where candidates
+    will be scored separately (e.g., with nomenklatura.compare()).
+
+    Blocking strategy:
+    - name_keys: exact match on sorted ASCII tokens (high precision)
+    - name_phonetic: phonetic match for spelling variants (high recall)
+    - name_symbols: WikiData name IDs, nicknames, company suffixes (synonyms)
+    - identifiers: exact match on tax IDs, registration numbers, etc.
+    """
+    if not entity.schema.matchable:
+        return {"match_none": {}}
+
+    names = entity.get_type_values(registry.name, matchable=True)
+    if not names:
+        return {"match_none": {}}
+
+    # Build blocking keys
+    name_keys = list(index_name_keys(entity.schema, names))
+    phonetics = list(phonetic_names(entity.schema, names))
+    symbols = [str(s) for s in get_name_symbols(entity.schema, *names)]
+
+    # Collect identifiers (tax IDs, registration numbers, etc.)
+    identifiers: list[str] = []
+    identifier_field: str | None = None
+    for prop, value in entity.itervalues():
+        if prop.type.group == registry.identifier.group:
+            identifiers.append(value)
+            # All identifiers go to the same group field
+            if identifier_field is None:
+                identifier_field = prop.type.group
+
+    # Build blocking filter: must match at least one blocking key
+    blocking_shoulds: list[dict[str, Any]] = []
+    if name_keys:
+        blocking_shoulds.append({"terms": {Field.NAME_KEYS: name_keys}})
+    if phonetics:
+        blocking_shoulds.append({"terms": {Field.NAME_PHONETIC: phonetics}})
+    if symbols:
+        blocking_shoulds.append({"terms": {Field.NAME_SYMBOLS: symbols}})
+    if identifiers and identifier_field:
+        blocking_shoulds.append({"terms": {identifier_field: identifiers}})
+
+    if not blocking_shoulds:
+        return {"match_none": {}}
+
+    # Build the query using filter context (no scoring, cacheable)
+    filters: list[dict[str, Any]] = [
+        # Schema filter
+        {"terms": {Field.SCHEMA: [s.name for s in entity.schema.matchable_schemata]}},
+        # Blocking filter: OR of blocking keys
+        {"bool": {"should": blocking_shoulds, "minimum_should_match": 1}},
+    ]
+
+    # Dataset/collection filter
+    if collection_ids:
+        filters.append({"terms": {Field.COLLECTION_ID: collection_ids}})
+    elif datasets:
+        filters.append({"terms": {Field.DATASET: datasets}})
+
+    # Exclude self
+    must_not: list[dict[str, Any]] = []
+    if entity.id is not None:
+        must_not.append({"ids": {"values": [entity.id]}})
+
+    return {
+        "bool": {
+            "filter": filters,
+            "must_not": must_not,
+        }
+    }

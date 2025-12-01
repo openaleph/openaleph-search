@@ -27,7 +27,7 @@ The index stores multiple name representations to catch variations:
 
 ### 1. Normalized keywords
 
-Names are normalized and matched with fuzzy search.
+Names are normalized and matched as exact keywords (after normalization).
 
 Example:
 ```
@@ -39,6 +39,8 @@ Normalization:
 - Special character removal
 - Whitespace collapsing
 - Diacritic folding
+
+Exact name matches (with order preserved) receive the highest boost.
 
 ### 2. Name symbols
 
@@ -85,16 +87,17 @@ Matches entities sharing name components.
 
 ### 5. Name keys
 
-Sorted token concatenation for exact deduplication.
+Sorted token concatenation for order-independent matching.
 
 Index field: `name_keys` (keyword)
 
 Example:
 ```
 "John A. Smith Jr." → "jjrsmith"
+"Smith John Jr. A." → "jjrsmith"
 ```
 
-Highest matching score when names contain the same tokens.
+Matches names containing the same tokens regardless of order.
 
 
 ## Identifier matching
@@ -142,14 +145,14 @@ Match scores combine multiple factors:
 
 | Signal | Boost | Index field |
 |--------|-------|-------------|
-| Names | 3.0 | `names` |
+| Names (exact, order preserved) | 5.0 | `names` |
+| Name keys (order-independent) | 3.0 | `name_keys` |
 | Identifiers | 3.0 | `properties.*` (for group type "identifier") |
-| Name keys (exact tokens) | 2.5 | `name_keys` |
 | High-value properties | 2.0 | `properties.*` (ip, url, email, phone) |
 | Name parts | 1.0 | `name_parts` |
-| Name symbols | 1.0 | `name_symbols` |
 | Other properties | 1.0 | `properties.*` |
 | Phonetic codes | 0.8 | `name_phonetics` |
+| Name symbols | 0.8 | `name_symbols` |
 
 Higher boost = more important for matching.
 
@@ -186,12 +189,12 @@ A match query combines multiple strategies:
       {
         "bool": {
           "should": [
-            // Name matching clauses
-            {"match": {"names": {"query": "john smith", "fuzziness": "AUTO"}}},
-            {"term": {"name_keys": "johnsmith"}},
-            {"term": {"name_parts": "john"}},
-            {"term": {"name_phonetic": "JN"}},
-            {"term": {"name_symbols": "[NAME:12345]"}}
+            // Name matching clauses (using terms queries for efficiency)
+            {"terms": {"names": ["john smith"], "boost": 5.0}},
+            {"terms": {"name_keys": ["johnsmith"], "boost": 3.0}},
+            {"terms_set": {"name_parts": {"terms": ["john", "smith"], "minimum_should_match_script": {...}}}},
+            {"terms_set": {"name_phonetic": {"terms": ["JN", "SM0"], "minimum_should_match_script": {...}}}},
+            {"terms_set": {"name_symbols": {"terms": ["[NAME:12345]"], "minimum_should_match_script": {...}}}}
           ],
           "minimum_should_match": 1
         }
@@ -214,6 +217,8 @@ A match query combines multiple strategies:
   }
 }
 ```
+
+For name_parts, phonetics, and symbols, `terms_set` queries require at least 2 matching terms to reduce false positives.
 
 ## Optimization tips
 
