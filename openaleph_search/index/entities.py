@@ -110,6 +110,7 @@ def iter_entity_ids(
     schemata=None,
     filters=None,
     sort=None,
+    index: str | None = None,
     es_scroll="5m",
     es_scroll_size=10000,
 ):
@@ -117,8 +118,23 @@ def iter_entity_ids(
 
     When sorting by _id, uses search_after with PIT (Point in Time) API instead of
     scroll, as _id sorting requires special handling in Elasticsearch.
+
+    Args:
+        auth: Optional auth filter
+        dataset: Optional dataset filter
+        collection_id: Optional collection ID filter
+        schemata: Optional schema filter (used to determine index if index not provided)
+        filters: Optional additional ES filters
+        sort: Optional sort specification
+        index: Optional explicit index name (overrides schemata-based index resolution)
+        es_scroll: Scroll timeout
+        es_scroll_size: Number of documents per scroll batch
+
+    Yields:
+        Entity IDs matching the criteria
     """
-    index = entities_read_index(schema=schemata)
+    if index is None:
+        index = entities_read_index(schema=schemata)
     es = get_es()
 
     # Check if we're sorting by _id - this requires special handling
