@@ -200,11 +200,18 @@ class EntitiesQuery(Query):
     def get_source(self) -> dict[str, Any]:
         """If the parser gets `dehydrate=true`, don't include properties payload
         in the response. This is used in the search views where no detail data
-        is needed"""
+        is needed.
+
+        The `include_fields` parameter can be used to add specific fields back even
+        when dehydrating (e.g. `include_fields=properties.startDate` or
+        `include_fields=emails`).
+        """
         if self.parser.dehydrate:
-            return {
-                "includes": [k for k in PROXY_INCLUDES if k not in EXCLUDE_DEHYDRATE]
-            }
+            includes = [k for k in PROXY_INCLUDES if k not in EXCLUDE_DEHYDRATE]
+            # Add any explicitly requested fields
+            if self.parser.include_fields:
+                includes.extend(self.parser.include_fields)
+            return {"includes": includes}
         return super().get_source()
 
 

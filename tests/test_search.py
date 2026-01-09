@@ -344,6 +344,64 @@ def test_search_dehydrate_default(index_entities):
         assert "schema" in hit["_source"]
 
 
+def test_search_dehydrate_with_include_fields(index_entities):
+    """Test that include_fields adds specific fields back when dehydrating"""
+    # Test dehydrate=true with include_fields=properties.birthDate
+    query = _create_query(
+        "/search?q=banana&dehydrate=true&include_fields=properties.birthDate"
+    )
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] >= 1
+    assert len(result["hits"]["hits"]) > 0
+
+    # Verify properties.birthDate is included but full properties is not
+    for hit in result["hits"]["hits"]:
+        assert "_source" in hit
+        # The full properties object should not be present
+        assert "properties" not in hit["_source"] or hit["_source"].get(
+            "properties"
+        ) == {"birthDate": hit["_source"]["properties"]["birthDate"]}
+        # Base fields should still be present
+        assert "schema" in hit["_source"]
+        assert "caption" in hit["_source"]
+
+
+def test_search_dehydrate_with_multiple_include_fields(index_entities):
+    """Test that multiple include_fields can be specified"""
+    # Test dehydrate=true with multiple include_fields
+    query = _create_query(
+        "/search?q=banana&dehydrate=true"
+        "&include_fields=properties.birthDate&include_fields=properties.deathDate"
+    )
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] >= 1
+    assert len(result["hits"]["hits"]) > 0
+
+    # Verify the requested fields can be returned
+    for hit in result["hits"]["hits"]:
+        assert "_source" in hit
+        assert "schema" in hit["_source"]
+        assert "caption" in hit["_source"]
+
+
+def test_search_include_fields_without_dehydrate(index_entities):
+    """Test that include_fields is ignored when dehydrate is false"""
+    # include_fields should have no effect when not dehydrating
+    query = _create_query("/search?q=banana&include_fields=properties.birthDate")
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] >= 1
+    assert len(result["hits"]["hits"]) > 0
+
+    # Verify full properties are still included (include_fields has no effect)
+    for hit in result["hits"]["hits"]:
+        assert "_source" in hit
+        assert "properties" in hit["_source"]
+        assert "schema" in hit["_source"]
+
+
 def test_search_sort(cleanup_after):
     e1 = make_entity(
         {"id": "event1", "schema": "Event", "properties": {"date": ["2020"]}}

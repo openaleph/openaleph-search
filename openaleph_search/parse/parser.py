@@ -188,6 +188,10 @@ class SearchQueryParser(QueryParser):
         # strip down entity payload for fast path search
         self.dehydrate = self.getbool("dehydrate")
 
+        # fields to include in response even when dehydrating
+        # (e.g. "properties.startDate", "emails")
+        self.include_fields = set(self.getlist("include_fields"))
+
         # expand query with name synonyms (name_symbols and name_keys)
         self.synonyms = self.getbool("synonyms", False)
 
@@ -310,4 +314,6 @@ class SearchQueryParser(QueryParser):
         parser["facet_names"] = list(self.facet_names)
         parser["facet_significant_names"] = list(self.facet_significant_names)
         parser["synonyms"] = self.synonyms
+        parser["include_fields"] = list(self.include_fields)
+        parser["dehydrate"] = self.dehydrate
         return parser
