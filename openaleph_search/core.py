@@ -31,33 +31,37 @@ def _ingest_nodes() -> list[str]:
 
 @error_handler(logger=log)
 def _get_client() -> Elasticsearch:
+    es = None
     settings = Settings()
     urls = _nodes()
-    es = Elasticsearch(
-        hosts=urls,
-        request_timeout=settings.timeout,
-        max_retries=settings.max_retries,
-        retry_on_timeout=settings.retry_on_timeout,
-        retry_on_status=[502, 503, 504],
-    )
-    es.info()
+    while es is None:
+        es = Elasticsearch(
+            hosts=urls,
+            request_timeout=settings.timeout,
+            max_retries=settings.max_retries,
+            retry_on_timeout=settings.retry_on_timeout,
+            retry_on_status=[502, 503, 504],
+        )
     urls = [mask_uri(u) for u in urls]
     log.info("Connected to Elasticsearch", nodes=urls)
+    es.info()
     return es
 
 
 @error_handler(logger=log)
 async def _get_async_client() -> AsyncElasticsearch:
+    es = None
     settings = Settings()
     urls = _nodes()
-    es = AsyncElasticsearch(
-        hosts=urls,
-        request_timeout=settings.timeout,
-        max_retries=settings.max_retries,
-        retry_on_timeout=settings.retry_on_timeout,
-        retry_on_status=[502, 503, 504],
-        connections_per_node=settings.connection_pool_limit_per_host,
-    )
+    while es is None:
+        es = AsyncElasticsearch(
+            hosts=urls,
+            request_timeout=settings.timeout,
+            max_retries=settings.max_retries,
+            retry_on_timeout=settings.retry_on_timeout,
+            retry_on_status=[502, 503, 504],
+            connections_per_node=settings.connection_pool_limit_per_host,
+        )
     await es.info()
     urls = [mask_uri(u) for u in urls]
     log.info(
@@ -79,15 +83,17 @@ async def get_async_es() -> AsyncElasticsearch:
 
 @error_handler(logger=log)
 def _get_ingest_client() -> Elasticsearch:
+    es = None
     settings = Settings()
     urls = _ingest_nodes()
-    es = Elasticsearch(
-        hosts=urls,
-        request_timeout=settings.timeout,
-        max_retries=settings.max_retries,
-        retry_on_timeout=settings.retry_on_timeout,
-        retry_on_status=[502, 503, 504],
-    )
+    while es is None:
+        es = Elasticsearch(
+            hosts=urls,
+            request_timeout=settings.timeout,
+            max_retries=settings.max_retries,
+            retry_on_timeout=settings.retry_on_timeout,
+            retry_on_status=[502, 503, 504],
+        )
     es.info()
     urls = [mask_uri(u) for u in urls]
     log.info("Connected to Elasticsearch ingest node", nodes=urls)
@@ -96,16 +102,18 @@ def _get_ingest_client() -> Elasticsearch:
 
 @error_handler(logger=log)
 async def _get_async_ingest_client() -> AsyncElasticsearch:
+    es = None
     settings = Settings()
     urls = _ingest_nodes()
-    es = AsyncElasticsearch(
-        hosts=urls,
-        request_timeout=settings.timeout,
-        max_retries=settings.max_retries,
-        retry_on_timeout=settings.retry_on_timeout,
-        retry_on_status=[502, 503, 504],
-        connections_per_node=settings.connection_pool_limit_per_host,
-    )
+    while es is None:
+        es = AsyncElasticsearch(
+            hosts=urls,
+            request_timeout=settings.timeout,
+            max_retries=settings.max_retries,
+            retry_on_timeout=settings.retry_on_timeout,
+            retry_on_status=[502, 503, 504],
+            connections_per_node=settings.connection_pool_limit_per_host,
+        )
     await es.info()
     urls = [mask_uri(u) for u in urls]
     log.info(
