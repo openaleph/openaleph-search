@@ -399,7 +399,56 @@ def test_search_include_fields_without_dehydrate(index_entities):
     for hit in result["hits"]["hits"]:
         assert "_source" in hit
         assert "properties" in hit["_source"]
+        assert len(hit["_source"]["properties"]) > 1
         assert "schema" in hit["_source"]
+
+
+def test_search_dehydrate_with_group_field(index_entities):
+    """Test that group fields (emails, names, etc.) expand to property paths"""
+    # Search for entity with email using group field
+    query = _create_query(
+        "/search?q=banana@example.com&dehydrate=true&include_fields=emails"
+    )
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] == 1
+
+    # Find the entity with the email
+    email_entity = None
+    for hit in result["hits"]["hits"]:
+        if hit["_id"] == "banana3":
+            email_entity = hit
+            break
+
+    assert email_entity is not None, "Entity with email should be found"
+    assert "_source" in email_entity
+    # The email should be included via properties.email expansion
+    assert "properties" in email_entity["_source"]
+    assert "email" in email_entity["_source"]["properties"]
+    assert email_entity["_source"]["properties"]["email"] == ["banana@example.com"]
+
+
+def test_search_dehydrate_with_group_field_no_match(index_entities):
+    """Test that entities without the requested group field are still returned"""
+    # Search for all bananas with emails group field included
+    query = _create_query("/search?q=banana&dehydrate=true&include_fields=emails")
+    result = query.search()
+
+    # Should return multiple entities (some with email, some without)
+    assert result["hits"]["total"]["value"] == 3
+
+    # All entities should be returned, regardless of having email
+    found_with_email = False
+    found_without_email = False
+    for hit in result["hits"]["hits"]:
+        source = hit["_source"]
+        if source.get("properties", {}).get("email"):
+            found_with_email = True
+        else:
+            found_without_email = True
+
+    assert found_with_email, "Should find entity with email"
+    assert found_without_email, "Should find entities without email"
 
 
 def test_search_sort(cleanup_after):

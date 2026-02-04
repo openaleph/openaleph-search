@@ -31,6 +31,8 @@ TEST_PRIVATE = [
             "name": ["Banana ba Nana"],
             "birthDate": ["1969-05-21"],
             "deathDate": ["1972-04-23"],
+            "email": ["banana@example.com"],
+            "phone": ["+1234567890"],
         },
     },
 ]

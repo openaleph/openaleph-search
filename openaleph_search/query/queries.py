@@ -15,9 +15,32 @@ from openaleph_search.query.more_like_this import more_like_this_query
 from openaleph_search.query.util import field_filter_query
 from openaleph_search.settings import Settings
 from openaleph_search.transform.util import index_name_keys
+from openaleph_search.util import SchemaType
 
 log = logging.getLogger(__name__)
 settings = Settings()
+
+# Group fields (emails, names, etc.) are not stored in _source (see SOURCE_EXCLUDES
+# in mapping.py), so we need to expand them to their corresponding property paths.
+_GROUP_TO_PROPERTIES: dict[str, set[str]] = {}
+for _prop in model.properties:
+    if _prop.type.group:
+        _GROUP_TO_PROPERTIES.setdefault(_prop.type.group, set()).add(
+            f"properties.{_prop.name}"
+        )
+
+
+def expand_include_fields(fields: set[str]) -> list[str]:
+    """Expand group field names (emails, names, addresses, etc.) to their
+    corresponding property paths, since group fields are not stored in _source.
+    """
+    expanded = []
+    for field in fields:
+        if field in _GROUP_TO_PROPERTIES:
+            expanded.extend(_GROUP_TO_PROPERTIES[field])
+        else:
+            expanded.append(field)
+    return expanded
 
 
 EXCLUDE_SCHEMATA = [
@@ -41,7 +64,7 @@ class EntitiesQuery(Query):
     SORT_DEFAULT = []
 
     @cached_property
-    def schemata(self) -> list[str]:
+    def schemata(self) -> list[SchemaType]:
         schemata = self.parser.getlist("filter:schema")
         if len(schemata):
             return schemata
@@ -203,14 +226,14 @@ class EntitiesQuery(Query):
         is needed.
 
         The `include_fields` parameter can be used to add specific fields back even
-        when dehydrating (e.g. `include_fields=properties.startDate` or
-        `include_fields=emails`).
+        when dehydrating. Supports both property paths (e.g. `properties.startDate`)
+        and group names (e.g. `emails`, `names`, `addresses`) which expand to their
+        corresponding property paths.
         """
         if self.parser.dehydrate:
             includes = [k for k in PROXY_INCLUDES if k not in EXCLUDE_DEHYDRATE]
-            # Add any explicitly requested fields
             if self.parser.include_fields:
-                includes.extend(self.parser.include_fields)
+                includes.extend(expand_include_fields(self.parser.include_fields))
             return {"includes": includes}
         return super().get_source()
 
