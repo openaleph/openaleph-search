@@ -205,9 +205,10 @@ class Query:
             facet_aggregations = {}
             if self.parser.get_facet_significant_values(facet_name):
                 agg_name = "%s.significant_terms" % facet_name
+                background = self.get_significant_background()
                 significant_terms_agg = {
                     "field": facet_name,
-                    "background_filter": self.get_significant_background(),
+                    **({"background_filter": background} if background else {}),
                     "size": self.parser.get_facet_significant_size(facet_name),
                     "min_doc_count": 3,
                     "shard_size": max(
@@ -243,13 +244,14 @@ class Query:
 
         significant_text_field = self.parser.get_facet_significant_text()
         if significant_text_field:
+            background = self.get_significant_background()
             aggregations["significant_text"] = {
                 **self.get_significant_text_sampler(),
                 "aggs": {
                     "significant_text": {
                         "significant_text": {
                             "field": significant_text_field,
-                            "background_filter": self.get_significant_background(),
+                            **({"background_filter": background} if background else {}),
                             "filter_duplicate_text": True,
                             "size": self.parser.get_facet_significant_text_size(),
                             "min_doc_count": self.parser.get_facet_significant_text_min_doc_count(),  # noqa: B950
@@ -271,6 +273,8 @@ class Query:
             query["bool"]["must"].append(
                 field_filter_query(Field.DATASET, self.parser.datasets)
             )
+        if not query["bool"]["must"]:
+            return None
         return query
 
     def get_sample_for_aggregation(
