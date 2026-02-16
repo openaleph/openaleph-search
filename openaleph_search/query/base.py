@@ -231,16 +231,22 @@ class Query:
                 facet_aggregations[agg_name] = {"cardinality": {"field": facet_name}}
 
             if len(facet_aggregations):
+                # Wrap in sampler to cap per-shard doc count
+                sampler_name = "%s.significant_sampled" % facet_name
+                sampled = {
+                    **self.get_significant_terms_sampler(),
+                    "aggs": facet_aggregations,
+                }
                 # Apply post-filters for significant terms aggregations
                 other_filters = self.get_post_filters(exclude=facet_name)
                 if len(other_filters["bool"]["filter"]):
                     agg_name = "%s.significant_filtered" % facet_name
                     aggregations[agg_name] = {
                         "filter": other_filters,
-                        "aggregations": facet_aggregations,
+                        "aggregations": {sampler_name: sampled},
                     }
                 else:
-                    aggregations.update(facet_aggregations)
+                    aggregations[sampler_name] = sampled
 
         significant_text_field = self.parser.get_facet_significant_text()
         if significant_text_field:
@@ -283,11 +289,17 @@ class Query:
         # https://www.elastic.co/docs/reference/aggregations/search-aggregations-bucket-sampler-aggregation
         return {"sampler": {"shard_size": size}, "aggs": {agg_name: aggregation}}
 
-    def get_significant_text_sampler(self) -> dict[str, Any]:
+    def get_significant_terms_sampler(self) -> dict[str, Any]:
+        size = settings.significant_terms_sampler_size
         if self.parser.collection_ids or self.parser.datasets:
-            # no sampling on all datasets
-            return {"sampler": {"shard_size": 200}}
-        return {"diversified_sampler": {"shard_size": 200, "field": self.AUTHZ_FIELD}}
+            return {"sampler": {"shard_size": size}}
+        return {"diversified_sampler": {"shard_size": size, "field": self.AUTHZ_FIELD}}
+
+    def get_significant_text_sampler(self) -> dict[str, Any]:
+        size = settings.significant_text_sampler_size
+        if self.parser.collection_ids or self.parser.datasets:
+            return {"sampler": {"shard_size": size}}
+        return {"diversified_sampler": {"shard_size": size, "field": self.AUTHZ_FIELD}}
 
     def get_sort(self) -> list[str | dict[str, dict[str, Any]]]:
         """Pick one of a set of named result orderings."""
