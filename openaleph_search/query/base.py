@@ -210,7 +210,8 @@ class Query:
                     "field": facet_name,
                     **({"background_filter": background} if background else {}),
                     "size": self.parser.get_facet_significant_size(facet_name),
-                    "min_doc_count": 3,
+                    "min_doc_count": settings.significant_terms_shard_min_doc_count,
+                    "shard_min_doc_count": settings.significant_terms_shard_min_doc_count,
                     "shard_size": max(
                         100, self.parser.get_facet_significant_size(facet_name) * 5
                     ),

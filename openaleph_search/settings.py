@@ -62,8 +62,9 @@ class Settings(BaseSettings):
     index_boost_pages: int = 1
 
     # Sampler shard_size for significant_terms / significant_text aggregations
-    significant_terms_sampler_size: int = 10000
+    significant_terms_sampler_size: int = 2000
     significant_text_sampler_size: int = 200
+    significant_terms_shard_min_doc_count: int = 3
 
     # enable/disable function_score wrapper for performance tuning
     query_function_score: bool = False
