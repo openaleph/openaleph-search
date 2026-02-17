@@ -92,16 +92,18 @@ def test_significant_terms_auth(
     # Test significant terms aggregation on dataset field
     # This should only calculate significance against datasets the user has access to
 
+    sampler_key = "dataset.significant_sampled"
+    terms_key = "dataset.significant_terms"
+
     # Test that unauthenticated users get no significant terms
     query = _create_query("/search?facet_significant:dataset=1", unauthenticated)
     result = query.search()
 
     # Should have empty aggregation results for unauthenticated users
-    if (
-        "aggregations" in result
-        and "dataset.significant_terms" in result["aggregations"]
-    ):
-        buckets = result["aggregations"]["dataset.significant_terms"]["buckets"]
+    aggs = result.get("aggregations", {})
+    sampled = aggs.get(sampler_key, {})
+    if terms_key in sampled:
+        buckets = sampled[terms_key]["buckets"]
         assert len(buckets) == 0
 
     # Test that public auth only sees significant terms from accessible datasets
@@ -109,11 +111,10 @@ def test_significant_terms_auth(
     result = query.search()
 
     public_buckets = []
-    if (
-        "aggregations" in result
-        and "dataset.significant_terms" in result["aggregations"]
-    ):
-        public_buckets = result["aggregations"]["dataset.significant_terms"]["buckets"]
+    aggs = result.get("aggregations", {})
+    sampled = aggs.get(sampler_key, {})
+    if terms_key in sampled:
+        public_buckets = sampled[terms_key]["buckets"]
         # All significant datasets should be ones the user has access to
         for bucket in public_buckets:
             dataset_name = bucket["key"]
@@ -125,11 +126,10 @@ def test_significant_terms_auth(
     result = query.search()
 
     private_buckets = []
-    if (
-        "aggregations" in result
-        and "dataset.significant_terms" in result["aggregations"]
-    ):
-        private_buckets = result["aggregations"]["dataset.significant_terms"]["buckets"]
+    aggs = result.get("aggregations", {})
+    sampled = aggs.get(sampler_key, {})
+    if terms_key in sampled:
+        private_buckets = sampled[terms_key]["buckets"]
         # Private user should have same or more significant terms than public
         assert len(private_buckets) >= len(public_buckets)
 
@@ -138,10 +138,9 @@ def test_significant_terms_auth(
     result = query.search()
 
     admin_buckets = []
-    if (
-        "aggregations" in result
-        and "dataset.significant_terms" in result["aggregations"]
-    ):
-        admin_buckets = result["aggregations"]["dataset.significant_terms"]["buckets"]
+    aggs = result.get("aggregations", {})
+    sampled = aggs.get(sampler_key, {})
+    if terms_key in sampled:
+        admin_buckets = sampled[terms_key]["buckets"]
         # Admin should have same or more significant terms than private user
         assert len(admin_buckets) >= len(private_buckets)
