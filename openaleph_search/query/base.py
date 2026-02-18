@@ -1,3 +1,4 @@
+from functools import cached_property
 from typing import Any, ClassVar
 
 from anystore.logging import get_logger
@@ -203,6 +204,7 @@ class Query:
         # Significant terms aggregations
         for facet_name in self.parser.facet_significant_names:
             facet_aggregations = {}
+            background = False
             if self.parser.get_facet_significant_values(facet_name):
                 agg_name = "%s.significant_terms" % facet_name
                 background = self.get_significant_background()
@@ -240,7 +242,7 @@ class Query:
                 if background:
                     sampler_name = "%s.significant_sampled" % facet_name
                     sampled = {
-                        **self.get_significant_terms_sampler(),
+                        **self.get_significant_terms_sampler(count=self.count),
                         "aggs": facet_aggregations,
                     }
                     if len(other_filters["bool"]["filter"]):
@@ -302,14 +304,20 @@ class Query:
         # https://www.elastic.co/docs/reference/aggregations/search-aggregations-bucket-sampler-aggregation
         return {"sampler": {"shard_size": size}, "aggs": {agg_name: aggregation}}
 
-    def get_significant_terms_sampler(self) -> dict[str, Any]:
-        if settings.significant_terms_random_sampler:
-            return {
-                "random_sampler": {
-                    "probability": settings.significant_terms_sampler_probability,
-                }
-            }
+    def get_significant_terms_sampler(self, count: int | None = None) -> dict[str, Any]:
         size = settings.significant_terms_sampler_size
+        if settings.significant_terms_random_sampler:
+            if count and count > size:
+                probability = max(0.01, size / count)
+            else:
+                probability = 1.0
+            log.debug(
+                "Significant terms sampler: count=%s target=%s probability=%.3f",
+                count,
+                size,
+                probability,
+            )
+            return {"random_sampler": {"probability": probability}}
         if self.parser.collection_ids or self.parser.datasets:
             return {"sampler": {"shard_size": size}}
         return {"diversified_sampler": {"shard_size": size, "field": self.AUTHZ_FIELD}}
@@ -434,6 +442,13 @@ class Query:
         if len(parts) > 1 and empty in parts:
             parts.remove(empty)
         return " ".join([p for p in parts if p is not None])
+
+    @cached_property
+    def count(self) -> int:
+        """Fast count of matching documents (no scoring, no aggs)."""
+        es = get_es()
+        result = es.count(index=self.get_index(), body={"query": self.get_query()})
+        return result.get("count", 0)
 
     def search(self) -> ObjectApiResponse:
         """Execute the query as assmbled."""

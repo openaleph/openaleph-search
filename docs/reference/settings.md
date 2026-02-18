@@ -207,7 +207,7 @@ export OPENALEPH_SEARCH_INDEX_BOOST_DOCUMENTS=2
 
 ### `significant_terms_sampler_size`
 
-Sampler shard_size for significant terms aggregations. Only used when `significant_terms_random_sampler` is `false`. Caps the number of top-scoring foreground documents per shard before computing term significance.
+Controls sampling for significant terms aggregations. When `significant_terms_random_sampler` is `true`, this is the target foreground document count (probability is computed as `size / count`). When `false`, this is the `shard_size` for the top-N sampler.
 
 - Type: `int`
 - Default: `10000`
@@ -233,12 +233,12 @@ Use `random_sampler` (probability-based) instead of `sampler` (top-N biased). Ra
 - Type: `bool`
 - Default: `true`
 
-### `significant_terms_sampler_probability`
+### `significant_terms_sampler_target`
 
-Probability for `random_sampler` (0.0-1.0). Controls what fraction of matching documents are sampled. Higher values = more accurate but slower.
+Target number of foreground documents for significant terms computation. When using `random_sampler`, a fast `_count` query is performed first to determine the total matching documents, then the sampling probability is computed as `target / count` (capped at 1.0). For small result sets (<= target), no sampling is applied.
 
-- Type: `float`
-- Default: `0.3`
+- Type: `int`
+- Default: `10000`
 
 ### `significant_terms_shard_min_doc_count`
 

@@ -64,7 +64,6 @@ class Settings(BaseSettings):
     # Sampler for significant_terms / significant_text aggregations
     # random_sampler (probability-based, representative sample) vs sampler (top-N biased)
     significant_terms_random_sampler: bool = True
-    significant_terms_sampler_probability: float = 0.3
     significant_terms_sampler_size: int = 10000
     significant_text_sampler_size: int = 200
     significant_terms_min_doc_count: int = 3

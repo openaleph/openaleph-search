@@ -141,16 +141,17 @@ Both significant terms and significant text aggregations are wrapped in a sample
 
 ### Significant terms sampling
 
-**Random sampling** (default):
-```json
-{
-  "random_sampler": {
-    "probability": 0.3
-  }
-}
+**Adaptive random sampling** (default):
+
+When enabled, a fast `_count` query is performed first to determine the result set size. The sampling probability is then computed to target a fixed foreground size:
+
+```
+probability = min(1.0, target / count)
 ```
 
-Uses a probability-based random sample across the full result set, giving statistically representative results. Configurable via `OPENALEPH_SEARCH_SIGNIFICANT_TERMS_SAMPLER_PROBABILITY` (default: `0.3`).
+For example, with the default target of 10,000 and a query matching 100,000 documents, the probability is set to 0.1 (10%). For queries matching fewer than 10,000 documents, no sampling is applied (probability = 1.0).
+
+Configurable via `OPENALEPH_SEARCH_SIGNIFICANT_TERMS_SAMPLER_SIZE` (default: `10000`).
 
 **Top-N sampling** (fallback, set `OPENALEPH_SEARCH_SIGNIFICANT_TERMS_RANDOM_SAMPLER=false`):
 
