@@ -64,7 +64,8 @@ class Settings(BaseSettings):
     # Sampler shard_size for significant_terms / significant_text aggregations
     significant_terms_sampler_size: int = 2000
     significant_text_sampler_size: int = 200
-    significant_terms_shard_min_doc_count: int = 3
+    significant_terms_min_doc_count: int = 3
+    significant_terms_shard_min_doc_count: int = 1
 
     # enable/disable function_score wrapper for performance tuning
     query_function_score: bool = False

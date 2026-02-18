@@ -203,6 +203,45 @@ Boost for Page entities.
 export OPENALEPH_SEARCH_INDEX_BOOST_DOCUMENTS=2
 ```
 
+## Significant terms / text
+
+### `significant_terms_sampler_size`
+
+Sampler shard_size for significant terms aggregations. Caps the number of top-scoring foreground documents per shard before computing term significance. Lower values improve performance but may reduce accuracy.
+
+- Type: `int`
+- Default: `2000`
+
+### `significant_text_sampler_size`
+
+Sampler shard_size for significant text aggregations.
+
+- Type: `int`
+- Default: `200`
+
+### `significant_terms_min_doc_count`
+
+Minimum total foreground frequency across all shards for a term to appear in results. Applied after merging shard results.
+
+- Type: `int`
+- Default: `3`
+
+### `significant_terms_shard_min_doc_count`
+
+Minimum number of times a term must appear in the foreground on a single shard before its background frequency is computed. Higher values skip more rare terms, reducing the number of expensive background posting-list intersections when `background_filter` is active.
+
+Should generally be lower than `min_doc_count`, since documents are distributed across shards.
+
+- Type: `int`
+- Default: `1`
+
+```bash
+# Tune for large clusters with many collections
+export OPENALEPH_SEARCH_SIGNIFICANT_TERMS_SAMPLER_SIZE=3000
+export OPENALEPH_SEARCH_SIGNIFICANT_TERMS_MIN_DOC_COUNT=5
+export OPENALEPH_SEARCH_SIGNIFICANT_TERMS_SHARD_MIN_DOC_COUNT=2
+```
+
 ## Search behavior
 
 ### `query_function_score`

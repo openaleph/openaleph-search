@@ -37,18 +37,22 @@ openaleph-search search query-string "investigation" \
 
 ### Response structure
 
+Significant terms results are wrapped in a sampler aggregation:
+
 ```json
 {
   "aggregations": {
-    "names.significant_terms": {
-      "buckets": [
-        {
-          "key": "jane doe",
-          "doc_count": 45,
-          "score": 0.8745,
-          "bg_count": 120
-        }
-      ]
+    "names.significant_sampled": {
+      "names.significant_terms": {
+        "buckets": [
+          {
+            "key": "jane doe",
+            "doc_count": 45,
+            "score": 0.8745,
+            "bg_count": 120
+          }
+        ]
+      }
     }
   }
 }
@@ -108,11 +112,11 @@ openaleph-search search query-string "investigation" \
 
 ## Background filtering
 
-Background datasets define the comparison baseline:
+Background datasets define the comparison baseline for significance scoring. The `background_filter` restricts which documents are used to compute background term frequencies.
 
 ### Dataset-specific
 
-When filtering by datasets:
+When filtering by datasets or collections, the background is scoped accordingly:
 ```json
 {
   "background_filter": {
@@ -124,16 +128,45 @@ When filtering by datasets:
 !!! info "OpenAleph"
     Currently, OpenAleph uses `collection_id` filter here with the numeric IDs instead.
 
+!!! warning "Performance"
+    `background_filter` requires Elasticsearch to compute background term frequencies on-the-fly by intersecting posting lists for each candidate term with the filtered document set. This is significantly slower than the default behavior (pre-computed index-level term statistics). The `shard_min_doc_count` setting helps by eliminating rare terms before the expensive background lookups happen.
 
-### Full dataset
+### No filter
 
-Without filters, uses entire accessible datasets.
+When no collection or dataset filter is applied, `background_filter` is omitted entirely. Elasticsearch then uses pre-computed index-level term statistics as background, which is fast.
 
 ## Sampling
 
+Both significant terms and significant text aggregations are wrapped in a sampler to cap the number of foreground documents processed per shard.
+
+### Significant terms sampling
+
+**Diversified sampling** (default, no collection/dataset filter):
+```json
+{
+  "diversified_sampler": {
+    "shard_size": 2000,
+    "field": "dataset"
+  }
+}
+```
+
+Samples across datasets so no single dataset dominates the foreground set.
+
+**Regular sampling** (when filtering by collection/dataset):
+```json
+{
+  "sampler": {
+    "shard_size": 2000
+  }
+}
+```
+
+Configurable via `OPENALEPH_SEARCH_SIGNIFICANT_TERMS_SAMPLER_SIZE` (default: `2000`).
+
 ### Significant text sampling
 
-**Diversified sampling** (default):
+**Diversified sampling** (default, no collection/dataset filter):
 ```json
 {
   "diversified_sampler": {
@@ -143,9 +176,7 @@ Without filters, uses entire accessible datasets.
 }
 ```
 
-Samples across datasets for representative analysis.
-
-**Regular sampling** (when filtering by dataset):
+**Regular sampling** (when filtering by collection/dataset):
 ```json
 {
   "sampler": {
@@ -154,14 +185,23 @@ Samples across datasets for representative analysis.
 }
 ```
 
+Configurable via `OPENALEPH_SEARCH_SIGNIFICANT_TEXT_SAMPLER_SIZE` (default: `200`).
+
 ### Shard size calculation
 
-For significant terms:
+For the significant terms aggregation's internal `shard_size` (number of candidate terms per shard, separate from the sampler):
 ```
 shard_size = max(100, requested_size * 5)
 ```
 
-Ensures sufficient sampling for statistical significance.
+### Minimum document counts
+
+Two thresholds control which terms are evaluated:
+
+- **`min_doc_count`** (default: `3`): Minimum total foreground frequency across all shards for a term to appear in final results. Applied after merging.
+- **`shard_min_doc_count`** (default: `1`): Minimum foreground frequency on a single shard before the expensive background frequency lookup happens. Should be lower than `min_doc_count` since documents are distributed across shards.
+
+Configurable via `OPENALEPH_SEARCH_SIGNIFICANT_TERMS_MIN_DOC_COUNT` and `OPENALEPH_SEARCH_SIGNIFICANT_TERMS_SHARD_MIN_DOC_COUNT`.
 
 ## Interpretation
 
@@ -251,11 +291,20 @@ openaleph-search search query-string "event" \
 
 ### Sampling efficiency
 
-Sampling balances performance and accuracy:
+All significant aggregations are wrapped in a sampler to limit the foreground document set:
 
-- Default 200 documents per shard
-- Diversified sampling across datasets
-- Configurable via shard_size parameters
+- Significant terms: default 2000 documents per shard
+- Significant text: default 200 documents per shard
+- Diversified sampling across datasets when no collection/dataset filter is applied
+- Configurable via settings
+
+### Background filter cost
+
+The `background_filter` is the main performance bottleneck. For each candidate term in the foreground, Elasticsearch must intersect its posting list with the background filter's document set. Mitigation strategies:
+
+- **`shard_min_doc_count`**: Eliminates rare terms before background lookups (default: 3)
+- **Smaller sampler size**: Fewer foreground docs means fewer candidate terms
+- **Filter caching**: Elasticsearch caches `collection_id` filters as BitSets; repeated queries with the same collection set benefit from cache hits
 
 ### Query optimization
 
@@ -264,8 +313,9 @@ Monitor performance through:
 - Query `took` times in responses
 - Elasticsearch slow query logs
 - Resource usage during aggregations
+- Filter cache hit rates: `GET /_nodes/stats/indices/query_cache`
 
-Adjust shard sizes and minimum document counts based on dataset characteristics.
+Adjust sampler sizes and minimum document counts based on dataset characteristics.
 
 ## Error handling
 
@@ -275,8 +325,10 @@ Empty analysis returns appropriate structure:
 ```json
 {
   "aggregations": {
-    "names.significant_terms": {
-      "buckets": []
+    "names.significant_sampled": {
+      "names.significant_terms": {
+        "buckets": []
+      }
     }
   }
 }
