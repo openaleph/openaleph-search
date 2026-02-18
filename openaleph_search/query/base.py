@@ -232,22 +232,34 @@ class Query:
                 facet_aggregations[agg_name] = {"cardinality": {"field": facet_name}}
 
             if len(facet_aggregations):
-                # Wrap in sampler to cap per-shard doc count
-                sampler_name = "%s.significant_sampled" % facet_name
-                sampled = {
-                    **self.get_significant_terms_sampler(),
-                    "aggs": facet_aggregations,
-                }
                 # Apply post-filters for significant terms aggregations
                 other_filters = self.get_post_filters(exclude=facet_name)
-                if len(other_filters["bool"]["filter"]):
-                    agg_name = "%s.significant_filtered" % facet_name
-                    aggregations[agg_name] = {
-                        "filter": other_filters,
-                        "aggregations": {sampler_name: sampled},
+                # Only wrap in sampler when background_filter is present
+                # (the expensive case). Without it, ES uses pre-computed
+                # index-level term stats and the sampler just adds overhead.
+                if background:
+                    sampler_name = "%s.significant_sampled" % facet_name
+                    sampled = {
+                        **self.get_significant_terms_sampler(),
+                        "aggs": facet_aggregations,
                     }
+                    if len(other_filters["bool"]["filter"]):
+                        agg_name = "%s.significant_filtered" % facet_name
+                        aggregations[agg_name] = {
+                            "filter": other_filters,
+                            "aggregations": {sampler_name: sampled},
+                        }
+                    else:
+                        aggregations[sampler_name] = sampled
                 else:
-                    aggregations[sampler_name] = sampled
+                    if len(other_filters["bool"]["filter"]):
+                        agg_name = "%s.significant_filtered" % facet_name
+                        aggregations[agg_name] = {
+                            "filter": other_filters,
+                            "aggregations": facet_aggregations,
+                        }
+                    else:
+                        aggregations.update(facet_aggregations)
 
         significant_text_field = self.parser.get_facet_significant_text()
         if significant_text_field:
@@ -291,6 +303,12 @@ class Query:
         return {"sampler": {"shard_size": size}, "aggs": {agg_name: aggregation}}
 
     def get_significant_terms_sampler(self) -> dict[str, Any]:
+        if settings.significant_terms_random_sampler:
+            return {
+                "random_sampler": {
+                    "probability": settings.significant_terms_sampler_probability,
+                }
+            }
         size = settings.significant_terms_sampler_size
         if self.parser.collection_ids or self.parser.datasets:
             return {"sampler": {"shard_size": size}}

@@ -141,49 +141,29 @@ Both significant terms and significant text aggregations are wrapped in a sample
 
 ### Significant terms sampling
 
-**Diversified sampling** (default, no collection/dataset filter):
+**Random sampling** (default):
 ```json
 {
-  "diversified_sampler": {
-    "shard_size": 2000,
-    "field": "dataset"
+  "random_sampler": {
+    "probability": 0.3
   }
 }
 ```
 
-Samples across datasets so no single dataset dominates the foreground set.
+Uses a probability-based random sample across the full result set, giving statistically representative results. Configurable via `OPENALEPH_SEARCH_SIGNIFICANT_TERMS_SAMPLER_PROBABILITY` (default: `0.3`).
 
-**Regular sampling** (when filtering by collection/dataset):
-```json
-{
-  "sampler": {
-    "shard_size": 2000
-  }
-}
-```
+**Top-N sampling** (fallback, set `OPENALEPH_SEARCH_SIGNIFICANT_TERMS_RANDOM_SAMPLER=false`):
 
-Configurable via `OPENALEPH_SEARCH_SIGNIFICANT_TERMS_SAMPLER_SIZE` (default: `2000`).
+When random sampling is disabled, falls back to top-N sampling which takes the highest-scoring documents per shard. This biases toward query-relevant documents and may give different significance results.
+
+- With collection/dataset filter: `sampler` with configurable `shard_size`
+- Without filter: `diversified_sampler` across datasets
+
+Configurable via `OPENALEPH_SEARCH_SIGNIFICANT_TERMS_SAMPLER_SIZE` (default: `10000`).
 
 ### Significant text sampling
 
-**Diversified sampling** (default, no collection/dataset filter):
-```json
-{
-  "diversified_sampler": {
-    "shard_size": 200,
-    "field": "dataset"
-  }
-}
-```
-
-**Regular sampling** (when filtering by collection/dataset):
-```json
-{
-  "sampler": {
-    "shard_size": 200
-  }
-}
-```
+Uses `diversified_sampler` (no collection/dataset filter) or `sampler` (with filter) to cap foreground documents for significant text analysis.
 
 Configurable via `OPENALEPH_SEARCH_SIGNIFICANT_TEXT_SAMPLER_SIZE` (default: `200`).
 
@@ -293,7 +273,7 @@ openaleph-search search query-string "event" \
 
 All significant aggregations are wrapped in a sampler to limit the foreground document set:
 
-- Significant terms: default 2000 documents per shard
+- Significant terms: default 10000 documents per shard
 - Significant text: default 200 documents per shard
 - Diversified sampling across datasets when no collection/dataset filter is applied
 - Configurable via settings
