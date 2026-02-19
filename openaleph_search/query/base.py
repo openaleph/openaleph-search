@@ -308,7 +308,7 @@ class Query:
         size = settings.significant_terms_sampler_size
         if settings.significant_terms_random_sampler:
             if count and count > size:
-                probability = max(0.01, size / count)
+                probability = min(0.5, max(0.01, size / count))
             else:
                 probability = 1.0
             log.debug(
