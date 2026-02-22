@@ -1,7 +1,7 @@
 import asyncio
 import time
+from functools import cache
 
-from anystore.functools import weakref_cache as cache
 from anystore.logging import get_logger
 from anystore.util import mask_uri
 from banal import ensure_list
