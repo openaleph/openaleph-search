@@ -84,12 +84,17 @@ def cli_format_entities(
     input_uri: str = OPT_INPUT_URI,
     output_uri: str = OPT_OUTPUT_URI,
     dataset: str = OPT_DATASET,
+    collection_id: int | None = None,
 ):
     """Transform entities into index actions"""
     with ErrorHandler(log):
         entities = smart_read_proxies(input_uri)
         formatted = logged_items(
-            format_parallel(dataset, entities), "Format", 10_000, "Entity", log
+            format_parallel(dataset, entities, collection_id=collection_id),
+            "Format",
+            10_000,
+            "Entity",
+            log,
         )
         smart_write_json(output_uri, formatted)
 
@@ -98,10 +103,13 @@ def cli_format_entities(
 def cli_index_entities(
     input_uri: str = OPT_INPUT_URI,
     dataset: str = OPT_DATASET,
+    collection_id: int | None = None,
 ):
     """Index entities into given dataset"""
     with ErrorHandler(log):
-        entities.index_bulk(dataset, smart_read_proxies(input_uri))
+        entities.index_bulk(
+            dataset, smart_read_proxies(input_uri), collection_id=collection_id
+        )
 
 
 @cli.command("index-actions")
