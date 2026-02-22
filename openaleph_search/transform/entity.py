@@ -158,6 +158,11 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
     data[Field.INDEX_VERSION] = __version__
     data[Field.INDEX_TS] = datetime.now().isoformat()
 
+    if settings.auth_field not in data:
+        raise RuntimeError(
+            f"Auth field missing in entity data: `{settings.auth_field}`"
+        )
+
     # log.info("%s", pformat(data))
     entity_id = data.pop("id")
     return {
