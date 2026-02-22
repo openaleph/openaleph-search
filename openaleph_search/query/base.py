@@ -375,6 +375,7 @@ class Query:
             ),
             Field.NAMES: get_highlighter(Field.NAME),
             Field.NAMES: get_highlighter(Field.NAMES),
+            Field.TRANSLATION: get_highlighter(Field.TRANSLATION, query),
         }
         if Field.TEXT not in fields:
             fields[Field.TEXT] = get_highlighter(Field.TEXT, query)

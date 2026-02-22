@@ -190,6 +190,59 @@ def test_bulk_indexing_mode(cleanup_after):
         assert idx_settings["number_of_replicas"] == str(settings.index_replicas)
 
 
+def test_translation_plaintext():
+    """PlainText: translatedText property is kept in properties; the ES mapping
+    copy_to directive copies it into the `translation` field at index time, so
+    the transform payload should NOT contain a top-level `translation` key."""
+    entity = make_entity(
+        {
+            "id": "plain-text-translated",
+            "schema": "PlainText",
+            "properties": {
+                "fileName": ["document.txt"],
+                "translatedText": ["This is the translated text"],
+            },
+        }
+    )
+    action = format_entity("test_dataset", entity)
+    assert action is not None
+    source = action["_source"]
+    # translatedText stays in properties for ES copy_to to handle
+    assert "translatedText" in source["properties"]
+    assert source["properties"]["translatedText"] == ["This is the translated text"]
+    # No explicit translation field — ES copy_to handles it
+    assert "translation" not in source
+
+
+def test_translation_pages():
+    """Pages: translations are extracted from indexText values prefixed with
+    `__translation__` and placed into the `translation` field explicitly."""
+    entity = make_entity(
+        {
+            "id": "pages-translated",
+            "schema": "Pages",
+            "properties": {
+                "fileName": ["document.pdf"],
+                "indexText": [
+                    "regular text content",
+                    "__translation__ Dies ist der übersetzte Text",
+                    "__translation__ Ceci est le texte traduit",
+                ],
+            },
+        }
+    )
+    action = format_entity("test_dataset", entity)
+    assert action is not None
+    source = action["_source"]
+    assert "translation" in source
+    assert set(source["translation"]) == {
+        "Dies ist der übersetzte Text",
+        "Ceci est le texte traduit",
+    }
+    # indexText is moved to `content`, and translations are stripped out
+    assert "content" in source
+
+
 def test_indexer_namespace(monkeypatch):
     import importlib
 

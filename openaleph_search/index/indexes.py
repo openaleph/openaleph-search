@@ -114,8 +114,10 @@ def make_schema_bucket_mapping(bucket: Bucket) -> dict[str, Any]:
     if bucket == "pages":
         # store full text for highlighting
         mapping["properties"][Field.CONTENT]["store"] = True
+        mapping["properties"][Field.TRANSLATION]["store"] = True
     else:
         mapping["properties"][Field.CONTENT]["store"] = False
+        mapping["properties"][Field.TRANSLATION]["store"] = False
     return mapping
 
 

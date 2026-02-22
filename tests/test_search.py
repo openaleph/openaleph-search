@@ -615,3 +615,36 @@ def test_search_synonyms_name_keys(cleanup_after):
     result = query.search()
     assert result["hits"]["total"]["value"] == 1
     assert result["hits"]["hits"][0]["_id"] == "darc-limited-company"
+
+
+def test_search_translation_plaintext(cleanup_after):
+    """Test that PlainText translatedText is searchable via ES copy_to into the
+    translation field."""
+    entity = make_entity(
+        {
+            "id": "plaintext-with-translation",
+            "schema": "PlainText",
+            "properties": {
+                "fileName": ["document.txt"],
+                "translatedText": ["Der Bericht enthält vertrauliche Informationen"],
+            },
+        }
+    )
+
+    index_bulk("test_translation", [entity], sync=True)
+
+    # Search for the translated text — it should be findable via the
+    # `translation` field that ES populates through copy_to
+    query = _create_query(
+        "/search?q=vertrauliche Informationen&filter:dataset=test_translation"
+    )
+    result = query.search()
+    assert result["hits"]["total"]["value"] == 1
+    assert result["hits"]["hits"][0]["_id"] == "plaintext-with-translation"
+
+    # The original text should not match (it's German, not English)
+    query = _create_query(
+        "/search?q=confidential information&filter:dataset=test_translation"
+    )
+    result = query.search()
+    assert result["hits"]["total"]["value"] == 0

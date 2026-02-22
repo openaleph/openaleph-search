@@ -148,6 +148,20 @@ class QueryTestCase(TestCase):
                         "pre_tags": [""],
                         "post_tags": [""],
                     },
+                    "translation": {
+                        "type": "plain",
+                        "fragment_size": 150,
+                        "number_of_fragments": 1,
+                        "highlight_query": {
+                            "query_string": {
+                                "query": "foo",
+                                "lenient": True,
+                                "fields": ["text"],
+                                "default_operator": "AND",
+                                "minimum_should_match": "66%",
+                            }
+                        },
+                    },
                 },
             },
         )

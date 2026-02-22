@@ -16,6 +16,8 @@ settings = Settings()
 MappingProperty: TypeAlias = dict[str, list[str] | str]
 Mapping: TypeAlias = dict[str, MappingProperty]
 
+PROP_TRANSLATED = "translatedText"
+
 # MAPPING SHORTCUTS #
 DEFAULT_ANALYZER = "default"
 DEFAULT_NORMALIZER = "default"
@@ -95,6 +97,7 @@ class Field:
     CONTENT = "content"
     TEXT = "text"
     TAGS = "tags"
+    TRANSLATION = "translation"
 
     NUMERIC = "numeric"
     PROPERTIES = "properties"
@@ -184,6 +187,7 @@ SOURCE_EXCLUDES = list(
             *GROUPS,
             Field.TEXT,
             Field.CONTENT,
+            Field.TRANSLATION,
             Field.NAME,
             Field.NAME_KEYS,
             Field.NAME_PARTS,
@@ -217,6 +221,7 @@ BASE_MAPPING = {
     # full text
     Field.CONTENT: FieldType.CONTENT,
     Field.TEXT: FieldType.TEXT,
+    Field.TRANSLATION: FieldType.TEXT,
     # tagging
     Field.TAGS: FieldType.KEYWORD,
     # processing metadata
@@ -303,7 +308,9 @@ def make_schema_mapping(schemata: Iterable[SchemaType]) -> Mapping:
             if prop.stub:
                 continue
             merged_props[name]["type"].add(get_index_field_type(prop.type))
-            if prop.type == registry.text:
+            if name == PROP_TRANSLATED:
+                merged_props[name]["copy_to"].add(Field.TRANSLATION)
+            elif prop.type == registry.text:
                 merged_props[name]["copy_to"].add(Field.CONTENT)
             else:
                 merged_props[name]["copy_to"].add(Field.TEXT)

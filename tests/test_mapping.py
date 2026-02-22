@@ -167,7 +167,12 @@ def test_mapping_spec():
     assert GROUP_MAPPING["emails"]["type"] == "keyword"
     mapping = make_schema_mapping(model.schemata.values())
     assert all(
-        ("text" in f["copy_to"] or "content" in f["copy_to"]) for f in mapping.values()
+        (
+            "text" in f["copy_to"]
+            or "content" in f["copy_to"]
+            or "translation" in f["copy_to"]
+        )
+        for f in mapping.values()
     )
     assert "names" in mapping["name"]["copy_to"]
     assert "dates" in mapping["birthDate"]["copy_to"]
@@ -188,6 +193,12 @@ def test_mapping_spec():
         "name" in person_mapping["name"]["copy_to"]
     ), "Person name should copy to name field"
 
+    # translatedText should copy to translation field, not to content/text
+    plaintext_mapping = make_schema_mapping(["PlainText"])
+    assert "translation" in plaintext_mapping["translatedText"]["copy_to"]
+    assert "content" not in plaintext_mapping["translatedText"]["copy_to"]
+    assert "text" not in plaintext_mapping["translatedText"]["copy_to"]
+
     full_mapping = make_mapping(mapping)
     assert "date" in full_mapping["properties"]["numeric"]["properties"]
     assert "dates" in full_mapping["properties"]["numeric"]["properties"]
@@ -197,14 +208,11 @@ def test_mapping_spec():
 
 
 def test_mapping_schema_bucket():
-    # full text is stored only for Pages entities
+    # full text and translation are stored only for Pages entities (for highlighting)
     mapping = make_schema_bucket_mapping("pages")
     assert mapping["properties"]["content"]["store"] is True
-    mapping = make_schema_bucket_mapping("page")
-    assert mapping["properties"]["content"]["store"] is False
-    mapping = make_schema_bucket_mapping("documents")
-    assert mapping["properties"]["content"]["store"] is False
-    mapping = make_schema_bucket_mapping("intervals")
-    assert mapping["properties"]["content"]["store"] is False
-    mapping = make_schema_bucket_mapping("things")
-    assert mapping["properties"]["content"]["store"] is False
+    assert mapping["properties"]["translation"]["store"] is True
+    for bucket in ("page", "documents", "intervals", "things"):
+        mapping = make_schema_bucket_mapping(bucket)
+        assert mapping["properties"]["content"]["store"] is False
+        assert mapping["properties"]["translation"]["store"] is False

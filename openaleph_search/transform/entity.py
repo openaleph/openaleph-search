@@ -8,12 +8,12 @@ from datetime import datetime
 from multiprocessing import cpu_count
 from typing import Generator, Iterable
 
-from anystore.functools import weakref_cache
 from anystore.logging import get_logger
 from anystore.util import Took
 from banal import ensure_list
 from followthemoney import EntityProxy, model, registry
 from followthemoney.namespace import Namespace
+from ftmq.util import select_data
 
 from openaleph_search.index.indexer import Action, Actions
 from openaleph_search.index.indexes import entities_write_index, schema_bucket
@@ -53,7 +53,11 @@ def _get_symbols(entity: EntityProxy) -> set[str]:
     return symbols
 
 
-@weakref_cache
+def _get_translations(entity: EntityProxy) -> set[str]:
+    return set(select_data(entity, "__translation__"))
+
+
+@functools.cache
 def _get_namespace(value: str) -> Namespace:
     return Namespace(value)
 
@@ -78,6 +82,7 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
     dataset = valid_dataset(dataset)
 
     data = entity.to_dict()
+    data["properties"] = data.get("properties", {})
     # deprecated
     collection_id = kwargs.get("collection_id")
     if collection_id is not None:
@@ -109,13 +114,21 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
 
     # Slight hack: a magic property in followthemoney that gets taken out
     # of the properties and added straight to the index text.
-    properties = data.get("properties", {})
-    text = properties.pop("indexText", [])
+    text = data["properties"].pop("indexText", [])
+
+    # Another hack: Translations are prefixed with "__translation__" in
+    # `Pages.indexText`
+    if entity.schema.name == "Pages":
+        translations = _get_translations(entity)
+        if translations:
+            data[Field.TRANSLATION] = list(translations)
+            text = [t for t in text if not t.startswith("__translation__")]
+
     if text:
         data[Field.CONTENT] = text
 
     # length normalization
-    data[Field.NUM_VALUES] = sum([len(v) for v in properties.values()])
+    data[Field.NUM_VALUES] = sum([len(v) for v in data["properties"].values()])
 
     # integer casting
     numeric = {}

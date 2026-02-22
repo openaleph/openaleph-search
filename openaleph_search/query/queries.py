@@ -56,6 +56,7 @@ class EntitiesQuery(Query):
         f"{Field.NAME_PARTS}^2",
         Field.CONTENT,
         f"{Field.TEXT}^0.8",
+        f"{Field.TRANSLATION}^0.7",
     ]
     PREFIX_FIELD = Field.NAME_PARTS
     HIGHLIGHT_FIELD = Field.CONTENT
