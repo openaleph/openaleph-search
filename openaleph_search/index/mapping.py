@@ -13,7 +13,7 @@ from openaleph_search.util import SchemaType
 
 settings = Settings()
 
-MappingProperty: TypeAlias = dict[str, list[str] | str]
+MappingProperty: TypeAlias = dict[str, Any]
 Mapping: TypeAlias = dict[str, MappingProperty]
 
 PROP_TRANSLATED = "translatedText"
@@ -198,76 +198,95 @@ SOURCE_EXCLUDES = list(
 )
 
 
-# base property mapping without specific schema fields
-BASE_MAPPING = {
-    Field.DATASET: FieldType.KEYWORD,
-    Field.SCHEMA: FieldType.KEYWORD,
-    Field.SCHEMATA: FieldType.KEYWORD,
-    # for fast label display
-    Field.CAPTION: FieldType.KEYWORD,
-    # original names as matching (text) field
-    Field.NAME: FieldType.NAME,
-    # names keywords, a bit normalized
-    Field.NAMES: FieldType.NAME_KEYWORD,
-    # name normalizations for filters and matching
-    Field.NAME_KEYS: FieldType.KEYWORD,
-    Field.NAME_PARTS: FieldType.KEYWORD_COPY,
-    Field.NAME_SYMBOLS: FieldType.KEYWORD,
-    Field.NAME_PHONETIC: FieldType.KEYWORD,
-    # all entities can reference geo points
-    Field.GEO_POINT: FieldType.GEOPOINT,
-    # references to other entities (after merging)
-    Field.REFERENTS: FieldType.KEYWORD,
-    # full text
-    Field.CONTENT: FieldType.CONTENT,
-    Field.TEXT: FieldType.TEXT,
-    Field.TRANSLATION: FieldType.TEXT,
-    # tagging
-    Field.TAGS: FieldType.KEYWORD,
-    # processing metadata
-    Field.UPDATED_AT: FieldType.DATE,
-    Field.CREATED_AT: FieldType.DATE,
-    # data metadata, provenance
-    Field.LAST_CHANGE: FieldType.DATE,
-    Field.LAST_SEEN: FieldType.DATE,
-    Field.FIRST_SEEN: FieldType.DATE,
-    Field.ORIGIN: FieldType.KEYWORD,
-    # OpenAleph leaked context data probably deprecated soon
-    Field.ROLE: FieldType.KEYWORD,
-    Field.PROFILE: FieldType.KEYWORD,
-    Field.COLLECTION_ID: FieldType.KEYWORD,
-    Field.MUTABLE: FieldType.BOOL,
-    # length normalization
-    Field.NUM_VALUES: FieldType.INTEGER,
-    # index metadata
-    Field.INDEX_BUCKET: {**FieldType.KEYWORD, "index": False},
-    Field.INDEX_VERSION: {**FieldType.KEYWORD, "index": False},
-    Field.INDEX_TS: {
-        **FieldType.DATE,
-        "index": True,
-    },  # we might want to filter on this
-}
+def base_mapping() -> dict[str, MappingProperty]:
+    """Base property mapping without specific schema fields.
 
-# combined fields for emails, countries, ...
-GROUP_MAPPING = {
-    group: TYPE_MAPPINGS.get(type_, FieldType.KEYWORD)
-    for group, type_ in registry.groups.items()
-    if group not in BASE_MAPPING
-}
+    Returns fresh dicts on each call so callers can safely mutate the result.
+    """
+    return {
+        Field.DATASET: {**FieldType.KEYWORD},
+        Field.SCHEMA: {**FieldType.KEYWORD},
+        Field.SCHEMATA: {**FieldType.KEYWORD},
+        # for fast label display
+        Field.CAPTION: {**FieldType.KEYWORD},
+        # original names as matching (text) field
+        Field.NAME: {**FieldType.NAME},
+        # names keywords, a bit normalized
+        Field.NAMES: {**FieldType.NAME_KEYWORD},
+        # name normalizations for filters and matching
+        Field.NAME_KEYS: {**FieldType.KEYWORD},
+        Field.NAME_PARTS: {**FieldType.KEYWORD_COPY},
+        Field.NAME_SYMBOLS: {**FieldType.KEYWORD},
+        Field.NAME_PHONETIC: {**FieldType.KEYWORD},
+        # all entities can reference geo points
+        Field.GEO_POINT: {**FieldType.GEOPOINT},
+        # references to other entities (after merging)
+        Field.REFERENTS: {**FieldType.KEYWORD},
+        # full text
+        Field.CONTENT: {**FieldType.CONTENT},
+        Field.TEXT: {**FieldType.TEXT},
+        Field.TRANSLATION: {**FieldType.TEXT},
+        # tagging
+        Field.TAGS: {**FieldType.KEYWORD},
+        # processing metadata
+        Field.UPDATED_AT: {**FieldType.DATE},
+        Field.CREATED_AT: {**FieldType.DATE},
+        # data metadata, provenance
+        Field.LAST_CHANGE: {**FieldType.DATE},
+        Field.LAST_SEEN: {**FieldType.DATE},
+        Field.FIRST_SEEN: {**FieldType.DATE},
+        Field.ORIGIN: {**FieldType.KEYWORD},
+        # OpenAleph leaked context data probably deprecated soon
+        Field.ROLE: {**FieldType.KEYWORD},
+        Field.PROFILE: {**FieldType.KEYWORD},
+        Field.COLLECTION_ID: {**FieldType.KEYWORD},
+        Field.MUTABLE: {**FieldType.BOOL},
+        # length normalization
+        Field.NUM_VALUES: {**FieldType.INTEGER},
+        # index metadata
+        Field.INDEX_BUCKET: {**FieldType.KEYWORD, "index": False},
+        Field.INDEX_VERSION: {**FieldType.KEYWORD, "index": False},
+        Field.INDEX_TS: {**FieldType.DATE, "index": True},
+    }
 
-# used for efficient sorting
-NUMERIC_MAPPING = {
-    **{
-        prop.name: FieldType.NUMERIC
-        for prop in model.properties
-        if prop.type in NUMERIC_TYPES
-    },
-    **{
-        group: FieldType.NUMERIC
+
+# keep module-level references for read-only access in tests etc.
+BASE_MAPPING = base_mapping()
+
+
+def group_mapping() -> dict[str, MappingProperty]:
+    """Combined fields for emails, countries, etc.
+
+    Returns fresh dicts on each call.
+    """
+    _base = base_mapping()
+    return {
+        group: {**TYPE_MAPPINGS.get(type_, FieldType.KEYWORD)}
         for group, type_ in registry.groups.items()
-        if type_ in NUMERIC_TYPES
-    },
-}
+        if group not in _base
+    }
+
+
+GROUP_MAPPING = group_mapping()
+
+
+def numeric_mapping() -> dict[str, MappingProperty]:
+    """Numeric field mapping used for efficient sorting.
+
+    Returns fresh dicts on each call.
+    """
+    return {
+        **{
+            prop.name: {**FieldType.NUMERIC}
+            for prop in model.properties
+            if prop.type in NUMERIC_TYPES
+        },
+        **{
+            group: {**FieldType.NUMERIC}
+            for group, type_ in registry.groups.items()
+            if type_ in NUMERIC_TYPES
+        },
+    }
 
 
 def property_field_name(prop: str) -> str:
@@ -282,11 +301,11 @@ def make_mapping(properties: Mapping) -> dict[str, Any]:
     return {
         "date_detection": False,
         "dynamic": False,
-        "_source": {"excludes": SOURCE_EXCLUDES},
+        "_source": {"excludes": list(SOURCE_EXCLUDES)},
         "properties": {
-            **BASE_MAPPING,
-            **GROUP_MAPPING,
-            Field.NUMERIC: make_object_type(NUMERIC_MAPPING),
+            **base_mapping(),
+            **group_mapping(),
+            Field.NUMERIC: make_object_type(numeric_mapping()),
             Field.PROPERTIES: make_object_type(properties),
         },
     }

@@ -1,0 +1,43 @@
+name: Upgrade
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    services:
+      elastic:
+        image: ghcr.io/openaleph/elasticsearch
+        ports:
+          - 9200:9200
+        env:
+          "discovery.type": single-node
+          "xpack.security.enabled": false
+          "xpack.security.transport.ssl.enabled": false
+          "xpack.security.http.ssl.enabled": false
+
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.13"
+
+    - name: Install baseline version and create indexes
+      run: |
+        pip install openaleph-search==5.1.0
+        openaleph-search upgrade
+
+    - name: Install current version
+      run: |
+        pip install poetry
+        poetry config virtualenvs.create false
+        poetry install --all-extras
+
+    - name: Upgrade indexes
+      run: openaleph-search upgrade
