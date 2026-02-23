@@ -243,6 +243,9 @@ def configure_index(index, mapping, settings_):
             if not check_response(index, res):
                 return False
         mapping = rewrite_mapping_safe(mapping, config.get("mappings"))
+        # _source config (e.g. excludes) is immutable after index creation,
+        # so we strip it when updating existing indexes
+        mapping.pop("_source", None)
         res = es.indices.put_mapping(body=mapping, **options)
         if not check_response(index, res):
             return False
