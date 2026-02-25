@@ -164,6 +164,24 @@ def cli_search_body(
     smart_write(output_uri, data)
 
 
+@cli.command("delete")
+def cli_delete(
+    input_uri: str = OPT_INPUT_URI,
+    index: str | None = None,
+):
+    """Delete documents by query (delete_by_query). Reads a JSON query body from input."""
+    with ErrorHandler(log):
+        from openaleph_search.core import get_es
+        from openaleph_search.index.indexes import entities_read_index
+
+        body = smart_read(input_uri, serialization_mode="json")
+        es = get_es()
+        index = index or entities_read_index()
+        res = es.delete_by_query(index=index, body=body)
+        data = dump_json(dict(res), clean=True, newline=True)
+        smart_write("-", data)
+
+
 @cli.command("analyze")
 def cli_analyze(
     input_uri: str = OPT_INPUT_URI,
