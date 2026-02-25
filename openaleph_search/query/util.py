@@ -105,8 +105,8 @@ def schema_query(
         schema = ensure_schema(schema)
         if not schema.abstract:
             values.add(schema.name)
-            if include_descendants:
-                values.update([s.name for s in schema.descendants])
+        if include_descendants:
+            values.update([s.name for s in schema.descendants if not s.abstract])
     if not len(values):
         return {"match_none": {}}
     return {"terms": {Field.SCHEMA: list(sorted(values))}}
