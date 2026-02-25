@@ -81,3 +81,6 @@ class Settings(BaseSettings):
     highlighter_boundary_max_scan: int = 100
     highlighter_no_match_size: int = 300
     highlighter_max_analyzed_offset: int = 999999
+
+    # search control
+    allow_leading_wildcard: bool = False
