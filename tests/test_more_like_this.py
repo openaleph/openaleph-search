@@ -149,10 +149,10 @@ def test_more_like_this_query_function():
     assert mlt_query["like"] == [{"_id": "doc1"}]
 
     # Check default parameters (hardcoded in more_like_this.py when no parser)
-    assert mlt_query["min_doc_freq"] == 2
-    assert mlt_query["minimum_should_match"] == "20%"
-    assert mlt_query["min_term_freq"] == 2
-    assert mlt_query["max_query_terms"] == 50
+    assert mlt_query["min_doc_freq"] == 1
+    assert mlt_query["minimum_should_match"] == "10%"
+    assert mlt_query["min_term_freq"] == 1
+    assert mlt_query["max_query_terms"] == 200
 
     # Test with custom parser
     parser = SearchQueryParser(
@@ -367,10 +367,10 @@ def test_more_like_this_configurable_parameters():
             break
 
     assert mlt_query_default is not None
-    assert mlt_query_default["min_doc_freq"] == 5  # parser default
-    assert mlt_query_default["minimum_should_match"] == "60%"  # parser default
-    assert mlt_query_default["min_term_freq"] == 5  # parser default
-    assert mlt_query_default["max_query_terms"] == 50  # parser default
+    assert mlt_query_default["min_doc_freq"] == 1  # parser default
+    assert mlt_query_default["minimum_should_match"] == "10%"  # parser default
+    assert mlt_query_default["min_term_freq"] == 1  # parser default
+    assert mlt_query_default["max_query_terms"] == 200  # parser default
 
 
 def test_more_like_this_bucket_filtering():

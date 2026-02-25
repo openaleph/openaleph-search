@@ -39,10 +39,10 @@ def more_like_this_query(
         query["bool"]["filter"].append({"terms": {"dataset": datasets}})
 
     # Get configurable parameters from parser, with sensible defaults
-    min_doc_freq = 2
-    minimum_should_match = "20%"
-    min_term_freq = 2
-    max_query_terms = 50
+    min_doc_freq = 1
+    minimum_should_match = "10%"
+    min_term_freq = 1
+    max_query_terms = 200
 
     if parser is not None:
         min_doc_freq = parser.get_mlt_min_doc_freq()
@@ -53,12 +53,16 @@ def more_like_this_query(
     # Build the more_like_this query using document ID
     mlt_query = {
         "more_like_this": {
-            "fields": [Field.CONTENT, Field.TEXT, Field.NAME],
+            "fields": [Field.CONTENT, f"{Field.NAME}^2"],
             "like": [{"_id": entity.id}],
             "min_term_freq": min_term_freq,
             "max_query_terms": max_query_terms,
             "min_doc_freq": min_doc_freq,
             "minimum_should_match": minimum_should_match,
+            # min_word_length filters out short stopwords (of, the, in, ...)
+            "min_word_length": 5,
+            "max_doc_freq": 500,  # filter out very common terms
+            "boost_terms": 1,
         }
     }
 
