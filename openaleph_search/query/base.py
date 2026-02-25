@@ -1,4 +1,3 @@
-from functools import cached_property
 from typing import Any, ClassVar
 
 from anystore.logging import get_logger
@@ -148,7 +147,6 @@ class Query:
                 terms = {
                     "field": facet_name,
                     "size": self.parser.get_facet_size(facet_name),
-                    "execution_hint": "map",
                 }
                 facet_aggregations[agg_name] = {"terms": terms}
 
@@ -208,16 +206,14 @@ class Query:
             if self.parser.get_facet_significant_values(facet_name):
                 agg_name = "%s.significant_terms" % facet_name
                 background = self.get_significant_background()
+                size = self.parser.get_facet_significant_size(facet_name)
                 significant_terms_agg = {
                     "field": facet_name,
                     **({"background_filter": background} if background else {}),
-                    "size": self.parser.get_facet_significant_size(facet_name),
+                    "size": size,
                     "min_doc_count": settings.significant_terms_min_doc_count,
                     "shard_min_doc_count": settings.significant_terms_shard_min_doc_count,
-                    "shard_size": max(
-                        100, self.parser.get_facet_significant_size(facet_name) * 5
-                    ),
-                    "execution_hint": "map",
+                    "shard_size": int(size * 1.5) + 10,
                 }
                 facet_aggregations[agg_name] = {
                     "significant_terms": significant_terms_agg
@@ -234,34 +230,21 @@ class Query:
                 facet_aggregations[agg_name] = {"cardinality": {"field": facet_name}}
 
             if len(facet_aggregations):
-                # Apply post-filters for significant terms aggregations
                 other_filters = self.get_post_filters(exclude=facet_name)
-                # Only wrap in sampler when background_filter is present
-                # (the expensive case). Without it, ES uses pre-computed
-                # index-level term stats and the sampler just adds overhead.
-                if background:
-                    sampler_name = "%s.significant_sampled" % facet_name
-                    sampled = {
-                        **self.get_significant_terms_sampler(count=self.count),
-                        "aggs": facet_aggregations,
+                # Always wrap in sampler to limit foreground doc traversal
+                sampler_name = "%s.significant_sampled" % facet_name
+                sampled = {
+                    **self.get_significant_terms_sampler(),
+                    "aggs": facet_aggregations,
+                }
+                if len(other_filters["bool"]["filter"]):
+                    agg_name = "%s.significant_filtered" % facet_name
+                    aggregations[agg_name] = {
+                        "filter": other_filters,
+                        "aggregations": {sampler_name: sampled},
                     }
-                    if len(other_filters["bool"]["filter"]):
-                        agg_name = "%s.significant_filtered" % facet_name
-                        aggregations[agg_name] = {
-                            "filter": other_filters,
-                            "aggregations": {sampler_name: sampled},
-                        }
-                    else:
-                        aggregations[sampler_name] = sampled
                 else:
-                    if len(other_filters["bool"]["filter"]):
-                        agg_name = "%s.significant_filtered" % facet_name
-                        aggregations[agg_name] = {
-                            "filter": other_filters,
-                            "aggregations": facet_aggregations,
-                        }
-                    else:
-                        aggregations.update(facet_aggregations)
+                    aggregations[sampler_name] = sampled
 
         significant_text_field = self.parser.get_facet_significant_text()
         if significant_text_field:
@@ -304,29 +287,25 @@ class Query:
         # https://www.elastic.co/docs/reference/aggregations/search-aggregations-bucket-sampler-aggregation
         return {"sampler": {"shard_size": size}, "aggs": {agg_name: aggregation}}
 
-    def get_significant_terms_sampler(self, count: int | None = None) -> dict[str, Any]:
-        size = settings.significant_terms_sampler_size
-        if settings.significant_terms_random_sampler:
-            if count and count > size:
-                probability = min(0.5, max(0.01, size / count))
-            else:
-                probability = 1.0
-            log.debug(
-                "Significant terms sampler: count=%s target=%s probability=%.3f",
-                count,
-                size,
-                probability,
-            )
-            return {"random_sampler": {"probability": probability}}
+    def _make_sampler(self, size: int) -> dict[str, Any]:
         if self.parser.collection_ids or self.parser.datasets:
             return {"sampler": {"shard_size": size}}
-        return {"diversified_sampler": {"shard_size": size, "field": self.AUTHZ_FIELD}}
+        # diversified_sampler max_docs_per_value defaults to 1, which means
+        # with N datasets you'd only sample N docs per shard. Set it high
+        # enough so the shard_size is the actual bound, not the diversity cap.
+        return {
+            "diversified_sampler": {
+                "shard_size": size,
+                "field": self.AUTHZ_FIELD,
+                "max_docs_per_value": size,
+            }
+        }
+
+    def get_significant_terms_sampler(self, **kwargs) -> dict[str, Any]:
+        return self._make_sampler(settings.significant_terms_sampler_size)
 
     def get_significant_text_sampler(self) -> dict[str, Any]:
-        size = settings.significant_text_sampler_size
-        if self.parser.collection_ids or self.parser.datasets:
-            return {"sampler": {"shard_size": size}}
-        return {"diversified_sampler": {"shard_size": size, "field": self.AUTHZ_FIELD}}
+        return self._make_sampler(settings.significant_text_sampler_size)
 
     def get_sort(self) -> list[str | dict[str, dict[str, Any]]]:
         """Pick one of a set of named result orderings."""
@@ -402,8 +381,9 @@ class Query:
         return False
 
     def get_body(self) -> dict[str, Any]:
+        significant = self.has_significant_aggregations()
         # Don't return hits when doing significant aggregations
-        size = 0 if self.has_significant_aggregations() else self.parser.limit
+        size = 0 if significant else self.parser.limit
 
         body = {
             "query": self.get_query(),
@@ -415,6 +395,8 @@ class Query:
             "highlight": self.get_highlight(),
             "_source": self.get_source(),
         }
+        if significant:
+            body["timeout"] = "%ds" % (settings.timeout // 2)
         # log.info("Query: %s", pformat(body))
         return body
 
@@ -443,13 +425,6 @@ class Query:
         if len(parts) > 1 and empty in parts:
             parts.remove(empty)
         return " ".join([p for p in parts if p is not None])
-
-    @cached_property
-    def count(self) -> int:
-        """Fast count of matching documents (no scoring, no aggs)."""
-        es = get_es()
-        result = es.count(index=self.get_index(), body={"query": self.get_query()})
-        return result.get("count", 0)
 
     def search(self) -> ObjectApiResponse:
         """Execute the query as assmbled."""
