@@ -8,7 +8,6 @@ from followthemoney.types import registry
 from openaleph_search.core import get_es
 from openaleph_search.index.mapping import (
     DATE_FORMAT,
-    GROUPS,
     NUMERIC_TYPES,
     Field,
     get_field_type,
@@ -337,8 +336,19 @@ class Query:
             query = bool_query()
             if self.get_query_string():
                 query["bool"]["should"] = [self.get_query_string()]
+            # Only highlight filter values that are human-readable text.
+            # Skip short-code groups (countries, languages, etc.) to avoid
+            # noisy highlights (e.g. "es" for Spain matching German text).
+            highlight_groups = {
+                "names",
+                "addresses",
+                "identifiers",
+                "emails",
+                "ips",
+                "phones",
+            }
             for key, values in self.parser.filters.items():
-                if key in GROUPS or key == Field.NAME:
+                if key in highlight_groups or key == Field.NAME:
                     for value in values:
                         query["bool"]["should"].append(
                             {

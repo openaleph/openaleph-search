@@ -160,6 +160,7 @@ class QueryTestCase(TestCase):
                                 "fields": ["text"],
                                 "default_operator": "AND",
                                 "minimum_should_match": "66%",
+                                "allow_leading_wildcard": False,
                             }
                         },
                     },
