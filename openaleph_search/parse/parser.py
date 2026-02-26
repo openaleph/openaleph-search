@@ -48,6 +48,9 @@ class QueryParser:
         self.next_limit = self.getint("next_limit", limit)
         self.text = sanitize_text(self.get("q"))
         self.prefix = sanitize_text(self.get("prefix"))
+        # prefix should always be case insensitive
+        if self.prefix:
+            self.prefix = self.prefix.lower()
 
         self.filters = self.prefixed_items("filter:")
         self.excludes = self.prefixed_items("exclude:")
@@ -295,19 +298,19 @@ class SearchQueryParser(QueryParser):
 
     def get_mlt_min_doc_freq(self) -> int:
         """Minimum document frequency for more_like_this query terms."""
-        return self.getint("mlt_min_doc_freq", 5) or 5
+        return self.getint("mlt_min_doc_freq", 1) or 1
 
     def get_mlt_minimum_should_match(self) -> str:
         """Minimum should match percentage for more_like_this query."""
-        return self.get("mlt_minimum_should_match", "60%") or "60%"
+        return self.get("mlt_minimum_should_match", "10%") or "10%"
 
     def get_mlt_min_term_freq(self) -> int:
         """Minimum term frequency for more_like_this query terms."""
-        return self.getint("mlt_min_term_freq", 5) or 5
+        return self.getint("mlt_min_term_freq", 1) or 1
 
     def get_mlt_max_query_terms(self) -> int:
         """Maximum number of query terms for more_like_this query."""
-        return self.getint("mlt_max_query_terms", 50) or 50
+        return self.getint("mlt_max_query_terms", 200) or 200
 
     def to_dict(self) -> dict[str, Any]:
         parser = super().to_dict()
