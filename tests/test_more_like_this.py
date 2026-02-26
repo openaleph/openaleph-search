@@ -401,7 +401,19 @@ def test_more_like_this_auth(
     """Test that MoreLikeThisQuery respects authentication filters"""
     monkeypatch.setenv("OPENALEPH_SEARCH_AUTH", "true")
 
-    # Create test documents for different datasets
+    from openaleph_search.core import get_es
+    from openaleph_search.index.admin import delete_index, upgrade_search
+    from openaleph_search.index.indexes import entities_read_index
+
+    # Recreate indexes from scratch to eliminate stale segment metadata from
+    # previous tests that can corrupt MLT term statistics
+    delete_index()
+    upgrade_search()
+    es = get_es()
+
+    # Create test documents for different datasets.
+    # Documents need enough overlapping content (words >= 5 chars) for MLT
+    # to find matches with min_word_length=5 on a small test dataset.
     public_docs = [
         make_entity(
             {
@@ -410,7 +422,12 @@ def test_more_like_this_auth(
                 "properties": {
                     "title": ["Public Machine Learning Paper"],
                     "bodyText": [
-                        "This public document discusses machine learning algorithms, neural networks, and deep learning architectures for computer vision applications."
+                        "This paper discusses various machine learning algorithms including "
+                        "neural networks, decision trees, and support vector machines. We "
+                        "present novel approaches to deep learning architectures and their "
+                        "applications in computer vision and natural language processing "
+                        "tasks. Modern optimization techniques enable training of larger "
+                        "models with improved performance across multiple benchmarks."
                     ],
                 },
             }
@@ -422,7 +439,12 @@ def test_more_like_this_auth(
                 "properties": {
                     "title": ["Public AI Research"],
                     "bodyText": [
-                        "Public research on artificial intelligence, machine learning models, and neural network optimization techniques."
+                        "Artificial intelligence and machine learning have revolutionized "
+                        "many fields. This survey covers neural networks, deep learning "
+                        "models, and their applications in computer vision research. We "
+                        "also discuss natural language processing and automated decision "
+                        "making systems. Training optimization techniques continue to "
+                        "advance with novel architectures and improved benchmarks."
                     ],
                 },
             }
@@ -437,7 +459,11 @@ def test_more_like_this_auth(
                 "properties": {
                     "title": ["Private ML Study"],
                     "bodyText": [
-                        "Private study on machine learning applications, deep neural networks, and computer vision algorithms."
+                        "Private study on machine learning applications using deep neural "
+                        "networks and computer vision algorithms. This research explores "
+                        "novel architectures for natural language processing and presents "
+                        "optimization techniques for training large models with improved "
+                        "performance across standard benchmarks and evaluation metrics."
                     ],
                 },
             }
@@ -449,7 +475,11 @@ def test_more_like_this_auth(
                 "properties": {
                     "title": ["Private Data Science"],
                     "bodyText": [
-                        "Confidential data science research involving machine learning techniques and neural network architectures."
+                        "Confidential research involving machine learning techniques and "
+                        "neural network architectures for computer vision and natural "
+                        "language processing applications. Advanced optimization methods "
+                        "enable training of deep learning models with novel approaches "
+                        "to improve performance on established benchmarks."
                     ],
                 },
             }
@@ -459,6 +489,8 @@ def test_more_like_this_auth(
     # Index documents in different datasets
     index_bulk("test_public", public_docs, sync=True)
     index_bulk("test_private", private_docs, sync=True)
+
+    es.indices.refresh(index=entities_read_index())
 
     # Use first public doc as source for more-like-this
     source_entity = public_docs[0]
