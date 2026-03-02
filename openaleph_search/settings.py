@@ -82,5 +82,13 @@ class Settings(BaseSettings):
     highlighter_no_match_size: int = 300
     highlighter_max_analyzed_offset: int = 999999
 
+    # More Like This defaults
+    mlt_min_doc_freq: int = 1
+    mlt_min_term_freq: int = 1
+    mlt_max_query_terms: int = 200
+    mlt_minimum_should_match: str = "10%"
+    mlt_min_word_length: int = 5
+    mlt_max_doc_freq: int = 500
+
     # search control
     allow_leading_wildcard: bool = False

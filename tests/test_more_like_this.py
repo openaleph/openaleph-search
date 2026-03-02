@@ -119,7 +119,16 @@ TEST_DOCUMENTS = [
 
 @pytest.fixture(scope="function")
 def index_test_documents(cleanup_after):
-    """Index test documents for more_like_this testing"""
+    """Index test documents for more_like_this testing.
+
+    Recreates indexes from scratch to eliminate stale segment metadata from
+    previous tests that can corrupt MLT term statistics (deleted docs remain
+    in Lucene segments and skew IDF calculations).
+    """
+    from openaleph_search.index.admin import delete_index, upgrade_search
+
+    delete_index()
+    upgrade_search()
     entities = [make_entity(doc) for doc in TEST_DOCUMENTS]
     index_bulk("test_mlt", entities, sync=True)
     return entities
@@ -148,11 +157,16 @@ def test_more_like_this_query_function():
     assert "like" in mlt_query
     assert mlt_query["like"] == [{"_id": "doc1"}]
 
-    # Check default parameters (hardcoded in more_like_this.py when no parser)
-    assert mlt_query["min_doc_freq"] == 1
-    assert mlt_query["minimum_should_match"] == "10%"
-    assert mlt_query["min_term_freq"] == 1
-    assert mlt_query["max_query_terms"] == 200
+    # Check default parameters (from settings, no parser)
+    from openaleph_search.settings import Settings
+
+    s = Settings()
+    assert mlt_query["min_doc_freq"] == s.mlt_min_doc_freq
+    assert mlt_query["minimum_should_match"] == s.mlt_minimum_should_match
+    assert mlt_query["min_term_freq"] == s.mlt_min_term_freq
+    assert mlt_query["max_query_terms"] == s.mlt_max_query_terms
+    assert mlt_query["min_word_length"] == s.mlt_min_word_length
+    assert mlt_query["max_doc_freq"] == s.mlt_max_doc_freq
 
     # Test with custom parser
     parser = SearchQueryParser(
@@ -367,10 +381,12 @@ def test_more_like_this_configurable_parameters():
             break
 
     assert mlt_query_default is not None
-    assert mlt_query_default["min_doc_freq"] == 1  # parser default
-    assert mlt_query_default["minimum_should_match"] == "10%"  # parser default
-    assert mlt_query_default["min_term_freq"] == 1  # parser default
-    assert mlt_query_default["max_query_terms"] == 200  # parser default
+    assert mlt_query_default["min_doc_freq"] == 1  # settings default
+    assert mlt_query_default["minimum_should_match"] == "10%"  # settings default
+    assert mlt_query_default["min_term_freq"] == 1  # settings default
+    assert mlt_query_default["max_query_terms"] == 200  # settings default
+    assert mlt_query_default["min_word_length"] == 3  # settings test override
+    assert mlt_query_default["max_doc_freq"] == 500  # settings default
 
 
 def test_more_like_this_bucket_filtering():

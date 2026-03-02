@@ -4,8 +4,10 @@ from followthemoney import EntityProxy
 
 from openaleph_search.index.mapping import Field
 from openaleph_search.query.util import BoolQuery, bool_query, none_query
+from openaleph_search.settings import Settings
 
 log = logging.getLogger(__name__)
+settings = Settings()
 
 
 def more_like_this_query(
@@ -38,17 +40,21 @@ def more_like_this_query(
     elif datasets:
         query["bool"]["filter"].append({"terms": {"dataset": datasets}})
 
-    # Get configurable parameters from parser, with sensible defaults
-    min_doc_freq = 1
-    minimum_should_match = "10%"
-    min_term_freq = 1
-    max_query_terms = 200
+    # Get configurable parameters from parser, falling back to settings defaults
+    min_doc_freq = settings.mlt_min_doc_freq
+    minimum_should_match = settings.mlt_minimum_should_match
+    min_term_freq = settings.mlt_min_term_freq
+    max_query_terms = settings.mlt_max_query_terms
+    min_word_length = settings.mlt_min_word_length
+    max_doc_freq = settings.mlt_max_doc_freq
 
     if parser is not None:
         min_doc_freq = parser.get_mlt_min_doc_freq()
         minimum_should_match = parser.get_mlt_minimum_should_match()
         min_term_freq = parser.get_mlt_min_term_freq()
         max_query_terms = parser.get_mlt_max_query_terms()
+        min_word_length = parser.get_mlt_min_word_length()
+        max_doc_freq = parser.get_mlt_max_doc_freq()
 
     # Build the more_like_this query using document ID
     mlt_query = {
@@ -59,9 +65,8 @@ def more_like_this_query(
             "max_query_terms": max_query_terms,
             "min_doc_freq": min_doc_freq,
             "minimum_should_match": minimum_should_match,
-            # min_word_length filters out short stopwords (of, the, in, ...)
-            "min_word_length": 5,
-            "max_doc_freq": 500,  # filter out very common terms
+            "min_word_length": min_word_length,
+            "max_doc_freq": max_doc_freq,
             "boost_terms": 1,
         }
     }
