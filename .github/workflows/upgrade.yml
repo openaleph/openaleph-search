@@ -30,7 +30,7 @@ jobs:
 
     - name: Install baseline version and create indexes
       run: |
-        pip install openaleph-search==5.1.0
+        pip install openaleph-search==5.1.0 anystore<=1.1.2
         openaleph-search upgrade
 
     - name: Install current version
