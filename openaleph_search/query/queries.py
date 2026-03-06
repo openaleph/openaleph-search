@@ -79,7 +79,7 @@ class EntitiesQuery(Query):
 
     def get_query(self) -> dict[str, Any]:
         query = self.get_inner_query()
-        if settings.query_function_score:
+        if settings.query_function_score and not self.is_empty_query:
             return self.wrap_query_function_score(query)
         return query
 
@@ -261,6 +261,11 @@ class MatchQuery(EntitiesQuery):
         # schemata. In practice this should always return the "things" index.
         schemata = list(self.entity.schema.matchable_schemata)
         return entities_read_index(schema=schemata)
+
+    def get_sort(self) -> list[str | dict[str, dict[str, Any]]]:
+        # Always sort by score — the match query builds scoring clauses
+        # even though the parser has no user text (is_empty_query=True).
+        return ["_score"]
 
     def get_inner_query(self) -> dict[str, Any]:
         query = match_query(

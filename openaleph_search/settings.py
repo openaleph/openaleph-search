@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     index_boost_documents: int = 1
     index_boost_pages: int = 1
 
+    # Sampler shard_size for facet aggregations on empty queries.
+    # Uses approximate counts for faster response on large indexes.
+    facet_sampler_size: int = 5000
+
     # Sampler for significant_terms / significant_text aggregations
     significant_terms_sampler_size: int = 2000
     significant_text_sampler_size: int = 200
@@ -95,6 +99,11 @@ class Settings(BaseSettings):
     mlt_minimum_should_match: str = "10%"
     mlt_min_word_length: int = 5
     mlt_max_doc_freq: int = 500
+
+    # Pre-build global ordinals on frequently-aggregated keyword fields
+    # during refresh. Eliminates first-query latency spikes at the cost of
+    # slightly slower refreshes.
+    eager_global_ordinals: bool = True
 
     # search control
     allow_leading_wildcard: bool = False

@@ -203,16 +203,17 @@ def base_mapping() -> dict[str, MappingProperty]:
 
     Returns fresh dicts on each call so callers can safely mutate the result.
     """
+    ego = {"eager_global_ordinals": True} if settings.eager_global_ordinals else {}
     return {
-        Field.DATASET: {**FieldType.KEYWORD},
-        Field.SCHEMA: {**FieldType.KEYWORD},
-        Field.SCHEMATA: {**FieldType.KEYWORD},
+        Field.DATASET: {**FieldType.KEYWORD, **ego},
+        Field.SCHEMA: {**FieldType.KEYWORD, **ego},
+        Field.SCHEMATA: {**FieldType.KEYWORD, **ego},
         # for fast label display
         Field.CAPTION: {**FieldType.KEYWORD},
         # original names as matching (text) field
         Field.NAME: {**FieldType.NAME},
         # names keywords, a bit normalized
-        Field.NAMES: {**FieldType.NAME_KEYWORD},
+        Field.NAMES: {**FieldType.NAME_KEYWORD, **ego},
         # name normalizations for filters and matching
         Field.NAME_KEYS: {**FieldType.KEYWORD},
         Field.NAME_PARTS: {**FieldType.KEYWORD_COPY},
@@ -227,7 +228,7 @@ def base_mapping() -> dict[str, MappingProperty]:
         Field.TEXT: {**FieldType.TEXT},
         Field.TRANSLATION: {**FieldType.TEXT},
         # tagging
-        Field.TAGS: {**FieldType.KEYWORD},
+        Field.TAGS: {**FieldType.KEYWORD, **ego},
         # processing metadata
         Field.UPDATED_AT: {**FieldType.DATE},
         Field.CREATED_AT: {**FieldType.DATE},
@@ -239,7 +240,7 @@ def base_mapping() -> dict[str, MappingProperty]:
         # OpenAleph leaked context data probably deprecated soon
         Field.ROLE: {**FieldType.KEYWORD},
         Field.PROFILE: {**FieldType.KEYWORD},
-        Field.COLLECTION_ID: {**FieldType.KEYWORD},
+        Field.COLLECTION_ID: {**FieldType.KEYWORD, **ego},
         Field.MUTABLE: {**FieldType.BOOL},
         # length normalization
         Field.NUM_VALUES: {**FieldType.INTEGER},
