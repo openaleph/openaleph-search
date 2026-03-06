@@ -64,8 +64,14 @@ class Settings(BaseSettings):
     # Sampler for significant_terms / significant_text aggregations
     significant_terms_sampler_size: int = 2000
     significant_text_sampler_size: int = 200
-    significant_terms_min_doc_count: int = 3
-    significant_terms_shard_min_doc_count: int = 1
+    significant_terms_min_doc_count: int = 5
+    significant_terms_shard_min_doc_count: int = 2
+
+    # Use random_sampler (Bernoulli segment-level sampling) instead of
+    # sampler/diversified_sampler for significant_terms aggregations.
+    # Dramatically reduces CPU cost of background frequency lookups.
+    significant_terms_random_sampler: bool = True
+    significant_terms_sampler_probability: float = 0.1
 
     # enable/disable function_score wrapper for performance tuning
     query_function_score: bool = False

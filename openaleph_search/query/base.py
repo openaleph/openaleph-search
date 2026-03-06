@@ -308,6 +308,12 @@ class Query:
         }
 
     def get_significant_terms_sampler(self, **kwargs) -> dict[str, Any]:
+        if settings.significant_terms_random_sampler:
+            return {
+                "random_sampler": {
+                    "probability": settings.significant_terms_sampler_probability,
+                }
+            }
         return self._make_sampler(settings.significant_terms_sampler_size)
 
     def get_significant_text_sampler(self) -> dict[str, Any]:
