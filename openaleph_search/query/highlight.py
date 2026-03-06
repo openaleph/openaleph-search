@@ -64,15 +64,15 @@ def get_highlighter(
     # Keyword names - simple exact matching
     if field == Field.NAMES:
         return {
-            "type": "plain",  # Fast for keyword fields
+            "type": "plain",
             "number_of_fragments": 3,
             "max_analyzed_offset": 999999,  # probably many names
             "pre_tags": [""],  # No markup
             "post_tags": [""],  # No markup
         }
     # other fields - leftovers, minimal highlighting if possible (not important)
-    plain = {
-        "type": "plain",  # Fastest option
+    default = {
+        "type": "unified",
         "fragment_size": 150,  # Shorter since less important
         "number_of_fragments": 1,  # Just one fragment
         # "max_analyzed_offset": 999999,  # Handle large documents
@@ -80,5 +80,5 @@ def get_highlighter(
         # "post_tags": ["</em>"],
     }
     if query:
-        plain["highlight_query"] = query
-    return plain
+        default["highlight_query"] = query
+    return default

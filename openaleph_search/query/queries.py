@@ -297,6 +297,18 @@ class MoreLikeThisQuery(EntitiesQuery):
         # Target only documents and pages buckets for more_like_this queries
         return entities_read_index(schema="Document")
 
+    def get_sort(self) -> list[str | dict[str, dict[str, Any]]]:
+        return ["_score"]
+
+    def get_highlight(self) -> dict[str, Any]:
+        """Use a match_all highlight query to extract text snippets without
+        triggering expensive MoreLikeThisQuery.rewrite() per highlighted doc."""
+        highlight = super().get_highlight()
+        if highlight:
+            for field_config in highlight.get("fields", {}).values():
+                field_config["highlight_query"] = {"match_all": {}}
+        return highlight
+
     def get_inner_query(self) -> dict[str, Any]:
         if not self.entity:
             return {"match_none": {}}

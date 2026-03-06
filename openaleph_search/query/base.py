@@ -1,3 +1,4 @@
+from functools import cached_property
 from typing import Any, ClassVar
 
 from anystore.logging import get_logger
@@ -43,6 +44,11 @@ class Query:
 
     def __init__(self, parser: SearchQueryParser) -> None:
         self.parser = parser
+
+    @cached_property
+    def is_empty_query(self) -> bool:
+        """True when no text, prefix, or filters are provided."""
+        return not self.parser.text and not self.parser.prefix
 
     def get_query_string(self) -> dict[str, Any] | None:
         if self.parser.text:
@@ -329,7 +335,7 @@ class Query:
         return list(reversed(sort_fields))
 
     def get_highlight(self) -> dict[str, Any]:
-        if not self.parser.highlight:
+        if not self.parser.highlight or self.is_empty_query:
             return {}
         query = self.get_query_string()
         if self.parser.filters:

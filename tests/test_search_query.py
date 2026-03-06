@@ -127,7 +127,7 @@ class QueryTestCase(TestCase):
                 "require_field_match": False,
                 "fields": {
                     "text": {
-                        "type": "plain",
+                        "type": "unified",
                         "fragment_size": 150,
                         "number_of_fragments": 1,
                         "max_analyzed_offset": 999999,
@@ -150,7 +150,7 @@ class QueryTestCase(TestCase):
                         "post_tags": [""],
                     },
                     "translation": {
-                        "type": "plain",
+                        "type": "unified",
                         "fragment_size": 150,
                         "number_of_fragments": 1,
                         "highlight_query": {
