@@ -28,8 +28,6 @@ from openaleph_search.settings import Settings
 log = get_logger(__name__)
 settings = Settings()
 
-_FACET_SAMPLER_KEY = "facets.sampled"
-
 
 class Query:
     TEXT_FIELDS: ClassVar[list[str]] = [Field.TEXT]
@@ -206,17 +204,6 @@ class Query:
                     }
                 else:
                     aggregations.update(facet_aggregations)
-
-        # For empty queries on large indexes, wrap facet aggregations in a
-        # sampler so ES only aggregates a subset of docs per shard. Gives
-        # approximate counts but is dramatically faster.
-        if self.is_empty_query and aggregations:
-            aggregations = {
-                _FACET_SAMPLER_KEY: {
-                    "sampler": {"shard_size": settings.facet_sampler_size},
-                    "aggs": aggregations,
-                }
-            }
 
         # Significant terms aggregations
         for facet_name in self.parser.facet_significant_names:
@@ -499,13 +486,5 @@ class Query:
             took=result.get("took"),
             hits=result.get("hits", {}).get("total", {}).get("value"),
         )
-
-        # Unwrap sampled facet aggregations so consumers see the same
-        # response structure regardless of whether sampling was used.
-        aggs = result.get("aggregations", {})
-        if _FACET_SAMPLER_KEY in aggs:
-            sampled = aggs.pop(_FACET_SAMPLER_KEY)
-            sampled.pop("doc_count", None)
-            aggs.update(sampled)
 
         return result
