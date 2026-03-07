@@ -226,12 +226,20 @@ class Query:
                 agg_name = "%s.significant_terms" % facet_name
                 background = self.get_significant_background()
                 size = self.parser.get_facet_significant_size(facet_name)
+                # random_sampler restricts min_doc_count and
+                # shard_min_doc_count to max 1 within its context.
+                if settings.significant_terms_random_sampler:
+                    min_doc_count = 1
+                    shard_min_doc_count = 1
+                else:
+                    min_doc_count = settings.significant_terms_min_doc_count
+                    shard_min_doc_count = settings.significant_terms_shard_min_doc_count
                 significant_terms_agg = {
                     "field": facet_name,
                     **({"background_filter": background} if background else {}),
                     "size": size,
-                    "min_doc_count": settings.significant_terms_min_doc_count,
-                    "shard_min_doc_count": settings.significant_terms_shard_min_doc_count,
+                    "min_doc_count": min_doc_count,
+                    "shard_min_doc_count": shard_min_doc_count,
                     "shard_size": int(size * 1.5) + 10,
                 }
                 facet_aggregations[agg_name] = {
