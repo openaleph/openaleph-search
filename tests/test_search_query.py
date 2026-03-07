@@ -130,7 +130,6 @@ class QueryTestCase(TestCase):
                         "type": "unified",
                         "fragment_size": 150,
                         "number_of_fragments": 1,
-                        "max_analyzed_offset": 999999,
                         "highlight_query": {
                             "query_string": {
                                 "query": "foo",
@@ -157,7 +156,7 @@ class QueryTestCase(TestCase):
                             "query_string": {
                                 "query": "foo",
                                 "lenient": True,
-                                "fields": ["text"],
+                                "fields": ["translation"],
                                 "default_operator": "AND",
                                 "minimum_should_match": "66%",
                                 "allow_leading_wildcard": False,

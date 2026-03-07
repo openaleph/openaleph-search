@@ -364,16 +364,26 @@ class Query:
         return list(reversed(sort_fields))
 
     def get_highlight(self) -> dict[str, Any]:
-        if not self.parser.highlight or self.is_empty_query:
+        if not self.parser.highlight:  # or self.is_empty_query:
             return {}
-        query = self.get_query_string()
+        text = self.parser.text
+        fields = {
+            self.HIGHLIGHT_FIELD: get_highlighter(
+                self.HIGHLIGHT_FIELD, text, self.parser.highlight_count
+            ),
+            Field.NAMES: get_highlighter(Field.NAMES),
+            Field.TRANSLATION: get_highlighter(Field.TRANSLATION, text),
+        }
+        # text field is a copy_to catch-all; it provides a fallback for
+        # entities whose content field text is not in _source (e.g.
+        # HyperText where indexText is popped from properties).
+        if Field.TEXT not in fields:
+            fields[Field.TEXT] = get_highlighter(Field.TEXT, text)
+        # Add filter value highlights to the main highlight field only.
+        # Only highlight filter values that are human-readable text.
+        # Skip short-code groups (countries, languages, etc.) to avoid
+        # noisy highlights (e.g. "es" for Spain matching German text).
         if self.parser.filters:
-            query = bool_query()
-            if self.get_query_string():
-                query["bool"]["should"] = [self.get_query_string()]
-            # Only highlight filter values that are human-readable text.
-            # Skip short-code groups (countries, languages, etc.) to avoid
-            # noisy highlights (e.g. "es" for Spain matching German text).
             highlight_groups = {
                 "names",
                 "addresses",
@@ -382,28 +392,28 @@ class Query:
                 "ips",
                 "phones",
             }
+            filter_clauses = []
             for key, values in self.parser.filters.items():
                 if key in highlight_groups or key == Field.NAME:
                     for value in values:
-                        query["bool"]["should"].append(
+                        filter_clauses.append(
                             {
                                 "multi_match": {
-                                    "fields": [Field.CONTENT, Field.TEXT, Field.NAME],
+                                    "fields": [self.HIGHLIGHT_FIELD],
                                     "query": value,
                                     "operator": "AND",
                                 }
                             }
                         )
-        fields = {
-            self.HIGHLIGHT_FIELD: get_highlighter(
-                self.HIGHLIGHT_FIELD, query, self.parser.highlight_count
-            ),
-            Field.NAMES: get_highlighter(Field.NAME),
-            Field.NAMES: get_highlighter(Field.NAMES),
-            Field.TRANSLATION: get_highlighter(Field.TRANSLATION, query),
-        }
-        if Field.TEXT not in fields:
-            fields[Field.TEXT] = get_highlighter(Field.TEXT, query)
+            if filter_clauses:
+                hl = fields[self.HIGHLIGHT_FIELD]
+                existing_hq = hl.get("highlight_query")
+                should = []
+                if existing_hq:
+                    should.append(existing_hq)
+                should.extend(filter_clauses)
+                hl["highlight_query"] = bool_query()
+                hl["highlight_query"]["bool"]["should"] = should
         return {
             "encoder": "html",
             # "max_fragment_length": 1000,

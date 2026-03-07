@@ -6,8 +6,24 @@ from openaleph_search.settings import Settings
 settings = Settings()
 
 
+def make_field_highlight_query(text: str, fields: str | list[str]) -> dict[str, Any]:
+    """Build a query_string scoped to specific field(s) for highlighting."""
+    if isinstance(fields, str):
+        fields = [fields]
+    return {
+        "query_string": {
+            "query": text,
+            "lenient": True,
+            "fields": fields,
+            "default_operator": "AND",
+            "minimum_should_match": "66%",
+            "allow_leading_wildcard": settings.allow_leading_wildcard,
+        }
+    }
+
+
 def get_highlighter(
-    field: str, query: dict[str, Any] | None = None, count: int | None = None
+    field: str, text: str | None = None, count: int | None = None
 ) -> dict[str, Any]:
     # Content field - configurable highlighting
     if field == Field.CONTENT:
@@ -45,8 +61,20 @@ def get_highlighter(
                 # "post_tags": ["</em>"],
                 "max_analyzed_offset": settings.highlighter_max_analyzed_offset,
             }
-        if query:
-            highlighter["highlight_query"] = query
+        if text:
+            # Use [content, text] because content has term_vectors but is
+            # excluded from _source and not stored.  ES's FVH/unified
+            # highlighters fail on phrase queries with a single-field
+            # query_string in this configuration; adding a second field
+            # triggers an internal multi-field code path that works.
+            highlighter["highlight_query"] = make_field_highlight_query(
+                text, [Field.CONTENT, Field.TEXT]
+            )
+        else:
+            # Prevent ES from falling back to the main search query for
+            # highlighting — that would highlight filter terms (e.g. "4"
+            # from collection_id=4) in the document text.
+            highlighter["highlight_query"] = {"match_all": {}}
         return highlighter
     # Human-readable names - exact highlighting
     if field == Field.NAME:
@@ -79,6 +107,8 @@ def get_highlighter(
         # "pre_tags": ["<em class='highlight-text'>"],
         # "post_tags": ["</em>"],
     }
-    if query:
-        default["highlight_query"] = query
+    if text:
+        default["highlight_query"] = make_field_highlight_query(text, field)
+    else:
+        default["highlight_query"] = {"match_all": {}}
     return default
