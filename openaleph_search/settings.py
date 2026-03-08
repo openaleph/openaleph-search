@@ -86,7 +86,9 @@ class Settings(BaseSettings):
     highlighter_phrase_limit: int = 64
     highlighter_boundary_max_scan: int = 100
     highlighter_no_match_size: int = 300
-    highlighter_max_analyzed_offset: int = 999999
+    highlighter_text_field: bool = True
+    highlighter_translation_field: bool = True
+    highlighter_max_analyzed_offset: int = 100000
 
     # More Like This defaults
     mlt_min_doc_freq: int = 1

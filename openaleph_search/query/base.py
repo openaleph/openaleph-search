@@ -359,13 +359,11 @@ class Query:
                 self.HIGHLIGHT_FIELD, text, self.parser.highlight_count
             ),
             Field.NAMES: get_highlighter(Field.NAMES),
-            Field.TRANSLATION: get_highlighter(Field.TRANSLATION, text),
         }
-        # text field is a copy_to catch-all; it provides a fallback for
-        # entities whose content field text is not in _source (e.g.
-        # HyperText where indexText is popped from properties).
-        if Field.TEXT not in fields:
+        if settings.highlighter_text_field and Field.TEXT not in fields:
             fields[Field.TEXT] = get_highlighter(Field.TEXT, text)
+        if settings.highlighter_translation_field:
+            fields[Field.TRANSLATION] = get_highlighter(Field.TRANSLATION, text)
         # Add filter value highlights to the main highlight field only.
         # Only highlight filter values that are human-readable text.
         # Skip short-code groups (countries, languages, etc.) to avoid

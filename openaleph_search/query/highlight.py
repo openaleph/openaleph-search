@@ -81,7 +81,7 @@ def get_highlighter(
         highlighter = {
             "type": "unified",  # Good for mixed content
             "fragment_size": 200,  # Longer to capture full names/titles
-            "number_of_fragments": 3,
+            "number_of_fragments": 1,
             "fragmenter": "simple",  # Don't break names awkwardly
             "pre_tags": [""],  # No markup
             "post_tags": [""],  # No markup
@@ -93,8 +93,7 @@ def get_highlighter(
     if field == Field.NAMES:
         return {
             "type": "plain",
-            "number_of_fragments": 3,
-            "max_analyzed_offset": 999999,  # probably many names
+            "number_of_fragments": 1,
             "pre_tags": [""],  # No markup
             "post_tags": [""],  # No markup
         }

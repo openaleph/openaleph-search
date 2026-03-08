@@ -143,8 +143,7 @@ class QueryTestCase(TestCase):
                     },
                     "names": {
                         "type": "plain",
-                        "number_of_fragments": 3,
-                        "max_analyzed_offset": 999999,
+                        "number_of_fragments": 1,
                         "pre_tags": [""],
                         "post_tags": [""],
                     },
