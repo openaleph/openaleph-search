@@ -35,7 +35,7 @@ Other entity types (Person, Company, etc.) are excluded.
 Minimum document frequency corpus-wide.
 
 - Type: `int`
-- Default: `0`
+- Default: `1`
 
 ```bash
 --args "mlt_min_doc_freq=2"
@@ -57,7 +57,7 @@ Minimum term frequency within source document.
 Maximum terms to use in query.
 
 - Type: `int`
-- Default: `25`
+- Default: `200`
 
 ```bash
 --args "mlt_max_query_terms=50"
@@ -72,6 +72,28 @@ Percentage of query terms that must match.
 
 ```bash
 --args "mlt_minimum_should_match=25%"
+```
+
+### `mlt_min_word_length`
+
+Minimum word length for query terms.
+
+- Type: `int`
+- Default: `5`
+
+```bash
+--args "mlt_min_word_length=3"
+```
+
+### `mlt_max_doc_freq`
+
+Maximum document frequency for query terms. Terms appearing in more documents than this are ignored.
+
+- Type: `int`
+- Default: `500`
+
+```bash
+--args "mlt_max_doc_freq=1000"
 ```
 
 ## Parameter effects
@@ -112,8 +134,10 @@ Affects query comprehensiveness:
     "fields": ["content", "text", "name"],
     "like": [{"_id": "doc-123"}],
     "min_term_freq": 1,
-    "max_query_terms": 25,
-    "min_doc_freq": 0,
+    "max_query_terms": 200,
+    "min_doc_freq": 1,
+    "min_word_length": 5,
+    "max_doc_freq": 500,
     "minimum_should_match": "10%"
   }
 }

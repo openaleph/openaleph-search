@@ -205,6 +205,28 @@ Specify facet aggregation type.
 --args "facet=properties.entity&facet_type:properties.entity=entity"
 ```
 
+## Metric aggregations
+
+Compute numeric metrics on numeric fields. [Read more](../aggregations.md#metric-aggregations)
+
+### `metric:TYPE`
+
+Format: `metric:TYPE=FIELD`
+
+Types: `sum`, `avg`, `min`, `max`
+
+Field is a FtM property name (the `numeric.` ES field prefix is resolved internally).
+
+```bash
+# Sum of amounts
+--args "metric:sum=amount"
+
+# Multiple metrics
+--args "metric:sum=amount&metric:avg=amount&metric:min=registrationArea"
+```
+
+Response keys follow `{field}.{type}` pattern (e.g. `amount.sum`).
+
 ## Significant terms
 
 Find unusual or interesting terms in search results. [Read more](../significant_terms.md)
@@ -304,31 +326,45 @@ Parameters for similarity search. [Read more](../more_like_this.md)
 Minimum document frequency for query terms.
 
 - Type: `int`
-- Default: `5`
+- Default: `1`
 
 ### `mlt_min_term_freq`
 
 Minimum term frequency within document.
 
 - Type: `int`
-- Default: `5`
+- Default: `1`
 
 ### `mlt_max_query_terms`
 
 Maximum number of query terms to use.
 
 - Type: `int`
-- Default: `50`
+- Default: `200`
 
 ### `mlt_minimum_should_match`
 
 Percentage of terms that must match.
 
 - Type: `str`
-- Default: `60%`
+- Default: `10%`
+
+### `mlt_min_word_length`
+
+Minimum word length for query terms.
+
+- Type: `int`
+- Default: `5`
+
+### `mlt_max_doc_freq`
+
+Maximum document frequency for query terms.
+
+- Type: `int`
+- Default: `500`
 
 ```bash
---args "mlt_min_doc_freq=3&mlt_max_query_terms=100&mlt_minimum_should_match=70%"
+--args "mlt_min_doc_freq=3&mlt_max_query_terms=100&mlt_minimum_should_match=25%"
 ```
 
 ## Performance

@@ -50,30 +50,26 @@ Reduce this value for better performance on large documents:
 
 The system uses different Elasticsearch highlighters optimized for each field type:
 
+### Unified Highlighter
+
+Used for: `content` (document text), `text` (secondary text), `translation` (translated text), `name` (entity names)
+
+The default highlighter for all fields. Balanced performance with good support for mixed content.
+
 ### Fast Vector Highlighter (FVH)
 
-Used for: `content` field (full-text of source documents)
-
-Best for long text with accurate phrase highlighting. Requires term vectors to be stored in the index.
+Optionally used for the `content` field. Provides more accurate phrase highlighting (wraps entire phrases in a single `<em>` tag) but requires term vectors. Disabled by default because it is incompatible with `copy_to` fields excluded from `_source` — for entities where multiple properties copy into `content` (e.g. HyperText with both `bodyHtml` and `indexText`), FVH causes term vector offset mismatches that drop hits from results.
 
 Configuration (via environment):
 
-- `OPENALEPH_SEARCH_HIGHLIGHTER_FVH_ENABLED=true` (default)
-- Requires `OPENALEPH_SEARCH_CONTENT_TERM_VECTORS=true` (default)
-
-If fast vector highlighting is disabled, the unified highlighter is used for the `content` field.
-
-### Unified Highlighter
-
-Used for: `name` field
-
-Balanced performance for entity names and titles.
+- `OPENALEPH_SEARCH_HIGHLIGHTER_FVH_ENABLED=false` (default)
+- Requires `OPENALEPH_SEARCH_CONTENT_TERM_VECTORS=true` (default) when enabled
 
 ### Plain Highlighter
 
-Used for: `names` (keywords), `text`, and other fields
+Used for: `names` (keywords)
 
-Fast highlighting for simple matches.
+Fast highlighting for simple keyword matches.
 
 ## Configuration
 
@@ -84,10 +80,10 @@ Control highlighting behavior via environment variables:
 Use Fast Vector Highlighter for content field.
 
 ```bash
-export OPENALEPH_SEARCH_HIGHLIGHTER_FVH_ENABLED=true
+export OPENALEPH_SEARCH_HIGHLIGHTER_FVH_ENABLED=false
 ```
 
-When false, uses Unified Highlighter instead.
+Default: `false`. When false, uses Unified Highlighter instead. See [Highlighter types](#highlighter-types) for trade-offs.
 
 ### `highlighter_fragment_size`
 
@@ -146,10 +142,10 @@ Default: `300`
 Maximum characters to analyze.
 
 ```bash
-export OPENALEPH_SEARCH_HIGHLIGHTER_MAX_ANALYZED_OFFSET=999999
+export OPENALEPH_SEARCH_HIGHLIGHTER_MAX_ANALYZED_OFFSET=100000
 ```
 
-Default: `999999`
+Default: `100000`
 
 ## Response format
 
@@ -183,10 +179,15 @@ Matched terms are wrapped in `<em>` tags.
 
 Multiple fields are highlighted automatically:
 
-- `content` - Main document text
-- `name` - Entity names
-- `names` - Name keywords
-- `text` - Secondary text content
+- `content` - Main document text (primary highlight field for entities)
+- `names` - Normalized name keywords
+- `text` - Secondary text content (catch-all `copy_to` target)
+- `translation` - Translated text content
+
+The `text` and `translation` highlight fields can be disabled via settings:
+
+- `OPENALEPH_SEARCH_HIGHLIGHTER_TEXT_FIELD=false`
+- `OPENALEPH_SEARCH_HIGHLIGHTER_TRANSLATION_FIELD=false`
 
 ## Examples
 
@@ -280,4 +281,4 @@ Check that:
 - Reduce `highlight_count`
 - Lower `max_highlight_analyzed_offset`
 - Decrease `phrase_limit`
-- (Other than that the name suggests, the FVH seems to be _slower_ than the unified highlighter): Consider disabling FVH: `OPENALEPH_SEARCH_HIGHLIGHTER_FVH_ENABLED=false`
+- The unified highlighter (default) generally performs well; FVH is not recommended due to compatibility issues with `copy_to` fields

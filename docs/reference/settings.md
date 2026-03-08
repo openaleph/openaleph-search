@@ -207,10 +207,10 @@ export OPENALEPH_SEARCH_INDEX_BOOST_DOCUMENTS=2
 
 ### `significant_terms_sampler_size`
 
-Controls sampling for significant terms aggregations. When `significant_terms_random_sampler` is `true`, this is the target foreground document count (probability is computed as `size / count`). When `false`, this is the `shard_size` for the top-N sampler.
+Controls sampling for significant terms aggregations. When `significant_terms_random_sampler` is `false`, this is the `shard_size` for the top-N sampler. Not used when `significant_terms_random_sampler` is `true`.
 
 - Type: `int`
-- Default: `10000`
+- Default: `2000`
 
 ### `significant_text_sampler_size`
 
@@ -224,7 +224,7 @@ Sampler shard_size for significant text aggregations.
 Minimum total foreground frequency across all shards for a term to appear in results. Applied after merging shard results.
 
 - Type: `int`
-- Default: `3`
+- Default: `5`
 
 ### `significant_terms_random_sampler`
 
@@ -233,12 +233,12 @@ Use `random_sampler` (probability-based) instead of `sampler` (top-N biased). Ra
 - Type: `bool`
 - Default: `true`
 
-### `significant_terms_sampler_target`
+### `significant_terms_sampler_probability`
 
-Target number of foreground documents for significant terms computation. When using `random_sampler`, a fast `_count` query is performed first to determine the total matching documents, then the sampling probability is computed as `target / count` (capped at 1.0). For small result sets (<= target), no sampling is applied.
+Sampling probability for `random_sampler`. Only used when `significant_terms_random_sampler` is `true`.
 
-- Type: `int`
-- Default: `10000`
+- Type: `float`
+- Default: `0.1`
 
 ### `significant_terms_shard_min_doc_count`
 
@@ -247,7 +247,7 @@ Minimum number of times a term must appear in the foreground on a single shard b
 Should generally be lower than `min_doc_count`, since documents are distributed across shards.
 
 - Type: `int`
-- Default: `1`
+- Default: `2`
 
 ```bash
 # Tune for large clusters with many collections
@@ -285,9 +285,9 @@ Required for [Fast Vector Highlighter](https://www.elastic.co/docs/reference/ela
 Use Fast Vector Highlighter for content field.
 
 - Type: `bool`
-- Default: `true`
+- Default: `false`
 
-When false, uses Unified Highlighter instead. FVH requires `content_term_vectors=true`.
+When false, uses Unified Highlighter instead. FVH requires `content_term_vectors=true`. FVH is disabled by default because it is incompatible with `copy_to` fields excluded from `_source`.
 
 ### `highlighter_fragment_size`
 
@@ -326,12 +326,72 @@ Fragment size when no match found.
 - Type: `int`
 - Default: `300`
 
+### `highlighter_text_field`
+
+Include the `text` field in highlight response.
+
+- Type: `bool`
+- Default: `true`
+
+### `highlighter_translation_field`
+
+Include the `translation` field in highlight response.
+
+- Type: `bool`
+- Default: `true`
+
 ### `highlighter_max_analyzed_offset`
 
 Maximum characters to analyze for highlighting.
 
 - Type: `int`
-- Default: `999999`
+- Default: `100000`
+
+## More Like This
+
+[Read more](../more_like_this.md)
+
+### `mlt_min_doc_freq`
+
+Minimum document frequency for MLT query terms.
+
+- Type: `int`
+- Default: `1`
+
+### `mlt_min_term_freq`
+
+Minimum term frequency within source document.
+
+- Type: `int`
+- Default: `1`
+
+### `mlt_max_query_terms`
+
+Maximum terms to use in MLT query.
+
+- Type: `int`
+- Default: `200`
+
+### `mlt_minimum_should_match`
+
+Percentage of MLT terms that must match.
+
+- Type: `str`
+- Default: `10%`
+
+### `mlt_min_word_length`
+
+Minimum word length for MLT query terms.
+
+- Type: `int`
+- Default: `5`
+
+### `mlt_max_doc_freq`
+
+Maximum document frequency for MLT query terms. Common terms above this threshold are ignored.
+
+- Type: `int`
+- Default: `500`
 
 ## Authorization
 

@@ -97,6 +97,36 @@ Aggregation type for special fields.
 --args "facet=properties.entity&facet_type:properties.entity=entity"
 ```
 
+### `metric:TYPE`
+
+Numeric metric aggregation. `TYPE` is one of `sum`, `avg`, `min`, `max`. Value is a FtM property name (the `numeric.` ES field prefix is resolved internally).
+
+```bash
+# Single metric
+--args "metric:sum=amount"
+
+# Multiple metrics on same or different fields
+--args "metric:sum=amount&metric:avg=amount&metric:min=registrationArea"
+```
+
+Response key format: `{field}.{type}` (e.g. `amount.sum`)
+
+### Metric aggregations
+
+Compute numeric metrics (sum, average, min, max) on numeric fields. Uses the `metric:` prefix with FtM property names — the `numeric.` ES field prefix is resolved internally.
+
+```bash
+# Sum of payment amounts
+openaleph-search search query-string "*" \
+  --args "filter:schema=Payment&metric:sum=amount"
+
+# Multiple metrics
+openaleph-search search query-string "*" \
+  --args "filter:schema=Payment&metric:sum=amount&metric:avg=amount&metric:min=amount&metric:max=amount"
+```
+
+Supported types: `sum`, `avg`, `min`, `max`
+
 ## Response format
 
 Aggregations appear in the `aggregations` section:
@@ -132,6 +162,12 @@ Aggregations appear in the `aggregations` section:
           "bg_count": 100
         }
       ]
+    },
+    "amount.sum": {
+      "value": 125000.0
+    },
+    "amount.avg": {
+      "value": 2500.0
     }
   }
 }
@@ -259,6 +295,13 @@ openaleph-search search query-string "person" \
 ```bash
 openaleph-search search query-string "company" \
   --args "facet=schema&facet=created_at&facet_interval:created_at=year&facet_size:schema=50"
+```
+
+### Payment totals
+
+```bash
+openaleph-search search query-string "*" \
+  --args "filter:schema=Payment&filter:beneficiary=entity-id&metric:sum=amount&metric:avg=amount"
 ```
 
 ## Error handling
