@@ -40,6 +40,7 @@ class Query:
         "score": "_score",
     }
     SORT_DEFAULT: ClassVar[list[str | dict[str, Any]]] = ["_score"]
+    METRIC_TYPES: ClassVar[tuple[str, ...]] = ("sum", "avg", "min", "max")
     SOURCE: ClassVar[dict[str, Any]] = {}
 
     def __init__(self, parser: SearchQueryParser) -> None:
@@ -278,6 +279,15 @@ class Query:
                     }
                 },
             }
+
+        # Metric aggregations (sum, avg, min, max) on numeric fields
+        for metric_type, fields in self.parser.metrics.items():
+            if metric_type not in self.METRIC_TYPES:
+                continue
+            for field in fields:
+                es_field = f"{Field.NUMERIC}.{field}"
+                agg_name = f"{field}.{metric_type}"
+                aggregations[agg_name] = {metric_type: {"field": es_field}}
 
         return aggregations
 

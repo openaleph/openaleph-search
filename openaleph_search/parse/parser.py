@@ -198,6 +198,9 @@ class SearchQueryParser(QueryParser):
         # expand query with name synonyms (name_symbols and name_keys)
         self.synonyms = self.getbool("synonyms", False)
 
+        # metric aggregations (sum, avg, min, max) on numeric fields
+        self.metrics = self.prefixed_items("metric:")
+
     @cached_property
     def collection_ids(self) -> set[str]:
         collections = self.filters.get("collection_id", set())
@@ -334,4 +337,5 @@ class SearchQueryParser(QueryParser):
         parser["synonyms"] = self.synonyms
         parser["include_fields"] = list(self.include_fields)
         parser["dehydrate"] = self.dehydrate
+        parser["metrics"] = {key: list(val) for key, val in self.metrics.items()}
         return parser

@@ -617,6 +617,64 @@ def test_search_synonyms_name_keys(cleanup_after):
     assert result["hits"]["hits"][0]["_id"] == "darc-limited-company"
 
 
+def test_search_metric_aggregations(cleanup_after):
+    """Test metric aggregations (sum, avg, min, max) on numeric fields"""
+    entities = [
+        make_entity(
+            {
+                "id": "payment1",
+                "schema": "Payment",
+                "properties": {"amount": ["100"], "date": ["2024-01-01"]},
+            }
+        ),
+        make_entity(
+            {
+                "id": "payment2",
+                "schema": "Payment",
+                "properties": {"amount": ["250"], "date": ["2024-02-01"]},
+            }
+        ),
+        make_entity(
+            {
+                "id": "payment3",
+                "schema": "Payment",
+                "properties": {"amount": ["150"], "date": ["2024-03-01"]},
+            }
+        ),
+    ]
+    index_bulk("test_metrics", entities, sync=True)
+
+    # Test sum (filter:schemata=Interval to include the intervals index)
+    query = _create_query(
+        "/search?filter:dataset=test_metrics&filter:schemata=Interval"
+        "&metric:sum=amount"
+    )
+    result = query.search()
+    assert result["hits"]["total"]["value"] == 3
+    assert result["aggregations"]["amount.sum"]["value"] == 500.0
+
+    # Test multiple metrics at once
+    query = _create_query(
+        "/search?filter:dataset=test_metrics&filter:schemata=Interval"
+        "&metric:sum=amount&metric:avg=amount&metric:min=amount&metric:max=amount"
+    )
+    result = query.search()
+    aggs = result["aggregations"]
+    assert aggs["amount.sum"]["value"] == 500.0
+    assert aggs["amount.avg"]["value"] == pytest.approx(500.0 / 3)
+    assert aggs["amount.min"]["value"] == 100.0
+    assert aggs["amount.max"]["value"] == 250.0
+
+    # Test with a filter narrowing results
+    query = _create_query(
+        "/search?filter:dataset=test_metrics&filter:schemata=Interval"
+        "&filter:gte:properties.date=2024-02-01&metric:sum=amount"
+    )
+    result = query.search()
+    assert result["hits"]["total"]["value"] == 2
+    assert result["aggregations"]["amount.sum"]["value"] == 400.0
+
+
 def test_search_translation_plaintext(cleanup_after):
     """Test that PlainText translatedText is searchable via ES copy_to into the
     translation field."""

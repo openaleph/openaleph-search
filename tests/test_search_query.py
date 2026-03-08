@@ -176,6 +176,27 @@ class QueryTestCase(TestCase):
             "bar",
         )
 
+    def test_metric_aggregations(self):
+        q = query(
+            [
+                ("metric:sum", "amount"),
+                ("metric:avg", "amount"),
+                ("metric:min", "registrationArea"),
+            ]
+        )
+        aggs = q.get_aggregations()
+        self.assertEqual(aggs["amount.sum"], {"sum": {"field": "numeric.amount"}})
+        self.assertEqual(aggs["amount.avg"], {"avg": {"field": "numeric.amount"}})
+        self.assertEqual(
+            aggs["registrationArea.min"],
+            {"min": {"field": "numeric.registrationArea"}},
+        )
+
+    def test_metric_invalid_type(self):
+        q = query([("metric:percentile", "amount")])
+        aggs = q.get_aggregations()
+        self.assertNotIn("amount.percentile", aggs)
+
     def test_schema_filter(self):
         q = query([("filter:schema", "Person")])
         assert q.get_filters() == [{"term": {"schema": "Person"}}]
