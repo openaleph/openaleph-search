@@ -364,11 +364,12 @@ def get_index_field_type(type_, to_numeric: bool | None = False) -> str:
     return FieldType.KEYWORD["type"]
 
 
-def get_field_type(field) -> str:
+def get_field_type(field):
+    """Return the FtM registry type object for a given field path."""
     field = field.split(".")[-1]
     if field in registry.groups:
-        return str(registry.groups[field])
+        return registry.groups[field]
     for prop in model.properties:
         if prop.name == field:
-            return str(prop.type)
-    return str(registry.string)
+            return prop.type
+    return registry.string
