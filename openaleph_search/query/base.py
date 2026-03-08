@@ -192,6 +192,20 @@ class Query:
                         "extended_bounds"
                     ] = extended_bounds
 
+                # Nest metric sub-aggregations inside date_histogram buckets
+                metric_sub_aggs = {}
+                for metric_type, fields in self.parser.metrics.items():
+                    if metric_type not in self.METRIC_TYPES:
+                        continue
+                    for field in fields:
+                        es_field = f"{Field.NUMERIC}.{field}"
+                        sub_agg_name = f"{field}.{metric_type}"
+                        metric_sub_aggs[sub_agg_name] = {
+                            metric_type: {"field": es_field}
+                        }
+                if metric_sub_aggs:
+                    facet_aggregations[agg_name]["aggs"] = metric_sub_aggs
+
             if len(facet_aggregations):
                 # See here for an explanation of the whole post_filters and
                 # aggregation filters thing:
