@@ -80,7 +80,7 @@ class Settings(BaseSettings):
     content_term_vectors: bool = True
 
     # Highlighter configuration
-    highlighter_fvh_enabled: bool = True
+    highlighter_fvh_enabled: bool = False
     highlighter_fragment_size: int = 200
     highlighter_number_of_fragments: int = 3
     highlighter_phrase_limit: int = 64

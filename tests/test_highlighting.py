@@ -25,7 +25,10 @@ def _search_highlight(
 def test_highlighting_phrases(index_entities):
     # this is using the sample entity 242d6724b38425f11df37437c38125b71fb13300
     highlight = _search_highlight('"Mr. Trump proclaimed"')
-    assert "<em>Mr. Trump proclaimed</em>" in highlight
+    # Unified highlighter highlights individual terms rather than full phrase spans
+    assert "<em>Mr</em>" in highlight
+    assert "<em>Trump</em>" in highlight
+    assert "<em>proclaimed</em>" in highlight
 
     highlight = _search_highlight('"former chairman"~2')
     assert "<em>former</em>" in highlight
@@ -33,14 +36,15 @@ def test_highlighting_phrases(index_entities):
 
     highlight = _search_highlight('"paul manafort"')
     assert highlight is not None
-    assert "<em>Paul Manafort</em>" in highlight
+    assert "<em>Paul</em>" in highlight
+    assert "<em>Manafort</em>" in highlight
 
     highlight = _search_highlight("Українська")
     assert highlight is not None
     assert "<em>Українська" in highlight
     highlight = _search_highlight('"日本語"')
     assert highlight is not None
-    assert "<em>本</em><em>語" in highlight
+    assert "<em>日本語" in highlight
 
 
 def test_highlighting_pages(fixture_pages, cleanup_after):
@@ -49,11 +53,14 @@ def test_highlighting_pages(fixture_pages, cleanup_after):
     index_bulk("test_pages_highlight", fixture_pages, sync=True)
 
     # Search in the indexText (-> content) of a Pages (aka Document) entity
+    # Unified highlighter highlights individual terms rather than full phrase spans
     highlight = _search_highlight(
         '"MIT license" "useful information" documentation', schema="Pages"
     )
-    assert "<em>MIT license</em>" in highlight
-    assert "<em>useful information</em>" in highlight
+    assert "<em>MIT</em>" in highlight
+    assert "<em>license</em>" in highlight
+    assert "<em>useful</em>" in highlight
+    assert "<em>information</em>" in highlight
     assert "<em>documentation</em>" in highlight
 
     # Search within its child page entities (used in OpenAleph ui)
@@ -62,8 +69,10 @@ def test_highlighting_pages(fixture_pages, cleanup_after):
         schema="Page",
         parent_id="f61295777cf69f423855655f1614794ce22086d8.b154e50f50c8c8133168767d78bbd1dff067f308",
     )
-    assert "<em>MIT license</em>" in highlight
-    assert "<em>useful information</em>" in highlight
+    assert "<em>MIT</em>" in highlight
+    assert "<em>license</em>" in highlight
+    assert "<em>useful</em>" in highlight
+    assert "<em>information</em>" in highlight
     assert "<em>documentation</em>" in highlight
 
     # Include mentioned names
@@ -71,7 +80,8 @@ def test_highlighting_pages(fixture_pages, cleanup_after):
         'names:"massachusetts institute of technology" "MIT license"', schema="Pages"
     )
     assert "massachusetts institute of technology" in highlight
-    assert "<em>MIT license</em>" in highlight
+    assert "<em>MIT</em>" in highlight
+    assert "<em>license</em>" in highlight
 
     # Page doesn't contain "names" but still the highlight works for the text phrase
     highlight = _search_highlight(
@@ -79,7 +89,8 @@ def test_highlighting_pages(fixture_pages, cleanup_after):
         schema="Page",
         parent_id="f61295777cf69f423855655f1614794ce22086d8.b154e50f50c8c8133168767d78bbd1dff067f308",
     )
-    assert "<em>MIT license</em>" in highlight
+    assert "<em>MIT</em>" in highlight
+    assert "<em>license</em>" in highlight
 
 
 def test_highlighting_translation_plaintext(cleanup_after):
