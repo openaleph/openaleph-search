@@ -330,7 +330,7 @@ def make_schema_mapping(schemata: Iterable[SchemaType]) -> Mapping:
             merged_props[name]["type"].add(get_index_field_type(prop.type))
             if name == PROP_TRANSLATED:
                 merged_props[name]["copy_to"].add(Field.TRANSLATION)
-            elif prop.type == registry.text:
+            elif prop.type in (registry.text, registry.html, registry.json):
                 merged_props[name]["copy_to"].add(Field.CONTENT)
             else:
                 merged_props[name]["copy_to"].add(Field.TEXT)
