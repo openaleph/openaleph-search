@@ -8,6 +8,7 @@ from rigour.text import levenshtein
 
 from openaleph_search.index.mapping import Field, property_field_name
 from openaleph_search.query.util import BoolQuery, bool_query, none_query
+from openaleph_search.settings import Settings
 from openaleph_search.transform.util import (
     index_name_keys,
     index_name_parts,
@@ -93,50 +94,55 @@ def names_query(schema: Schema, names: list[str]) -> Clauses:
     if keys:
         shoulds.append({"terms": {Field.NAME_KEYS: keys, "boost": 3.0}})
 
+    settings = Settings()
+
     # 3. name_parts: partial token overlap (requires 2+ matching tokens)
-    parts = list(index_name_parts(schema, names))
-    if parts:
-        shoulds.append(
-            {
-                "terms_set": {
-                    Field.NAME_PARTS: {
-                        "terms": parts,
-                        "minimum_should_match_script": _min_should_match_script(2),
-                        "boost": 1.0,
+    if settings.match_name_parts:
+        parts = list(index_name_parts(schema, names))
+        if parts:
+            shoulds.append(
+                {
+                    "terms_set": {
+                        Field.NAME_PARTS: {
+                            "terms": parts,
+                            "minimum_should_match_script": _min_should_match_script(2),
+                            "boost": 1.0,
+                        }
                     }
                 }
-            }
-        )
+            )
 
     # 4. name_phonetic: spelling/transliteration variants
-    phonetics = list(phonetic_names(schema, names))
-    if phonetics:
-        shoulds.append(
-            {
-                "terms_set": {
-                    Field.NAME_PHONETIC: {
-                        "terms": phonetics,
-                        "minimum_should_match_script": _min_should_match_script(2),
-                        "boost": 0.8,
+    if settings.match_phonetic:
+        phonetics = list(phonetic_names(schema, names))
+        if phonetics:
+            shoulds.append(
+                {
+                    "terms_set": {
+                        Field.NAME_PHONETIC: {
+                            "terms": phonetics,
+                            "minimum_should_match_script": _min_should_match_script(2),
+                            "boost": 0.8,
+                        }
                     }
                 }
-            }
-        )
+            )
 
     # 5. name_symbols: synonyms, nicknames, company suffixes
-    symbols = [str(s) for s in get_name_symbols(schema, *names)]
-    if symbols:
-        shoulds.append(
-            {
-                "terms_set": {
-                    Field.NAME_SYMBOLS: {
-                        "terms": symbols,
-                        "minimum_should_match_script": _min_should_match_script(2),
-                        "boost": 0.8,
+    if settings.match_symbols:
+        symbols = [str(s) for s in get_name_symbols(schema, *names)]
+        if symbols:
+            shoulds.append(
+                {
+                    "terms_set": {
+                        Field.NAME_SYMBOLS: {
+                            "terms": symbols,
+                            "minimum_should_match_script": _min_should_match_script(2),
+                            "boost": 0.8,
+                        }
                     }
                 }
-            }
-        )
+            )
 
     return shoulds
 

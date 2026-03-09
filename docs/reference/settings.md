@@ -393,6 +393,38 @@ Maximum document frequency for MLT query terms. Common terms above this threshol
 - Type: `int`
 - Default: `500`
 
+## Entity matching
+
+[Read more](../matching.md)
+
+### `match_name_parts`
+
+Enable name parts matching (partial token overlap, requires 2+ matching tokens).
+
+- Type: `bool`
+- Default: `false`
+
+### `match_phonetic`
+
+Enable phonetic matching (sound-alike via Double Metaphone).
+
+- Type: `bool`
+- Default: `false`
+
+### `match_symbols`
+
+Enable name symbols matching (cross-language/alphabet via WikiData).
+
+- Type: `bool`
+- Default: `false`
+
+```bash
+# Enable all optional matching stages
+export OPENALEPH_SEARCH_MATCH_NAME_PARTS=true
+export OPENALEPH_SEARCH_MATCH_PHONETIC=true
+export OPENALEPH_SEARCH_MATCH_SYMBOLS=true
+```
+
 ## Authorization
 
 [Read more](./authorization.md)

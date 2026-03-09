@@ -23,6 +23,25 @@ The index stores multiple name representations to catch variations:
 - Name parts (partial matching) (`name_parts`)
 
 
+## Configuration
+
+Matching stages 1 (normalized keywords) and 2 (name keys) are always enabled. Stages 3-5 can be toggled via environment variables:
+
+| Setting | Default | Stage |
+|---------|---------|-------|
+| `OPENALEPH_SEARCH_MATCH_NAME_PARTS` | `false` | Name parts (partial token overlap) |
+| `OPENALEPH_SEARCH_MATCH_PHONETIC` | `false` | Phonetic encoding (sound-alike) |
+| `OPENALEPH_SEARCH_MATCH_SYMBOLS` | `false` | Name symbols (cross-language) |
+
+Enabling more stages improves recall (finding more potential matches) at the cost of query complexity and performance. For most use cases, stages 1 and 2 provide sufficient matching quality.
+
+```bash
+# Enable all matching stages
+export OPENALEPH_SEARCH_MATCH_NAME_PARTS=true
+export OPENALEPH_SEARCH_MATCH_PHONETIC=true
+export OPENALEPH_SEARCH_MATCH_SYMBOLS=true
+```
+
 ## Name matching strategies
 
 ### 1. Normalized keywords
@@ -42,7 +61,10 @@ Normalization:
 
 Exact name matches (with order preserved) receive the highest boost.
 
-### 2. Name symbols
+### 2. Name symbols {: #name-symbols }
+
+!!! note
+    Disabled by default. Enable with `OPENALEPH_SEARCH_MATCH_SYMBOLS=true`.
 
 Cross-language and cross-alphabet matching via symbolic representations. This can be considered as a synonyms search, but more precise and context specific than [a global synonyms file](https://www.elastic.co/docs/solutions/search/full-text/search-with-synonyms).
 
@@ -58,7 +80,10 @@ Example:
 
 Same symbol = same entity name (part) across languages.
 
-### 3. Phonetic encoding
+### 3. Phonetic encoding {: #phonetic }
+
+!!! note
+    Disabled by default. Enable with `OPENALEPH_SEARCH_MATCH_PHONETIC=true`.
 
 Sound-alike matching using Double Metaphone algorithm.
 
@@ -72,7 +97,10 @@ Example:
 
 Catches alternate spellings and transcription variations.
 
-### 4. Name parts
+### 4. Name parts {: #name-parts }
+
+!!! note
+    Disabled by default. Enable with `OPENALEPH_SEARCH_MATCH_NAME_PARTS=true`.
 
 Individual name components for partial matching.
 
@@ -143,16 +171,16 @@ Only compatible schema types can match each other.
 
 Match scores combine multiple factors:
 
-| Signal | Boost | Index field |
-|--------|-------|-------------|
-| Names (exact, order preserved) | 5.0 | `names` |
-| Name keys (order-independent) | 3.0 | `name_keys` |
-| Identifiers | 3.0 | `properties.*` (for group type "identifier") |
-| High-value properties | 2.0 | `properties.*` (ip, url, email, phone) |
-| Name parts | 1.0 | `name_parts` |
-| Other properties | 1.0 | `properties.*` |
-| Phonetic codes | 0.8 | `name_phonetics` |
-| Name symbols | 0.8 | `name_symbols` |
+| Signal | Boost | Index field | Default |
+|--------|-------|-------------|---------|
+| Names (exact, order preserved) | 5.0 | `names` | always |
+| Name keys (order-independent) | 3.0 | `name_keys` | always |
+| Identifiers | 3.0 | `properties.*` (for group type "identifier") | always |
+| High-value properties | 2.0 | `properties.*` (ip, url, email, phone) | always |
+| Name parts | 1.0 | `name_parts` | opt-in |
+| Other properties | 1.0 | `properties.*` | always |
+| Phonetic codes | 0.8 | `name_phonetics` | opt-in |
+| Name symbols | 0.8 | `name_symbols` | opt-in |
 
 Higher boost = more important for matching.
 
@@ -192,9 +220,10 @@ A match query combines multiple strategies:
             // Name matching clauses (using terms queries for efficiency)
             {"terms": {"names": ["john smith"], "boost": 5.0}},
             {"terms": {"name_keys": ["johnsmith"], "boost": 3.0}},
-            {"terms_set": {"name_parts": {"terms": ["john", "smith"], "minimum_should_match_script": {...}}}},
-            {"terms_set": {"name_phonetic": {"terms": ["JN", "SM0"], "minimum_should_match_script": {...}}}},
-            {"terms_set": {"name_symbols": {"terms": ["[NAME:12345]"], "minimum_should_match_script": {...}}}}
+            // Optional stages (disabled by default, enable via settings):
+            {"terms_set": {"name_parts": {"terms": ["john", "smith"], "minimum_should_match_script": {...}}}},   // match_name_parts
+            {"terms_set": {"name_phonetic": {"terms": ["JN", "SM0"], "minimum_should_match_script": {...}}}},    // match_phonetic
+            {"terms_set": {"name_symbols": {"terms": ["[NAME:12345]"], "minimum_should_match_script": {...}}}}   // match_symbols
           ],
           "minimum_should_match": 1
         }

@@ -98,6 +98,12 @@ class Settings(BaseSettings):
     mlt_min_word_length: int = 5
     mlt_max_doc_freq: int = 500
 
+    # Entity matching stages (names_query in query/matching.py)
+    # Stages 1 (names) and 2 (name_keys) are always enabled.
+    match_name_parts: bool = False
+    match_phonetic: bool = False
+    match_symbols: bool = False
+
     # Pre-build global ordinals on frequently-aggregated keyword fields
     # during refresh. Eliminates first-query latency spikes at the cost of
     # slightly slower refreshes.
