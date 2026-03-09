@@ -29,7 +29,7 @@ Matching stages 1 (normalized keywords) and 2 (name keys) are always enabled. St
 
 | Setting | Default | Stage |
 |---------|---------|-------|
-| `OPENALEPH_SEARCH_MATCH_NAME_PARTS` | `false` | Name parts (partial token overlap) |
+| `OPENALEPH_SEARCH_MATCH_NAME_PARTS` | `true` | Name parts (partial token overlap) |
 | `OPENALEPH_SEARCH_MATCH_PHONETIC` | `false` | Phonetic encoding (sound-alike) |
 | `OPENALEPH_SEARCH_MATCH_SYMBOLS` | `false` | Name symbols (cross-language) |
 
@@ -98,9 +98,6 @@ Example:
 Catches alternate spellings and transcription variations.
 
 ### 4. Name parts {: #name-parts }
-
-!!! note
-    Disabled by default. Enable with `OPENALEPH_SEARCH_MATCH_NAME_PARTS=true`.
 
 Individual name components for partial matching.
 
@@ -177,7 +174,7 @@ Match scores combine multiple factors:
 | Name keys (order-independent) | 3.0 | `name_keys` | always |
 | Identifiers | 3.0 | `properties.*` (for group type "identifier") | always |
 | High-value properties | 2.0 | `properties.*` (ip, url, email, phone) | always |
-| Name parts | 1.0 | `name_parts` | opt-in |
+| Name parts | 1.0 | `name_parts` | always |
 | Other properties | 1.0 | `properties.*` | always |
 | Phonetic codes | 0.8 | `name_phonetics` | opt-in |
 | Name symbols | 0.8 | `name_symbols` | opt-in |

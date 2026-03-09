@@ -402,7 +402,7 @@ Maximum document frequency for MLT query terms. Common terms above this threshol
 Enable name parts matching (partial token overlap, requires 2+ matching tokens).
 
 - Type: `bool`
-- Default: `false`
+- Default: `true`
 
 ### `match_phonetic`
 

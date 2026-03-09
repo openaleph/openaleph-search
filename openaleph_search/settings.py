@@ -100,7 +100,7 @@ class Settings(BaseSettings):
 
     # Entity matching stages (names_query in query/matching.py)
     # Stages 1 (names) and 2 (name_keys) are always enabled.
-    match_name_parts: bool = False
+    match_name_parts: bool = True
     match_phonetic: bool = False
     match_symbols: bool = False
 
