@@ -477,7 +477,7 @@ def test_search_sort(cleanup_after):
             "numeric.dates": {
                 "order": "desc",
                 "missing": "_last",
-                "unmapped_type": "keyword",
+                "unmapped_type": "double",
                 "mode": "min",
             }
         },
