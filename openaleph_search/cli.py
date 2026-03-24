@@ -16,6 +16,8 @@ from rich import print
 
 from openaleph_search.index import admin, entities, export
 from openaleph_search.index.indexer import bulk_actions
+from openaleph_search.index.percolator import bulk_index_queries
+from openaleph_search.model import PercolatorQuery
 from openaleph_search.search.logic import (
     analyze_text,
     make_parser,
@@ -180,6 +182,19 @@ def cli_delete(
         res = es.delete_by_query(index=index, body=body)
         data = dump_json(dict(res), clean=True, newline=True)
         smart_write("-", data)
+
+
+@cli.command("load-percolator")
+def cli_load_percolator(input_uri: str = OPT_INPUT_URI):
+    """Load percolator queries from a stream of JSON objects.
+
+    Each JSON object must have: key, names[], and optionally countries[], schemata[].
+    """
+    with ErrorHandler(log), Took() as t:
+        items = (PercolatorQuery(**obj) for obj in smart_stream_json(input_uri))
+        items = logged_items(items, "Loading", 10_000, "Query", log)
+        bulk_index_queries(items)
+        log.info("Load percolator complete.", input_uri=input_uri, took=t.took)
 
 
 @cli.command("analyze")

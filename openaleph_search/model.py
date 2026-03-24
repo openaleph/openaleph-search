@@ -26,3 +26,12 @@ class SearchAuth(BaseModel):
                 list(map(str, self.collection_ids)), field, self.is_admin
             )
         return auth_datasets_query(list(self.datasets), field, self.is_admin)
+
+
+class PercolatorQuery(BaseModel):
+    """A stored percolator query mapping entity names to documents."""
+
+    key: str
+    names: list[str]
+    countries: list[str] = []
+    schemata: list[str] = []

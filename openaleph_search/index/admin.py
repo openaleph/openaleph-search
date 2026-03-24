@@ -5,6 +5,7 @@ from openaleph_search.index.indexes import (
     configure_entities,
     entities_read_index,
 )
+from openaleph_search.index.percolator import configure_percolator, percolator_index
 
 log = get_logger(__name__)
 
@@ -12,12 +13,15 @@ log = get_logger(__name__)
 def upgrade_search():
     """Add any missing properties to the index mappings."""
     configure_entities()
+    configure_percolator()
 
 
 def delete_index():
     es = get_es()
     log.warning("🔥 Deleting all indices 🔥")
-    for index in entities_read_index().split(","):
+    indexes = entities_read_index().split(",")
+    indexes.append(percolator_index())
+    for index in indexes:
         if es.indices.exists(index=index):
             es.indices.delete(index=index)
 
@@ -25,10 +29,13 @@ def delete_index():
 def clear_index():
     es = get_es()
     log.warning("🔥 Deleting all data 🔥")
-    es.delete_by_query(
-        index=entities_read_index(),
-        body={"query": {"match_all": {}}},
-        refresh=True,
-        wait_for_completion=True,
-        conflicts="proceed",
-    )
+    indexes = [entities_read_index(), percolator_index()]
+    for index in indexes:
+        if es.indices.exists(index=index):
+            es.delete_by_query(
+                index=index,
+                body={"query": {"match_all": {}}},
+                refresh=True,
+                wait_for_completion=True,
+                conflicts="proceed",
+            )
