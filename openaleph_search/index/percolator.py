@@ -93,11 +93,15 @@ def percolate(
 
     filters = _build_filters(countries=countries, schemata=schemata)
     if filters:
-        query = bool_query()
-        query["bool"]["must"].append(percolate_clause)
-        query["bool"]["filter"] = filters
+        inner = bool_query()
+        inner["bool"]["must"].append(percolate_clause)
+        inner["bool"]["filter"] = filters
     else:
-        query = percolate_clause
+        inner = percolate_clause
+
+    # Wrap in constant_score to skip scoring — we only care about matches,
+    # not relevance. This avoids deserializing each matching query for scoring.
+    query: dict[str, Any] = {"constant_score": {"filter": inner}}
 
     es = get_es()
     body: dict[str, Any] = {"size": size, "query": query}
