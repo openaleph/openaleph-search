@@ -102,7 +102,7 @@ def get_highlighter(
         "type": "unified",
         "fragment_size": 150,  # Shorter since less important
         "number_of_fragments": 1,  # Just one fragment
-        # "max_analyzed_offset": 999999,  # Handle large documents
+        "max_analyzed_offset": settings.highlighter_max_analyzed_offset,
         # "pre_tags": ["<em class='highlight-text'>"],
         # "post_tags": ["</em>"],
     }
