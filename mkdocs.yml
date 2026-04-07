@@ -6,6 +6,7 @@ nav:
   - Features:
     - Matching: matching.md
     - More Like This: more_like_this.md
+    - Percolation: percolation.md
     - Significant Terms: significant_terms.md
     - Facets & Aggregations: aggregations.md
     - Highlighting: highlighting.md
