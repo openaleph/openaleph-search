@@ -16,7 +16,7 @@ from rich import print
 
 from openaleph_search.index import admin, entities, export
 from openaleph_search.index.indexer import bulk_actions
-from openaleph_search.index.percolator import bulk_index_queries
+from openaleph_search.index.percolator import bulk_index_queries, percolate
 from openaleph_search.model import PercolatorQuery
 from openaleph_search.search.logic import (
     analyze_text,
@@ -191,10 +191,37 @@ def cli_load_percolator(input_uri: str = OPT_INPUT_URI):
     Each JSON object must have: key, names[], and optionally countries[], schemata[].
     """
     with ErrorHandler(log), Took() as t:
-        items = (PercolatorQuery(**obj) for obj in smart_stream_json(input_uri))
-        items = logged_items(items, "Loading", 10_000, "Query", log)
+        items = (
+            PercolatorQuery(**obj)
+            for obj in smart_stream_json(input_uri)
+            if obj.get("names")
+        )
         bulk_index_queries(items)
         log.info("Load percolator complete.", input_uri=input_uri, took=t.took)
+
+
+@cli.command("percolate")
+def cli_percolate(
+    input_uri: str = OPT_INPUT_URI,
+    output_uri: str = OPT_OUTPUT_URI,
+    countries: Annotated[
+        Optional[list[str]],
+        typer.Option("--country", help="Filter by country (repeatable)"),
+    ] = None,
+    schemata: Annotated[
+        Optional[list[str]],
+        typer.Option("--schema", help="Filter by schema (repeatable)"),
+    ] = None,
+    size: Annotated[
+        int, typer.Option(help="Maximum number of matching queries to return")
+    ] = 100,
+):
+    """Percolate input text against stored queries to find matches"""
+    with ErrorHandler(log):
+        text = smart_read(input_uri, mode="r")
+        result = percolate(text, countries=countries, schemata=schemata, size=size)
+        data = dump_json(dict(result), clean=True, newline=True)
+        smart_write(output_uri, data)
 
 
 @cli.command("analyze")

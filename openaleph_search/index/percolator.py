@@ -1,6 +1,10 @@
-from typing import Any, Iterable
+import re
+from typing import Any, Iterable, Iterator
 
 from anystore.logging import get_logger
+from anystore.types import SDict
+from anystore.util import clean_dict
+from elastic_transport import ObjectApiResponse
 
 from openaleph_search.core import get_es
 from openaleph_search.index.indexer import Actions, bulk_actions, configure_index
@@ -14,6 +18,22 @@ PERCOLATOR_VERSION = "v1"
 
 COUNTRIES = "countries"
 SCHEMATA = "schemata"
+SURFACE_FORMS = "surface_forms"
+
+_MARK_RE = re.compile(r"<mark>(.*?)</mark>", re.DOTALL)
+
+
+def _extract_surface_forms(highlight: dict[str, list[str]] | None) -> list[str]:
+    """Pull <mark>…</mark> spans from a hit's highlight block, deduped."""
+    if not highlight:
+        return []
+    return sorted(
+        {
+            match
+            for fragment in highlight.get(Field.CONTENT, [])
+            for match in _MARK_RE.findall(fragment)
+        }
+    )
 
 
 def percolator_index() -> str:
@@ -54,6 +74,7 @@ def bulk_index_queries(items: Iterable[PercolatorQuery], sync: bool = False):
                 {"match_phrase": {Field.CONTENT: {"query": name, "slop": 2}}}
                 for name in item.names
             ]
+            query = clean_dict(query)
             source: dict[str, Any] = {
                 "query": query,
                 "names": item.names,
@@ -71,12 +92,34 @@ def bulk_index_queries(items: Iterable[PercolatorQuery], sync: bool = False):
     bulk_actions(_actions(), sync=sync)
 
 
+def unpack_percolation_result(res: ObjectApiResponse) -> SDict:
+    data = dict(res)
+    hits = data.get("hits", {}).get("hits", [])
+    if not hits:
+        return data
+    data["hits"] = data.pop("hits", {})
+    data["hits"]["hits"] = []
+    for hit in hits:
+        hit.pop("_score", None)
+        source = hit.get("_source", {})
+        new_source: dict[str, Any] = {
+            SURFACE_FORMS: _extract_surface_forms(hit.pop("highlight", None)),
+        }
+        if source.get(COUNTRIES):
+            new_source[COUNTRIES] = source[COUNTRIES]
+        if source.get(SCHEMATA):
+            new_source[SCHEMATA] = source[SCHEMATA]
+        hit["_source"] = new_source
+        data["hits"]["hits"].append(hit)
+    return data
+
+
 def percolate(
     text: str,
     countries: list[str] | None = None,
     schemata: list[str] | None = None,
     size: int = 100,
-) -> list[dict[str, Any]]:
+) -> SDict:
     """Run a percolate query to find matching stored queries for the given text.
 
     Optionally filter by countries and/or schemata to only return queries that
@@ -104,9 +147,27 @@ def percolate(
     query: dict[str, Any] = {"constant_score": {"filter": inner}}
 
     es = get_es()
-    body: dict[str, Any] = {"size": size, "query": query}
+    body: dict[str, Any] = {
+        "size": size,
+        "query": query,
+        "highlight": {
+            "pre_tags": ["<mark>"],
+            "post_tags": ["</mark>"],
+            "fields": {
+                Field.CONTENT: {"number_of_fragments": 0},
+            },
+        },
+    }
     res = es.search(index=percolator_index(), body=body)
-    return res.get("hits", {}).get("hits", [])
+    return unpack_percolation_result(res)
+
+
+def resolve_percolation(res: ObjectApiResponse) -> Iterator[SDict]:
+    for hit in res.get("hits", {}).get("hits", []):
+        names = hit.get("_source", {}).get("names", [])
+        if names:
+            # search entities schemata=LegalEntity and names=names
+            yield
 
 
 def _build_filters(
