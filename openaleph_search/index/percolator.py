@@ -5,13 +5,23 @@ from anystore.logging import get_logger
 from anystore.types import SDict
 from anystore.util import clean_dict
 from elastic_transport import ObjectApiResponse
+from followthemoney import model
 
 from openaleph_search.core import get_es
+from openaleph_search.index.entities import PROXY_INCLUDES
 from openaleph_search.index.indexer import Actions, bulk_actions, configure_index
+from openaleph_search.index.indexes import entities_read_index
 from openaleph_search.index.mapping import Field, FieldType
-from openaleph_search.index.util import index_name, index_settings, refresh_sync
-from openaleph_search.model import PercolatorQuery
-from openaleph_search.query.util import bool_query, field_filter_query
+from openaleph_search.index.util import (
+    index_name,
+    index_settings,
+    refresh_sync,
+    unpack_result,
+)
+from openaleph_search.model import PercolatorDoc
+from openaleph_search.query.matching import names_query
+from openaleph_search.query.queries import EXCLUDE_DEHYDRATE
+from openaleph_search.query.util import bool_query, field_filter_query, schema_query
 
 log = get_logger(__name__)
 PERCOLATOR_VERSION = "v1"
@@ -57,8 +67,8 @@ def configure_percolator():
     return configure_index(percolator_index(), mapping, settings_)
 
 
-def bulk_index_queries(items: Iterable[PercolatorQuery], sync: bool = False):
-    """Bulk upsert percolator docs from PercolatorQuery objects.
+def bulk_index_queries(items: Iterable[PercolatorDoc], sync: bool = False):
+    """Bulk upsert percolator docs from PercolatorDoc objects.
 
     Each item becomes a percolator doc with:
     - _id = key
@@ -162,12 +172,95 @@ def percolate(
     return unpack_percolation_result(res)
 
 
-def resolve_percolation(res: ObjectApiResponse) -> Iterator[SDict]:
-    for hit in res.get("hits", {}).get("hits", []):
-        names = hit.get("_source", {}).get("names", [])
-        if names:
-            # search entities schemata=LegalEntity and names=names
-            yield
+def resolve_percolation(
+    res: SDict, size: int = 10, dehydrate: bool = False
+) -> Iterator[SDict]:
+    """For each percolation hit, yield a record with the percolator key,
+    its surface forms / countries / schemata, and the matched entities.
+
+    Internally issues a single `_msearch` containing one query per hit, so
+    cost is one Elasticsearch round-trip regardless of how many percolator
+    hits are being resolved.
+
+    Args:
+        size: caps the number of entities returned per percolator hit.
+        dehydrate: when True, strip the bulky `properties` field from each
+            returned entity (mirrors `EntitiesQuery`'s `dehydrate=true` fast
+            path — `openaleph_search/query/queries.py:224`). Use this when
+            you only need entity ids/names/schema/dataset and not the full
+            FtM property payload.
+    """
+    hits = res.get("hits", {}).get("hits", [])
+    if not hits:
+        return
+
+    legal_entity = model.get("LegalEntity")
+    index = entities_read_index(schema="LegalEntity")
+    source_spec: dict[str, Any] | None = None
+    if dehydrate:
+        source_spec = {
+            "includes": [k for k in PROXY_INCLUDES if k not in EXCLUDE_DEHYDRATE]
+        }
+
+    body: list[dict[str, Any]] = []
+    metadata: list[dict[str, Any]] = []  # parallel to msearch responses
+
+    for hit in hits:
+        source = hit.get("_source", {})
+        surface_forms = source.get(SURFACE_FORMS, [])
+        countries = source.get(COUNTRIES, [])
+        schemata = source.get(SCHEMATA, [])
+
+        meta: dict[str, Any] = {
+            "key": hit.get("_id"),
+            SURFACE_FORMS: surface_forms,
+        }
+        if countries:
+            meta[COUNTRIES] = countries
+        if schemata:
+            meta[SCHEMATA] = schemata
+        metadata.append(meta)
+
+        body.append({"index": index})
+
+        if not surface_forms:
+            # Defensive: a hit with no surface forms shouldn't happen (the
+            # highlight is what made it a hit), but keep response alignment
+            # by sending a no-op query.
+            body.append({"size": 0, "query": {"match_none": {}}})
+            continue
+
+        inner = bool_query()
+        inner["bool"]["should"] = names_query(legal_entity, surface_forms)
+        inner["bool"]["minimum_should_match"] = 1
+
+        outer = bool_query()
+        outer["bool"]["must"].append(inner)
+        if countries:
+            outer["bool"]["should"].append(
+                {"terms": {COUNTRIES: countries, "boost": 2.0}}
+            )
+        if schemata:
+            sq = schema_query(schemata, include_descendants=True)
+            # schema_query returns {"terms": {"schema": [...]}} — attach boost.
+            sq["terms"]["boost"] = 2.0
+            outer["bool"]["should"].append(sq)
+
+        per_body: dict[str, Any] = {"size": size, "query": outer}
+        if source_spec is not None:
+            per_body["_source"] = source_spec
+        body.append(per_body)
+
+    es = get_es()
+    results = es.msearch(body=body)
+
+    for meta, response in zip(metadata, results.get("responses", [])):
+        entities: list[SDict] = []
+        for entity_hit in response.get("hits", {}).get("hits", []):
+            unpacked = unpack_result(entity_hit)
+            if unpacked is not None:
+                entities.append(unpacked)
+        yield {**meta, "entities": entities}
 
 
 def _build_filters(

@@ -17,7 +17,9 @@ from rich import print
 from openaleph_search.index import admin, entities, export
 from openaleph_search.index.indexer import bulk_actions
 from openaleph_search.index.percolator import bulk_index_queries, percolate
-from openaleph_search.model import PercolatorQuery
+from openaleph_search.model import PercolatorDoc
+from openaleph_search.parse.parser import SearchQueryParser
+from openaleph_search.query.queries import PercolatorQuery
 from openaleph_search.search.logic import (
     analyze_text,
     make_parser,
@@ -192,7 +194,7 @@ def cli_load_percolator(input_uri: str = OPT_INPUT_URI):
     """
     with ErrorHandler(log), Took() as t:
         items = (
-            PercolatorQuery(**obj)
+            PercolatorDoc(**obj)
             for obj in smart_stream_json(input_uri)
             if obj.get("names")
         )
@@ -215,11 +217,51 @@ def cli_percolate(
     size: Annotated[
         int, typer.Option(help="Maximum number of matching queries to return")
     ] = 100,
+    resolve: Annotated[
+        bool,
+        typer.Option(
+            "--resolve/--no-resolve",
+            help="Resolve matched names to entities in the things bucket",
+        ),
+    ] = False,
+    resolve_size: Annotated[
+        int, typer.Option(help="Max entities returned per resolved percolator hit")
+    ] = 10,
+    dehydrate: Annotated[
+        bool,
+        typer.Option(
+            "--dehydrate/--no-dehydrate",
+            help="Strip the bulky `properties` field from resolved entities",
+        ),
+    ] = False,
 ):
-    """Percolate input text against stored queries to find matches"""
+    """Percolate input text against stored queries to find matches.
+
+    Without `--resolve` this dumps the raw percolation response (which
+    stored queries fired, with surface forms). With `--resolve`, the
+    surface forms are resolved against the entity index via
+    `PercolatorQuery` and the response shape matches a regular entity
+    search (deduped flat hits, each carrying a `percolator` block in
+    `_source`).
+    """
     with ErrorHandler(log):
         text = smart_read(input_uri, mode="r")
-        result = percolate(text, countries=countries, schemata=schemata, size=size)
+        if resolve:
+            # Bridge the typer flags into a SearchQueryParser so that
+            # PercolatorQuery picks them up uniformly with other query
+            # classes (dehydrate / limit / filters all flow through).
+            args: list[tuple[str, str]] = [("limit", str(resolve_size))]
+            if dehydrate:
+                args.append(("dehydrate", "true"))
+            for c in countries or []:
+                args.append(("filter:countries", c))
+            for s in schemata or []:
+                args.append(("filter:schemata", s))
+            parser = SearchQueryParser(args)
+            query = PercolatorQuery(parser, text=text, percolate_size=size)
+            result = query.search()
+        else:
+            result = percolate(text, countries=countries, schemata=schemata, size=size)
         data = dump_json(dict(result), clean=True, newline=True)
         smart_write(output_uri, data)
 
