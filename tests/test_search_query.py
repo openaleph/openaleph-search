@@ -5,6 +5,9 @@ import pytest
 from openaleph_search.parse.parser import SearchQueryParser
 from openaleph_search.query.queries import Query
 from openaleph_search.query.util import schema_query
+from openaleph_search.settings import Settings
+
+settings = Settings()
 
 
 def query(args):
@@ -130,6 +133,7 @@ class QueryTestCase(TestCase):
                         "type": "unified",
                         "fragment_size": 150,
                         "number_of_fragments": 1,
+                        "max_analyzed_offset": settings.highlighter_max_analyzed_offset,
                         "highlight_query": {
                             "query_string": {
                                 "query": "foo",
@@ -151,6 +155,7 @@ class QueryTestCase(TestCase):
                         "type": "unified",
                         "fragment_size": 150,
                         "number_of_fragments": 1,
+                        "max_analyzed_offset": settings.highlighter_max_analyzed_offset,
                         "highlight_query": {
                             "query_string": {
                                 "query": "foo",
