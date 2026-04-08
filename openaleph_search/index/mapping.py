@@ -99,6 +99,9 @@ class Field:
     TAGS = "tags"
     TRANSLATION = "translation"
 
+    # entities group convenience
+    ENTITIES = "entities"
+
     NUMERIC = "numeric"
     PROPERTIES = "properties"
 
