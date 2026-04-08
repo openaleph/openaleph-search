@@ -137,18 +137,17 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
     # `query` field at all so they stay out of the percolator candidate
     # set. Globally gated by the `percolation` setting.
     #
-    # Source the percolator names from `name` + `alias` + `previousName`
-    # only — NOT from the full `entity.names` union (which also includes
-    # `weakAlias` and others, producing noisy single-token clauses like
-    # `weakAlias: ["Friedrich"]` that fire on every doc mentioning
-    # "Friedrich Engels", "Friedrich Nietzsche", etc.). The full
-    # `entity.names` list is still used above for the entity-matching
-    # path's `name_keys`/`name_parts`/`name_phonetic` fields where
-    # those weaker variants are useful — they are just too noisy to
-    # percolate against arbitrary text.
+    # Source the percolator names from `name` + `previousName` only —
+    # NOT from the full `entity.names` union (which also includes
+    # `alias`, `weakAlias`, and others, producing noisy clauses that
+    # fire on too many documents). `alias` and `weakAlias` in
+    # OpenSanctions data are loose enough to cause significant false
+    # positives. The full `entity.names` list is still used above for
+    # the entity-matching path's `name_keys`/`name_parts`/`name_phonetic`
+    # fields where those weaker variants are useful — they are just
+    # too noisy to percolate against arbitrary text.
     if settings.percolation and schema_bucket(data["schema"]) == "things":
         percolator_names = list(entity.get("name", quiet=True))
-        percolator_names.extend(entity.get("alias", quiet=True))
         percolator_names.extend(entity.get("previousName", quiet=True))
         identifiers = list(entity.get_type_values(registry.identifier))
         percolator_query = make_percolator_query(
