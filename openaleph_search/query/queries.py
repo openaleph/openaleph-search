@@ -402,13 +402,14 @@ class PercolatorQuery(EntitiesQuery):
         """
         if not self.parser.highlight:
             return {}
-        content_highlighter = get_highlighter(
-            Field.CONTENT, count=self.parser.highlight_count
-        )
-        content_highlighter.pop("highlight_query", None)
+        highlighter = get_highlighter(Field.CONTENT, count=self.parser.highlight_count)
+        highlighter["no_match_size"] = 0
+        # we really want to find all surface forms
+        highlighter["max_analyzed_offset"] = 9999999
+        highlighter.pop("highlight_query", None)
         return {
             "encoder": "html",
-            "fields": {Field.CONTENT: content_highlighter},
+            "fields": {Field.CONTENT: highlighter},
         }
 
     def search(self) -> ObjectApiResponse:
