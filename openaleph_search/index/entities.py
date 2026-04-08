@@ -14,10 +14,7 @@ from openaleph_search.index.indexer import (
     bulk_actions,
     delete_safe,
 )
-from openaleph_search.index.indexes import (
-    entities_read_index,
-    entities_write_index,
-)
+from openaleph_search.index.indexes import entities_read_index, entities_write_index
 from openaleph_search.index.util import unpack_result
 from openaleph_search.model import SearchAuth
 from openaleph_search.settings import MAX_PAGE

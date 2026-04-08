@@ -121,6 +121,10 @@ class Field:
     # length norm
     NUM_VALUES = "num_values"
 
+    # stored percolator query (things bucket only); built from the entity's
+    # cleaned name variants at index time. See PercolatorQuery.
+    QUERY = "query"
+
     # index metadata
     INDEX_BUCKET = "index_bucket"
     INDEX_VERSION = "index_version"
@@ -154,6 +158,8 @@ class FieldType:
     INTEGER = {"type": "integer"}
     GEOPOINT = {"type": "geo_point"}
     BOOL = {"type": "boolean"}
+    # stored percolator query field (see Field.QUERY)
+    PERCOLATOR = {"type": "percolator"}
 
     # No length normalization for names. Merged entities have a lot of names,
     # and we don't want to penalize them for that.

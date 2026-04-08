@@ -8,7 +8,12 @@ from followthemoney.exc import InvalidData
 from followthemoney.schema import Schema
 
 from openaleph_search.index.indexer import configure_index
-from openaleph_search.index.mapping import Field, make_mapping, make_schema_mapping
+from openaleph_search.index.mapping import (
+    Field,
+    FieldType,
+    make_mapping,
+    make_schema_mapping,
+)
 from openaleph_search.index.util import index_name, index_settings
 from openaleph_search.settings import Settings
 from openaleph_search.util import SchemaType, ensure_schema
@@ -111,6 +116,12 @@ def configure_entities():
 def make_schema_bucket_mapping(bucket: Bucket) -> dict[str, Any]:
     properties = make_schema_bucket_properties(bucket)
     mapping = make_mapping(properties)
+    if bucket == "things":
+        # Per-entity stored percolator query, built at index time from the
+        # entity's cleaned name variants. See
+        # `openaleph_search.transform.entity.format_entity` and
+        # `openaleph_search.query.queries.PercolatorQuery`.
+        mapping["properties"][Field.QUERY] = {**FieldType.PERCOLATOR}
     if bucket == "pages":
         # store full text for highlighting
         mapping["properties"][Field.CONTENT]["store"] = True

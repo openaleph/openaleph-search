@@ -9,11 +9,7 @@ from anystore.logging import get_logger
 from elasticsearch import AsyncElasticsearch
 from elasticsearch.helpers import BulkIndexError, async_bulk, bulk
 
-from openaleph_search.core import (
-    get_async_ingest_es,
-    get_es,
-    get_ingest_es,
-)
+from openaleph_search.core import get_async_ingest_es, get_es, get_ingest_es
 from openaleph_search.index.util import (
     check_response,
     check_settings_changed,

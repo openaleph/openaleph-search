@@ -1,21 +1,20 @@
 import logging
+import re
 from functools import cached_property
 from typing import Any
 
-from anystore.types import SDict
 from banal import ensure_list
 from elastic_transport import ObjectApiResponse
 from followthemoney import EntityProxy, model
 from ftmq.util import get_name_symbols
 
-from openaleph_search.core import get_es
 from openaleph_search.index.entities import ENTITY_SOURCE, PROXY_INCLUDES
 from openaleph_search.index.indexes import entities_read_index
 from openaleph_search.index.mapping import Field
 from openaleph_search.query.base import Query
-from openaleph_search.query.matching import match_query, names_query
+from openaleph_search.query.matching import match_query
 from openaleph_search.query.more_like_this import more_like_this_query
-from openaleph_search.query.util import bool_query, field_filter_query, schema_query
+from openaleph_search.query.util import field_filter_query
 from openaleph_search.settings import Settings
 from openaleph_search.transform.util import index_name_keys
 from openaleph_search.util import SchemaType
@@ -283,221 +282,121 @@ class MatchQuery(EntitiesQuery):
         return query
 
 
+_PERCOLATOR_MARK_RE = re.compile(r"<mark>(.*?)</mark>", re.DOTALL)
+
+
+def _extract_surface_forms(highlight: dict[str, list[str]] | None) -> list[str]:
+    """Pull <mark>…</mark> spans from a hit's highlight block, deduped."""
+    if not highlight:
+        return []
+    return sorted(
+        {
+            match
+            for fragment in highlight.get(Field.CONTENT, [])
+            for match in _PERCOLATOR_MARK_RE.findall(fragment)
+        }
+    )
+
+
+def _empty_search_response() -> dict[str, Any]:
+    """Synthetic empty ES search response, ObjectApiResponse-shaped."""
+    return {
+        "took": 0,
+        "timed_out": False,
+        "hits": {
+            "total": {"value": 0, "relation": "eq"},
+            "max_score": None,
+            "hits": [],
+        },
+    }
+
+
 class PercolatorQuery(EntitiesQuery):
-    """Two-phase 'find entities mentioned in this text' query.
+    """Find entities mentioned in a document.
 
-    Phase 1: percolate the document against stored name queries (the
-    percolator index) to discover which stored queries match and what
-    surface forms fired them.
+    Each entity in the things bucket carries a stored percolator query
+    built at index time from its cleaned name variants (see
+    `openaleph_search.transform.entity.format_entity`). Percolating a
+    document is then a normal entity search against the things bucket
+    with a `percolate` clause added to the bool query and an always-on
+    highlight on `Field.CONTENT` to extract the surface forms.
 
-    Phase 2: msearch each percolator hit's surface forms against the
-    things bucket using `names_query`. Optional country/schema metadata
-    on the stored query becomes a soft scoring boost — never a filter —
-    so name-matching entities still surface even when their country/
-    schema differ from the stored query's metadata.
+    All standard `EntitiesQuery` parser knobs apply: filters
+    (`filter:dataset`, `filter:countries`, `filter:schema`, …),
+    `dehydrate`, `limit`, `offset`, `sort`, auth.
 
-    Looks like a regular `EntitiesQuery` to upstream callers: `.search()`
-    returns a synthetic `ObjectApiResponse`-shaped dict with `hits.hits[]`
-    of entities. The same entity matched by multiple percolator hits is
-    deduped and sorted by max score; each surviving entity carries a
-    `percolator` block in its `_source` listing the matching keys and
-    surface forms.
+    Each returned hit has a `surface_forms` list on its `_source` —
+    the actual `<mark>…</mark>` spans from the highlight, parsed and
+    deduped — so callers don't have to deal with the raw highlight HTML.
     """
 
-    # The percolator pipeline only makes sense for matchable named
-    # entities, which all live in the things bucket via LegalEntity
-    # and its descendants.
+    # Only matchable named entities live in the things bucket; this is
+    # also the only bucket that has the `query` percolator field.
     _SCHEMA = "LegalEntity"
-    _COUNTRY_BOOST = 2.0
-    _SCHEMA_BOOST = 2.0
 
-    def __init__(self, parser, text: str, percolate_size: int = 100):
+    def __init__(self, parser, text: str):
         self.text = text
-        self.percolate_size = percolate_size
         super().__init__(parser)
 
     def get_index(self) -> str:
         return entities_read_index(schema=self._SCHEMA)
 
-    def get_sort(self) -> list[str | dict[str, dict[str, Any]]]:
-        # Always score-sorted: the names_query is purely a scoring query.
-        return ["_score"]
+    def get_inner_query(self) -> dict[str, Any]:
+        # Wrap whatever the parent built (parser filters, text query,
+        # negative filters, …) inside a bool that also requires the
+        # percolate clause to fire. Then wrap the whole thing in
+        # `constant_score` so ES skips relevance scoring of the matched
+        # stored queries — we don't need server-side ranking, the
+        # `_name` tags on each stored clause give downstream apps the
+        # signal-type info they need to do their own weighting.
+        inner = super().get_inner_query()
+        percolate_clause = {
+            "percolate": {
+                "field": Field.QUERY,
+                "document": {Field.CONTENT: self.text},
+            }
+        }
+        return {
+            "constant_score": {"filter": {"bool": {"must": [inner, percolate_clause]}}}
+        }
+
+    def get_highlight(self) -> dict[str, Any]:
+        # Always-on highlight for surface form extraction, regardless of
+        # parser.highlight. `number_of_fragments=0` returns the whole
+        # content with every <mark>…</mark> span in place.
+        return {
+            "pre_tags": ["<mark>"],
+            "post_tags": ["</mark>"],
+            "fields": {Field.CONTENT: {"number_of_fragments": 0}},
+        }
 
     def search(self) -> ObjectApiResponse:
-        """Run the 2-phase percolate→msearch pipeline.
-
-        Returns a synthetic response shaped like an Elasticsearch search
-        response so upstream code that consumes `EntitiesQuery.search()`
-        can consume this without special-casing.
-        """
-        # Lazy import to avoid a circular dep (percolator imports queries
-        # for EXCLUDE_DEHYDRATE).
-        from openaleph_search.index.percolator import (
-            COUNTRIES,
-            SCHEMATA,
-            SURFACE_FORMS,
-            percolate,
-        )
-
-        # Phase 1 — percolation. The percolator's countries/schemata args
-        # are filters on which *stored queries* fire, not on which entities
-        # we resolve. They come from the parser's filter:countries/filter:
-        # schemata if present.
-        countries_filter = sorted(self.parser.filters.get("countries", set())) or None
-        schemata_filter = sorted(self.parser.filters.get("schemata", set())) or None
-        percolation = percolate(
-            self.text,
-            countries=countries_filter,
-            schemata=schemata_filter,
-            size=self.percolate_size,
-        )
-
-        hits = percolation.get("hits", {}).get("hits", [])
-        if not hits:
-            return self._empty_response(percolation.get("took", 0))
-
-        # Phase 2 — msearch. One body per percolator hit; align responses
-        # via a parallel `metadata` list.
-        legal_entity = model.get(self._SCHEMA)
-        index = self.get_index()
-        source_spec = self.get_source()  # respects parser.dehydrate
-        sort_spec = self.get_sort()
-        # Per-hit size: we cap with parser.limit so a single percolator
-        # hit can't blow past the user's overall limit. Some entities
-        # will get deduped, so this is a soft cap and the final result
-        # is sliced to parser.limit at the end.
-        per_hit_size = max(self.parser.limit, 1)
-
-        body: list[dict[str, Any]] = []
-        metadata: list[dict[str, Any]] = []
-
-        for hit in hits:
-            src = hit.get("_source", {})
-            surface_forms = src.get(SURFACE_FORMS, [])
-            countries = src.get(COUNTRIES, [])
-            schemata = src.get(SCHEMATA, [])
-
-            metadata.append(
-                {
-                    "key": hit.get("_id"),
-                    "surface_forms": surface_forms,
-                }
+        if not settings.percolation:
+            log.warning(
+                "Percolation is globally disabled "
+                "(set OPENALEPH_SEARCH_PERCOLATION=1 to enable). "
+                "PercolatorQuery returning an empty result."
             )
-
-            body.append({"index": index})
-
-            if not surface_forms:
-                # Defensive: highlight is what makes a hit a hit, but keep
-                # response alignment with a no-op query.
-                body.append({"size": 0, "query": {"match_none": {}}})
-                continue
-
-            inner = bool_query()
-            inner["bool"]["should"] = names_query(legal_entity, surface_forms)
-            inner["bool"]["minimum_should_match"] = 1
-
-            outer = bool_query()
-            outer["bool"]["must"].append(inner)
-            if countries:
-                outer["bool"]["should"].append(
-                    {
-                        "terms": {
-                            "countries": countries,
-                            "boost": self._COUNTRY_BOOST,
-                        }
-                    }
-                )
-            if schemata:
-                sq = schema_query(schemata, include_descendants=True)
-                sq["terms"]["boost"] = self._SCHEMA_BOOST
-                outer["bool"]["should"].append(sq)
-
-            body.append(
-                {
-                    "size": per_hit_size,
-                    "query": outer,
-                    "_source": source_spec,
-                    "sort": sort_spec,
-                }
-            )
-
-        es = get_es()
-        results = es.msearch(body=body)
-        return self._aggregate(metadata, results, percolation.get("took", 0))
-
-    def _aggregate(
-        self,
-        metadata: list[dict[str, Any]],
-        results: dict[str, Any],
-        percolate_took: int,
-    ) -> ObjectApiResponse:
-        """Dedupe entity hits across percolator responses and build a
-        single ObjectApiResponse-shaped dict.
-        """
-        responses = results.get("responses", [])
-        # Map entity _id → hit dict (the first occurrence is kept and its
-        # _score is widened to the maximum across all percolator hits).
-        merged: dict[str, dict[str, Any]] = {}
-
-        for meta, response in zip(metadata, responses):
-            for entity_hit in response.get("hits", {}).get("hits", []) or []:
-                eid = entity_hit.get("_id")
-                if eid is None:
-                    continue
-                existing = merged.get(eid)
-                if existing is None:
-                    # Inject percolator metadata into _source so it travels
-                    # alongside the entity's own data.
-                    src = entity_hit.setdefault("_source", {})
-                    src["percolator"] = {
-                        "keys": [meta["key"]],
-                        "surface_forms": list(meta["surface_forms"]),
-                    }
-                    merged[eid] = entity_hit
-                else:
-                    perc = existing["_source"]["percolator"]
-                    if meta["key"] not in perc["keys"]:
-                        perc["keys"].append(meta["key"])
-                    for sf in meta["surface_forms"]:
-                        if sf not in perc["surface_forms"]:
-                            perc["surface_forms"].append(sf)
-                    new_score = entity_hit.get("_score") or 0
-                    if new_score > (existing.get("_score") or 0):
-                        existing["_score"] = new_score
-
-        sorted_hits = sorted(
-            merged.values(),
-            key=lambda h: h.get("_score") or 0,
-            reverse=True,
-        )
-        # Apply parser.offset/limit to the final deduped list.
-        offset = self.parser.offset
-        limit = self.parser.limit
-        page = sorted_hits[offset : offset + limit] if limit else sorted_hits
-
-        max_score = page[0].get("_score") if page else None
-        body: SDict = {
-            "took": percolate_took + (results.get("took") or 0),
-            "timed_out": False,
-            "hits": {
-                "total": {"value": len(merged), "relation": "eq"},
-                "max_score": max_score,
-                "hits": page,
-            },
-        }
-        return body  # type: ignore[return-value]
-
-    def _empty_response(self, took: int) -> ObjectApiResponse:
-        body: SDict = {
-            "took": took,
-            "timed_out": False,
-            "hits": {
-                "total": {"value": 0, "relation": "eq"},
-                "max_score": None,
-                "hits": [],
-            },
-        }
-        return body  # type: ignore[return-value]
+            return _empty_search_response()  # type: ignore[return-value]
+        result = super().search()
+        # Post-process per hit: parse <mark>…</mark> spans from the
+        # highlight into a `surface_forms` list on `_source`, and read
+        # the matched named queries from the stored percolator query
+        # into a deduped + sorted `percolator_match` list.
+        #
+        # ES surfaces named queries from stored percolator clauses under
+        # `hit.fields._percolator_document_slot_0_matched_queries` —
+        # NOT under `hit.matched_queries` (which is for top-level query
+        # named clauses). The slot is always `0` because we percolate a
+        # single document per request.
+        for hit in result.get("hits", {}).get("hits", []) or []:
+            spans = _extract_surface_forms(hit.pop("highlight", None))
+            fields = hit.pop("fields", None) or {}
+            matched = fields.get("_percolator_document_slot_0_matched_queries") or []
+            source = hit.setdefault("_source", {})
+            source["surface_forms"] = spans
+            source["percolator_match"] = sorted(set(matched))
+        return result
 
 
 class MoreLikeThisQuery(EntitiesQuery):

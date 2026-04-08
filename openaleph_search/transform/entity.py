@@ -28,6 +28,7 @@ from openaleph_search.transform.util import (
     get_geopoints,
     index_name_keys,
     index_name_parts,
+    make_percolator_query,
     phonetic_names,
 )
 from openaleph_search.util import valid_dataset
@@ -129,6 +130,17 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
 
     # length normalization
     data[Field.NUM_VALUES] = sum([len(v) for v in data["properties"].values()])
+
+    # Stored percolator query — only for entities in the things bucket
+    # (Person, Company, Organization, …). Documents/Pages/Intervals never
+    # get one. Entities whose name list is empty after cleaning get no
+    # `query` field at all so they stay out of the percolator candidate
+    # set. Globally gated by the `percolation` setting.
+    if settings.percolation and schema_bucket(data["schema"]) == "things":
+        identifiers = list(entity.get_type_values(registry.identifier))
+        percolator_query = make_percolator_query(names, identifiers=identifiers)
+        if percolator_query is not None:
+            data[Field.QUERY] = percolator_query
 
     # integer casting
     numeric = {}
