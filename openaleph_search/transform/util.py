@@ -141,9 +141,22 @@ def make_percolator_query(
 ) -> dict[str, Any] | None:
     """Build a stored percolator query from name + identifier signals.
 
-    Names use `match_phrase` with `slop: 2` (forgiving on minor word-order
-    or inserted middle initials). Identifiers use `match_phrase` with
-    `slop: 0` — they must appear exactly as stored, no slop tolerated.
+    Names use `match_phrase` with `slop: 2` — tolerant of inserted
+    middle initials (`"Jane Doe"` matches `"Jane A. Doe"`), reversed
+    last-name-first variants (`"Doe, Jane"`), and small token gaps.
+    Performance is essentially the same as `slop: 1`; both fall off
+    the `index_phrases` shingle fast path that `slop: 0` uses, and the
+    slop value only affects a constant-time budget check at match time.
+    Identifiers use `match_phrase` with `slop: 0` — they must appear
+    exactly as stored, no slop tolerated.
+
+    All cleaned name and identifier values become clauses — there is
+    no cap. OpenSanctions-style entities with many language variants
+    or aliases produce many clauses per stored query, which favours
+    recall (every variant a document might use is matchable). The
+    downstream app or user is responsible for disambiguating among
+    matched entities, e.g. via `entity.topics`, `entity.position`, or
+    similar entity-level signals.
 
     Each clause is tagged with `_name` ("name" or "identifier") so the
     percolate response can surface which clause(s) fired per hit via

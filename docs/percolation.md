@@ -29,8 +29,12 @@ There is **no separate percolator index**. The `query` field of ES type
 
 Two signal types live in the same stored query:
 
-- **Names** are matched with `slop: 2` — forgiving on minor word-order
-  changes or inserted middle initials (`"Jane Doe"` matches `"Jane A. Doe"`).
+- **Names** are matched with `slop: 2` — tolerant of inserted middle
+  initials (`"Jane Doe"` matches `"Jane A. Doe"`), reversed
+  last-name-first variants (`"Doe, Jane"`), and small token gaps.
+  Performance is essentially the same as `slop: 1`; both fall off the
+  `index_phrases` shingle fast path that `slop: 0` uses, so once you're
+  paying the slop cost the value itself is free.
 - **Identifiers** (the `registry.identifier` group: IMO numbers, VATs,
   registration numbers, passport numbers, etc.) are matched with `slop: 0`
   — they must appear exactly as stored. Identifiers should never tolerate
@@ -48,10 +52,22 @@ bucket with three extra ingredients:
 2. The whole inner query is wrapped in `constant_score.filter` — ES skips
    relevance scoring entirely. All hits get the same `_score`. Downstream
    apps decide their own weighting from the named-query signal types.
-3. An always-on highlight on the `content` field, so each hit comes back
-   with the actual `<mark>…</mark>` spans the document used for that
-   match. These are parsed into a `surface_forms` list on the hit's
-   `_source` so callers don't have to deal with raw highlight HTML.
+3. An **opt-in** highlight on the `content` field, gated on the standard
+   `highlight=true` parser arg (same as every other query in this
+   codebase). When enabled, the format mirrors `EntitiesQuery`
+   highlights — a `highlight.content` list of fragment snippets with
+   `<em>…</em>` markup. `parser.highlight_count` controls the fragment
+   count (default 3). The whole `highlight` block stays on each hit,
+   *and* the marked phrases are also parsed into a `surface_forms` list
+   on `_source` as a convenience for callers that only need the matched
+   strings without surrounding context.
+
+When `highlight=true` is **not** set (the default), ES skips the
+highlighter entirely. The hit has no `highlight` block, and
+`_source.surface_forms` is empty for every hit. `_source.percolator_match`
+is independent of highlights and continues to populate correctly in
+both modes — it comes from `hit.fields._percolator_document_slot_0_matched_queries`,
+not from the highlight.
 
 ## Signal cleaning
 
@@ -83,17 +99,42 @@ percolatable.
 
 ### CLI
 
+By default, the response is the lean shape — no highlight block, no
+surface forms — just matched entities and their `percolator_match`
+signal-type tags:
+
 ```bash
 openaleph-search percolate -i document.txt
 ```
 
-The response shape mirrors a regular entity search response (`hits.hits[]`
-of unpacked entities). Each hit carries two extra fields on its `_source`:
+```json
+{
+  "_id": "vessel-12345",
+  "_index": "openaleph-entity-things-v1",
+  "_score": 1.0,
+  "_source": {
+    "schema": "Vessel",
+    "caption": "MV Example",
+    "properties": {"name": ["MV Example"], "imoNumber": ["9123456"]},
+    "surface_forms": [],
+    "percolator_match": ["identifier"]
+  }
+}
+```
 
-- `surface_forms` — the actual `<mark>…</mark>` spans the document used
-  for that match (parsed from the highlight, deduped, sorted).
-- `percolator_match` — which signal type(s) fired for this hit, deduped
-  and sorted. One or both of `"name"`, `"identifier"`.
+To get highlight snippets and parsed surface forms, opt in with
+`highlight=true`:
+
+```bash
+openaleph-search percolate -i document.txt --args "highlight=true"
+```
+
+Each hit then carries:
+
+- A standard `highlight.content` block — a list of fragment snippets
+  with `<em>…</em>` markup, same shape as `EntitiesQuery` highlights.
+- A populated `_source.surface_forms` list — the matched phrases
+  parsed out of the highlight, deduped and sorted alphabetically.
 
 ```json
 {
@@ -112,6 +153,11 @@ of unpacked entities). Each hit carries two extra fields on its `_source`:
           "properties": {"name": ["MV Example"], "imoNumber": ["9123456"]},
           "surface_forms": ["9123456"],
           "percolator_match": ["identifier"]
+        },
+        "highlight": {
+          "content": [
+            "The vessel <em>9123456</em> was sighted near the canal."
+          ]
         }
       }
     ]
@@ -129,6 +175,10 @@ All standard query parser arguments apply via `--args`:
 # Scope to a single dataset
 openaleph-search percolate -i leak.txt \
   --args "filter:dataset=peps_watchlist"
+
+# Add highlights + control fragment count
+openaleph-search percolate -i leak.txt \
+  --args "filter:dataset=peps_watchlist&highlight=true&highlight_count=5"
 
 # Combine filters with dehydration to slim the response
 openaleph-search percolate -i leak.txt \
@@ -242,6 +292,72 @@ Mapping snippet:
 }
 ```
 
+## Performance
+
+Percolator latency is dominated by **how many stored queries ES has to
+re-evaluate** for each percolation request. Without filtering, that's
+*every* matchable entity in the things bucket — for an [OpenSanctions](https://www.opensanctions.org/datasets/default/)-
+sized index (~2M entities) that's roughly **1.5–2 seconds per request**
+even with the candidate-selection optimization, because the candidate
+selection narrows the set by less than an order of magnitude on long
+percolated documents.
+
+**Always pair `percolate` with a selective filter.** ES pushes filter
+clauses *down* into the percolate evaluation: the filter is applied
+first, and the percolate clause only runs against the docs that survive
+it. Latency scales linearly with the size of the filtered set.
+
+Real numbers from a 2.1M-entity OpenSanctions index, percolating a
+~700-word German news article:
+
+| Filter | Filtered set size | Candidates per shard | Latency |
+|---|---|---|---|
+| (none) | 2.1M | ~39,000 | **~1800ms** |
+| `filter:topics=role.pep` | 662K | ~70 | **~13ms** |
+| `filter:topics=poi` | 32K | ~5 | **~6ms** |
+| `filter:topics=sanction` | 72K | ~10 | **~10ms** |
+| `filter:dataset=opensanctions` (everything) | 2.1M | ~39,000 | **~1800ms** |
+
+### Recommended filter strategies for common workflows
+
+**Watchlist screening** — pair with the topic that defines your
+watchlist:
+
+```bash
+openaleph-search percolate -i incoming.txt \
+  --args "filter:topics=role.pep&highlight=true"
+```
+
+**Sanctions screening** — same pattern with the sanction topic:
+
+```bash
+openaleph-search percolate -i incoming.txt \
+  --args "filter:topics=sanction&highlight=true"
+```
+
+**Multi-dataset deployments** — when you maintain several distinct
+percolatable datasets, scope to the one you actually want to screen
+against:
+
+```bash
+openaleph-search percolate -i incoming.txt \
+  --args "filter:dataset=peps_watchlist&highlight=true"
+```
+
+**Schema-scoped screening** — restrict to one schema if your workflow
+only cares about people or only about companies:
+
+```bash
+openaleph-search percolate -i incoming.txt \
+  --args "filter:schema=Person&filter:topics=role.pep"
+```
+
+**Multi-scope screening** — if you want to screen against several
+narrow scopes (e.g. PEPs *and* sanctions *and* wanted persons),
+running them as **separate percolate requests in parallel** and
+merging client-side is faster than one unscoped request, because each
+scoped request hits its own pruned candidate set.
+
 ## Limits and trade-offs
 
 ### Recall is bounded by the entity's stored signals
@@ -272,11 +388,12 @@ if it matters.
 ### Memory at percolate time
 
 ES caches parsed percolator queries in heap when percolating. The
-candidate-selection optimization built into the percolator type means
-only stored queries whose terms appear in the percolated document are
-evaluated — so percolating a 1k-word document against millions of
-entities doesn't evaluate millions of queries. It evaluates the few
-thousand whose name terms intersect the document's analyzed text.
+candidate-selection optimization built into the percolator type
+narrows the set of stored queries that get re-evaluated, but on long
+percolated documents the surviving candidate set can still be tens of
+thousands per shard for an index with millions of stored queries —
+enough to dominate latency. See the [Performance](#performance)
+section above for the recommended filter-based mitigation.
 
 ### Things bucket only
 

@@ -12,6 +12,7 @@ from openaleph_search.index.entities import ENTITY_SOURCE, PROXY_INCLUDES
 from openaleph_search.index.indexes import entities_read_index
 from openaleph_search.index.mapping import Field
 from openaleph_search.query.base import Query
+from openaleph_search.query.highlight import get_highlighter
 from openaleph_search.query.matching import match_query
 from openaleph_search.query.more_like_this import more_like_this_query
 from openaleph_search.query.util import field_filter_query
@@ -282,18 +283,24 @@ class MatchQuery(EntitiesQuery):
         return query
 
 
-_PERCOLATOR_MARK_RE = re.compile(r"<mark>(.*?)</mark>", re.DOTALL)
+_PERCOLATOR_EM_RE = re.compile(r"<em>(.*?)</em>", re.DOTALL)
 
 
 def _extract_surface_forms(highlight: dict[str, list[str]] | None) -> list[str]:
-    """Pull <mark>…</mark> spans from a hit's highlight block, deduped."""
+    """Pull <em>…</em> spans from a hit's highlight block, deduped.
+
+    The unified highlighter wraps each whole matched phrase in a single
+    `<em>…</em>` tag (e.g. `<em>Banana ba Nana</em>`), so each match is
+    a complete surface form. Result list is deduped and sorted
+    alphabetically.
+    """
     if not highlight:
         return []
     return sorted(
         {
             match
             for fragment in highlight.get(Field.CONTENT, [])
-            for match in _PERCOLATOR_MARK_RE.findall(fragment)
+            for match in _PERCOLATOR_EM_RE.findall(fragment)
         }
     )
 
@@ -361,13 +368,47 @@ class PercolatorQuery(EntitiesQuery):
         }
 
     def get_highlight(self) -> dict[str, Any]:
-        # Always-on highlight for surface form extraction, regardless of
-        # parser.highlight. `number_of_fragments=0` returns the whole
-        # content with every <mark>…</mark> span in place.
+        """Highlight on the percolated content, opt-in via `parser.highlight`.
+
+        Returns an empty dict (ES skips the highlighter entirely) when
+        `highlight=true` is not in the parser args, matching the
+        contract of every other Query subclass. When highlights are
+        off, the derived `_source.surface_forms` list will be empty
+        for every hit; `_source.percolator_match` is independent of
+        highlights and still populates correctly.
+
+        When highlights are on, the format mirrors `EntitiesQuery` —
+        a top-level dict with `encoder` and a `fields` map. The
+        content highlighter is the same unified highlighter
+        `get_highlighter(Field.CONTENT)` returns — same fragment size,
+        same boundary scanner — minus two `EntitiesQuery`-isms that
+        don't apply here:
+
+        - `highlight_query` (set to `{"match_all": {}}` by
+          `get_highlighter` when no text is provided) is dropped so ES
+          uses the matching stored percolator query as the highlight
+          query, which is the percolator default and what we want.
+        - `require_field_match: False` is NOT set. With it, the
+          unified highlighter switches to per-token marking
+          (`<em>Banana</em> <em>ba</em> <em>Nana</em>`); without it,
+          whole phrases are wrapped in a single `<em>…</em>` tag
+          (`<em>Banana ba Nana</em>`). For percolator queries the
+          highlight always targets the same field as the query
+          (`content`), so cross-field matching isn't needed.
+
+        `parser.highlight_count` flows through to control the number
+        of fragments returned (default 3), same as on search-side
+        queries. Default ES tags `<em>…</em>` are used.
+        """
+        if not self.parser.highlight:
+            return {}
+        content_highlighter = get_highlighter(
+            Field.CONTENT, count=self.parser.highlight_count
+        )
+        content_highlighter.pop("highlight_query", None)
         return {
-            "pre_tags": ["<mark>"],
-            "post_tags": ["</mark>"],
-            "fields": {Field.CONTENT: {"number_of_fragments": 0}},
+            "encoder": "html",
+            "fields": {Field.CONTENT: content_highlighter},
         }
 
     def search(self) -> ObjectApiResponse:
@@ -379,18 +420,21 @@ class PercolatorQuery(EntitiesQuery):
             )
             return _empty_search_response()  # type: ignore[return-value]
         result = super().search()
-        # Post-process per hit: parse <mark>…</mark> spans from the
-        # highlight into a `surface_forms` list on `_source`, and read
-        # the matched named queries from the stored percolator query
-        # into a deduped + sorted `percolator_match` list.
+        # Post-process per hit:
         #
-        # ES surfaces named queries from stored percolator clauses under
-        # `hit.fields._percolator_document_slot_0_matched_queries` —
-        # NOT under `hit.matched_queries` (which is for top-level query
-        # named clauses). The slot is always `0` because we percolate a
-        # single document per request.
+        # - The `highlight` block stays on the hit unchanged (same
+        #   shape as EntitiesQuery responses).
+        # - We additionally parse the `<em>…</em>` spans into a
+        #   `surface_forms` convenience list on `_source`.
+        # - The matched named queries from the stored percolator
+        #   clauses go into `_source.percolator_match`. ES surfaces
+        #   them under `hit.fields._percolator_document_slot_0_matched_queries`
+        #   — NOT `hit.matched_queries`, which is for top-level query
+        #   named clauses. The slot is always 0 because we percolate
+        #   a single document per request. The `fields` block is
+        #   dropped after we've extracted what we need.
         for hit in result.get("hits", {}).get("hits", []) or []:
-            spans = _extract_surface_forms(hit.pop("highlight", None))
+            spans = _extract_surface_forms(hit.get("highlight"))
             fields = hit.pop("fields", None) or {}
             matched = fields.get("_percolator_document_slot_0_matched_queries") or []
             source = hit.setdefault("_source", {})

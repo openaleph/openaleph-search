@@ -37,7 +37,8 @@ def test_percolator_query_finds_entity(index_entities):
         "An investigation into KwaZulu revealed that "
         "Banana ba Nana was involved in the affair."
     )
-    result = _percolate(text)
+    # Highlights are opt-in, same as every other Query subclass.
+    result = _percolate(text, args=[("highlight", "true")])
 
     hits = result["hits"]["hits"]
     by_id = {h["_id"]: h for h in hits}
@@ -79,7 +80,7 @@ def test_percolator_query_dataset_filter(index_entities):
 def test_percolator_query_dehydrate(index_entities):
     """parser.dehydrate strips properties but keeps surface_forms."""
     text = "An investigation into KwaZulu was launched."
-    result = _percolate(text, args=[("dehydrate", "true")])
+    result = _percolate(text, args=[("dehydrate", "true"), ("highlight", "true")])
 
     hits = result["hits"]["hits"]
     assert len(hits) >= 1
@@ -154,7 +155,10 @@ def test_percolator_query_matches_identifier(cleanup_after):
     )
     index_bulk("test_vessels", [vessel], sync=True)
 
-    result = _percolate("The vessel 9123456 was sighted near the canal.")
+    result = _percolate(
+        "The vessel 9123456 was sighted near the canal.",
+        args=[("highlight", "true")],
+    )
 
     hits = result["hits"]["hits"]
     by_id = {h["_id"]: h for h in hits}
@@ -198,7 +202,10 @@ def test_percolator_query_match_signals_combined(cleanup_after):
     )
     index_bulk("test_vessels_combined", [vessel], sync=True)
 
-    result = _percolate("The vessel MV Example Two (IMO 9876543) cleared customs.")
+    result = _percolate(
+        "The vessel MV Example Two (IMO 9876543) cleared customs.",
+        args=[("highlight", "true")],
+    )
 
     hits = result["hits"]["hits"]
     by_id = {h["_id"]: h for h in hits}
@@ -237,6 +244,89 @@ def test_percolator_query_identifier_no_slop(cleanup_after):
     result = _percolate("Filed in DE under HRB category as serial 12345 reference.")
     ids = {h["_id"] for h in result["hits"]["hits"]}
     assert "de-company" not in ids
+
+
+def test_percolator_query_highlight_snippets(cleanup_after):
+    """Each hit carries an EntitiesQuery-format highlight block.
+
+    The percolator highlight uses the same shape as `EntitiesQuery`
+    highlights — a `highlight.content` list of fragment snippets with
+    `<em>…</em>` markup, driven by `get_highlighter(Field.CONTENT)`.
+    The marked spans inside the snippets agree with `_source.surface_forms`.
+    """
+    vessel = make_entity(
+        {
+            "id": "vessel-snippets",
+            "schema": "Vessel",
+            "properties": {
+                "name": ["MV Snippet Tester"],
+                "imoNumber": ["7654321"],
+            },
+        }
+    )
+    index_bulk("test_snippets", [vessel], sync=True)
+
+    result = _percolate(
+        "Inspectors confirmed that the MV Snippet Tester (IMO 7654321) "
+        "had cleared customs without incident.",
+        args=[("highlight", "true")],
+    )
+
+    hits = result["hits"]["hits"]
+    by_id = {h["_id"]: h for h in hits}
+    assert "vessel-snippets" in by_id
+    hit = by_id["vessel-snippets"]
+
+    # Highlight stays on the hit (not popped)
+    assert "highlight" in hit
+    snippets = hit["highlight"].get("content")
+    assert snippets, f"expected highlight.content list, got {hit['highlight']!r}"
+    assert isinstance(snippets, list)
+    # At least one snippet contains <em>…</em> markup
+    assert any("<em>" in s and "</em>" in s for s in snippets)
+
+    # Every span surfaced under surface_forms is a phrase that appears
+    # in at least one snippet (with markup stripped, the span text
+    # should be present somewhere in the snippet text).
+    surface_forms = hit["_source"]["surface_forms"]
+    assert surface_forms  # non-empty
+    flat_text = " ".join(snippets)
+    flat_text = flat_text.replace("<em>", "").replace("</em>", "")
+    for span in surface_forms:
+        assert span in flat_text, f"surface form {span!r} not in {flat_text!r}"
+
+
+def test_percolator_query_highlight_off_by_default(cleanup_after):
+    """Highlights are opt-in. Without `highlight=true`, the highlight
+    block is not present on hits and `_source.surface_forms` is empty,
+    but `_source.percolator_match` still populates correctly.
+    """
+    vessel = make_entity(
+        {
+            "id": "vessel-no-hl",
+            "schema": "Vessel",
+            "properties": {
+                "name": ["MV Quiet Tester"],
+                "imoNumber": ["1112223"],
+            },
+        }
+    )
+    index_bulk("test_no_highlight", [vessel], sync=True)
+
+    # Default args — no highlight=true
+    result = _percolate("The vessel 1112223 was sighted near the canal.")
+
+    hits = result["hits"]["hits"]
+    by_id = {h["_id"]: h for h in hits}
+    assert "vessel-no-hl" in by_id
+
+    hit = by_id["vessel-no-hl"]
+    # The highlight block is absent (ES skipped the highlighter entirely)
+    assert "highlight" not in hit
+    # surface_forms is empty without highlights
+    assert hit["_source"]["surface_forms"] == []
+    # percolator_match is independent of highlights and still works
+    assert hit["_source"]["percolator_match"] == ["identifier"]
 
 
 def test_percolator_query_constant_score(cleanup_after):
