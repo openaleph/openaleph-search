@@ -183,19 +183,19 @@ def cli_delete(
         smart_write("-", data)
 
 
-@cli.command("percolate")
-def cli_percolate(
+@cli.command("percolate-text")
+def cli_percolate_text(
     input_uri: str = OPT_INPUT_URI,
     output_uri: str = OPT_OUTPUT_URI,
     args: OPT_SEARCH_ARGS = None,
 ):
-    """Find entities mentioned in the input text.
+    """Find entities mentioned in arbitrary input text.
 
     Each entity in the things bucket carries a stored percolator query
-    built from its name variants at index time. This command percolates
-    the input text against the things bucket and returns the matching
-    entities, with surface forms (the actual matched spans) injected
-    into each hit's `_source`.
+    built from its name variants at index time. This command reads text
+    from `--input-uri` (default: stdin) and percolates it against the
+    things bucket, returning the matching entities with surface forms
+    (the actual matched spans) injected into each hit's `_source`.
 
     All standard query parser args apply via `--args`, e.g.:
 
@@ -205,6 +205,34 @@ def cli_percolate(
         text = smart_read(input_uri, mode="r")
         parser = make_parser(args=args)
         query = PercolatorQuery(parser, text=text)
+        result = query.search()
+        data = dump_json(dict(result), clean=True, newline=True)
+        smart_write(output_uri, data)
+
+
+@cli.command("percolate-entity")
+def cli_percolate_entity(
+    entity_id: Annotated[
+        str,
+        typer.Argument(help="ID of an indexed Document or Pages entity."),
+    ],
+    output_uri: str = OPT_OUTPUT_URI,
+    args: OPT_SEARCH_ARGS = None,
+):
+    """Find entities mentioned in an already-indexed Document or Pages entity.
+
+    Resolves the entity's fulltext from the index — `bodyText` from
+    `_source` for Document descendants, or `content` from `stored_fields`
+    for Pages — and percolates it against the things bucket. Page
+    entities and non-document entities are rejected with a clear error.
+
+    All standard query parser args apply via `--args`, e.g.:
+
+      --args "filter:dataset=peps_watchlist&highlight=true&limit=50"
+    """
+    with ErrorHandler(log):
+        parser = make_parser(args=args)
+        query = PercolatorQuery(parser, entity_id=entity_id)
         result = query.search()
         data = dump_json(dict(result), clean=True, newline=True)
         smart_write(output_uri, data)

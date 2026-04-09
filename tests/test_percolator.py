@@ -19,6 +19,7 @@ Available test entities (from `tests/conftest.py`):
 
 from unittest import mock
 
+import pytest
 from ftmq.util import make_entity
 
 from openaleph_search.index.entities import index_bulk
@@ -363,3 +364,159 @@ def test_percolator_query_constant_score(cleanup_after):
     # Constant_score wrap means every hit shares the same score, even
     # though the company also fired its identifier clause.
     assert scores["scoring-person"] == scores["scoring-company"]
+
+
+# ---------------------------------------------------------------------------
+# entity_id input mode — percolate against fulltext that is already indexed.
+#
+# Document descendants carry their text in `properties.bodyText` (in `_source`),
+# while `Pages` entities have an empty `bodyText` and the aggregated text in
+# `Field.CONTENT` (stored via `store: true` in the pages bucket only). The
+# helper resolves both transparently. `Page` entities (which do NOT inherit
+# from `Document` in FtM) and any non-document entities are rejected.
+# ---------------------------------------------------------------------------
+
+
+def test_percolator_query_by_document_entity_id(cleanup_after):
+    """Percolating by id resolves bodyText from _source for Document entities."""
+    target = make_entity(
+        {
+            "id": "doc-target-vessel",
+            "schema": "Vessel",
+            "properties": {
+                "name": ["MV Indexed Document"],
+                "imoNumber": ["1230098"],
+            },
+        }
+    )
+    document = make_entity(
+        {
+            "id": "doc-source-1",
+            "schema": "PlainText",
+            "properties": {
+                "bodyText": [
+                    "Inspectors confirmed that the MV Indexed Document "
+                    "(IMO 1230098) had cleared customs without incident."
+                ],
+                "fileName": ["report.txt"],
+            },
+        }
+    )
+    index_bulk("test_doc_entity_id", [target, document], sync=True)
+
+    parser = SearchQueryParser([("highlight", "true")])
+    result = PercolatorQuery(parser, entity_id="doc-source-1").search()
+
+    hits = result["hits"]["hits"]
+    by_id = {h["_id"]: h for h in hits}
+    assert "doc-target-vessel" in by_id, f"target missing from {list(by_id)}"
+
+    hit = by_id["doc-target-vessel"]
+    surface_forms = set(hit["_source"]["surface_forms"])
+    assert "MV Indexed Document" in surface_forms
+    assert "1230098" in surface_forms
+    assert hit["_source"]["percolator_match"] == ["identifier", "name"]
+
+
+def test_percolator_query_by_pages_entity_id(cleanup_after):
+    """Percolating by id resolves stored Field.CONTENT for Pages entities.
+
+    `Pages.indexText` is the magic property the transform pops and routes
+    into `Field.CONTENT`, which the pages bucket persists with
+    `store: true`. The helper retrieves it via `stored_fields`.
+    """
+    target = make_entity(
+        {
+            "id": "pages-target-vessel",
+            "schema": "Vessel",
+            "properties": {
+                "name": ["MV Pages Aggregator"],
+                "imoNumber": ["7779991"],
+            },
+        }
+    )
+    pages = make_entity(
+        {
+            "id": "pages-source-1",
+            "schema": "Pages",
+            "properties": {
+                "indexText": [
+                    "The MV Pages Aggregator (IMO 7779991) was sighted "
+                    "at the harbor on the morning of the inspection."
+                ],
+                "fileName": ["report.pdf"],
+                "mimeType": ["application/pdf"],
+            },
+        }
+    )
+    index_bulk("test_pages_entity_id", [target, pages], sync=True)
+
+    parser = SearchQueryParser([("highlight", "true")])
+    result = PercolatorQuery(parser, entity_id="pages-source-1").search()
+
+    hits = result["hits"]["hits"]
+    by_id = {h["_id"]: h for h in hits}
+    assert "pages-target-vessel" in by_id, f"target missing from {list(by_id)}"
+
+    hit = by_id["pages-target-vessel"]
+    surface_forms = set(hit["_source"]["surface_forms"])
+    assert "MV Pages Aggregator" in surface_forms
+    assert "7779991" in surface_forms
+
+
+def test_percolator_query_entity_id_rejects_page(cleanup_after):
+    """Page entities are not Document descendants and are rejected.
+
+    Page lives in its own bucket and is not part of `entities_read_index(
+    schema="Document")`, so the helper returns `None` and the constructor
+    raises `ValueError`.
+    """
+    page = make_entity(
+        {
+            "id": "page-source-1",
+            "schema": "Page",
+            "properties": {
+                "index": ["1"],
+                "bodyText": [
+                    "Some page-level body text that should never be percolated."
+                ],
+            },
+        }
+    )
+    index_bulk("test_page_reject", [page], sync=True)
+
+    parser = SearchQueryParser([])
+    with pytest.raises(ValueError, match="No percolatable fulltext"):
+        PercolatorQuery(parser, entity_id="page-source-1")
+
+
+def test_percolator_query_entity_id_rejects_thing(cleanup_after):
+    """Person/Company/Vessel etc. live in things bucket — no fulltext."""
+    person = make_entity(
+        {
+            "id": "thing-reject",
+            "schema": "Person",
+            "properties": {"name": ["John Doe Rejecter"]},
+        }
+    )
+    index_bulk("test_thing_reject", [person], sync=True)
+
+    parser = SearchQueryParser([])
+    with pytest.raises(ValueError, match="No percolatable fulltext"):
+        PercolatorQuery(parser, entity_id="thing-reject")
+
+
+def test_percolator_query_entity_id_not_found():
+    """Unknown entity id raises ValueError."""
+    parser = SearchQueryParser([])
+    with pytest.raises(ValueError, match="No percolatable fulltext"):
+        PercolatorQuery(parser, entity_id="this-id-does-not-exist")
+
+
+def test_percolator_query_text_and_entity_id_mutually_exclusive():
+    """Exactly one of text/entity_id must be provided."""
+    parser = SearchQueryParser([])
+    with pytest.raises(ValueError, match="exactly one"):
+        PercolatorQuery(parser, text="hello", entity_id="some-id")
+    with pytest.raises(ValueError, match="exactly one"):
+        PercolatorQuery(parser)

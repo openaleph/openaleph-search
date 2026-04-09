@@ -341,8 +341,31 @@ class PercolatorQuery(EntitiesQuery):
     # also the only bucket that has the `query` percolator field.
     _SCHEMA = "LegalEntity"
 
-    def __init__(self, parser, text: str):
+    def __init__(
+        self,
+        parser,
+        text: str | None = None,
+        entity_id: str | None = None,
+    ):
+        if (text is None) == (entity_id is None):
+            raise ValueError(
+                "PercolatorQuery requires exactly one of `text` or `entity_id`"
+            )
+        if entity_id is not None:
+            # Local import to avoid circular dependency: index/entities.py
+            # transitively imports from query/base.py via Query.
+            from openaleph_search.index.entities import get_entity_content
+
+            content = get_entity_content(entity_id)
+            if not content:
+                raise ValueError(
+                    f"No percolatable fulltext for entity {entity_id!r}. "
+                    f"Only Document descendants (incl. Pages) carry indexable "
+                    f"text; Page entities and non-document entities are excluded."
+                )
+            text = content
         self.text = text
+        self.entity_id = entity_id
         super().__init__(parser)
 
     def get_index(self) -> str:
