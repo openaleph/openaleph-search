@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Iterable
+from typing import Any, Iterable, NamedTuple
 
 from banal import ensure_list
 from elasticsearch.helpers import scan
@@ -274,6 +274,42 @@ def get_entity(entity_id, **kwargs):
     """Fetch an entity from the index."""
     for entity in entities_by_ids(entity_id, cached=False, **kwargs):
         return entity
+
+
+class EntityVersion(NamedTuple):
+    """ES versioning pair for an indexed entity.
+
+    `seq_no` and `primary_term` together uniquely identify a write to a
+    document and change on every update — useful as an ETag / cache
+    invalidation key, and what ES wants for optimistic concurrency on
+    `if_seq_no` / `if_primary_term` updates.
+    """
+
+    seq_no: int
+    primary_term: int
+
+
+def get_entity_version(entity_id: str) -> EntityVersion | None:
+    """Fetch the (seq_no, primary_term) version pair of an entity by id.
+
+    Returns `None` if the entity is not found. Searches across all entity
+    indexes via the `ids` query — same lookup pattern as `get_entity`,
+    since the caller doesn't need to know which bucket the entity lives in
+    (entity ids are cluster-unique and used as the ES `_id`).
+    """
+    es = get_es()
+    body = {
+        "query": {"ids": {"values": [entity_id]}},
+        "_source": False,
+        "seq_no_primary_term": True,
+        "size": 1,
+    }
+    result = es.search(index=entities_read_index(), body=body)
+    hits = result.get("hits", {}).get("hits", [])
+    if not hits:
+        return None
+    hit = hits[0]
+    return EntityVersion(seq_no=hit["_seq_no"], primary_term=hit["_primary_term"])
 
 
 def index_proxy(dataset: str, proxy: EntityProxy, sync=False, **kwargs):
