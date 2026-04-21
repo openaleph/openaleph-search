@@ -919,3 +919,187 @@ def test_annotated_cyrillic_no_false_positives(index_annotated_cyrillic_docs):
     """Plain Cyrillic doc without annotations doesn't match annotation queries."""
     ids = _annotated_ids("__PER__")
     assert "ann-cyr-3" not in ids
+
+
+# ── Search-time synonym tests ────────────────────────────────────────
+
+
+@pytest.fixture(scope="module")
+def index_synonym_entities():
+    """Index persons with different name spelling variants for synonym testing."""
+    entities = [
+        {
+            "id": "syn-wladimir",
+            "schema": "Person",
+            "properties": {"name": ["Wladimir Igumnow"]},
+        },
+        {
+            "id": "syn-vladimir",
+            "schema": "Person",
+            "properties": {"name": ["Vladimir Igumnov"]},
+        },
+        {
+            "id": "syn-volodymyr",
+            "schema": "Person",
+            "properties": {"name": ["Volodymyr Shkuro"]},
+        },
+        {
+            "id": "syn-unrelated",
+            "schema": "Person",
+            "properties": {"name": ["John Smith"]},
+        },
+    ]
+    index_bulk("test_synonyms", map(make_entity, entities), sync=True)
+    yield
+
+
+def _synonym_search(q, synonyms=False):
+    url = f"/search?q={q}&filter:dataset=test_synonyms"
+    if synonyms:
+        url += "&synonyms=true"
+    query = _create_query(url)
+    return query.search()
+
+
+def _synonym_ids(q, synonyms=False):
+    res = _synonym_search(q, synonyms=synonyms)
+    return {h["_id"] for h in res["hits"]["hits"]}
+
+
+def test_synonyms_off_exact_match_only(index_synonym_entities):
+    """Without synonyms, only exact spelling matches."""
+    ids = _synonym_ids("Wladimir")
+    assert "syn-wladimir" in ids
+    assert "syn-vladimir" not in ids
+
+
+def test_synonyms_on_expands_name_variants(index_synonym_entities):
+    """With synonyms, 'Vladimir' also matches 'Wladimir' and vice versa."""
+    ids = _synonym_ids("Vladimir", synonyms=True)
+    assert "syn-wladimir" in ids
+    assert "syn-vladimir" in ids
+
+
+def test_synonyms_on_both_directions(index_synonym_entities):
+    """Synonym expansion works in both directions."""
+    ids = _synonym_ids("Wladimir", synonyms=True)
+    assert "syn-wladimir" in ids
+    assert "syn-vladimir" in ids
+
+
+def test_synonyms_on_combined_name(index_synonym_entities):
+    """Full name query with synonyms matches across spelling variants."""
+    # "Vladimir Igumnov" should match "Wladimir Igumnow"
+    ids = _synonym_ids("Vladimir Igumnov", synonyms=True)
+    assert "syn-wladimir" in ids
+    assert "syn-vladimir" in ids
+    assert "syn-unrelated" not in ids
+
+
+def test_synonyms_off_combined_name_no_cross_match(index_synonym_entities):
+    """Without synonyms, 'Vladimir Igumnov' does NOT match 'Wladimir Igumnow'."""
+    ids = _synonym_ids("Vladimir Igumnov")
+    assert "syn-vladimir" in ids
+    assert "syn-wladimir" not in ids
+
+
+def test_synonyms_no_false_positives(index_synonym_entities):
+    """Synonyms don't cause unrelated entities to match."""
+    ids = _synonym_ids("Vladimir", synonyms=True)
+    assert "syn-unrelated" not in ids
+    assert "syn-volodymyr" not in ids  # Volodymyr is a different name
+
+
+def test_synonyms_different_synonym_group(index_synonym_entities):
+    """shkuro/schkuro/škuro are a separate synonym group."""
+    ids = _synonym_ids("schkuro", synonyms=True)
+    assert "syn-volodymyr" in ids  # indexed as "Shkuro"
+    assert "syn-wladimir" not in ids
+
+
+# ── Fulltext synonym tests (content/text fields, no keyword expansion) ──
+
+
+@pytest.fixture(scope="module")
+def index_synonym_docs():
+    """Index documents with name variants in body text for fulltext synonym testing."""
+    docs = [
+        {
+            "id": "syn-doc-wladimir",
+            "schema": "PlainText",
+            "properties": {
+                "bodyText": ["Report on Wladimir Igumnow and his business dealings"],
+            },
+        },
+        {
+            "id": "syn-doc-vladimir",
+            "schema": "PlainText",
+            "properties": {
+                "bodyText": ["Vladimir Igumnov testified before the committee"],
+            },
+        },
+        {
+            "id": "syn-doc-cyrillic",
+            "schema": "PlainText",
+            "properties": {
+                "bodyText": ["Доклад про Владимир и его компанию"],
+            },
+        },
+        {
+            "id": "syn-doc-unrelated",
+            "schema": "PlainText",
+            "properties": {
+                "bodyText": ["Unrelated document about cooking recipes"],
+            },
+        },
+    ]
+    index_bulk("test_syn_docs", map(make_entity, docs), sync=True)
+    yield
+
+
+def _syndoc_search(q, synonyms=False):
+    url = f"/search?q={q}&filter:dataset=test_syn_docs&filter:schema=PlainText"
+    if synonyms:
+        url += "&synonyms=true"
+    query = _create_query(url)
+    return query.search()
+
+
+def _syndoc_ids(q, synonyms=False):
+    res = _syndoc_search(q, synonyms=synonyms)
+    return {h["_id"] for h in res["hits"]["hits"]}
+
+
+def test_synonyms_fulltext_off(index_synonym_docs):
+    """Without synonyms, only exact name in body text matches."""
+    ids = _syndoc_ids("Wladimir")
+    assert "syn-doc-wladimir" in ids
+    assert "syn-doc-vladimir" not in ids
+
+
+def test_synonyms_fulltext_on(index_synonym_docs):
+    """With synonyms, 'Vladimir' in query matches 'Wladimir' in body text."""
+    ids = _syndoc_ids("Vladimir", synonyms=True)
+    assert "syn-doc-wladimir" in ids
+    assert "syn-doc-vladimir" in ids
+    assert "syn-doc-unrelated" not in ids
+
+
+def test_synonyms_fulltext_cyrillic(index_synonym_docs):
+    """Cyrillic synonym: 'Vladimir' matches Cyrillic 'Владимира' in body text."""
+    ids = _syndoc_ids("Vladimir", synonyms=True)
+    assert "syn-doc-cyrillic" in ids
+
+
+def test_synonyms_fulltext_combined(index_synonym_docs):
+    """Full name with synonyms matches across spelling variants in body text."""
+    ids = _syndoc_ids("Vladimir Igumnov", synonyms=True)
+    assert "syn-doc-wladimir" in ids
+    assert "syn-doc-vladimir" in ids
+    assert "syn-doc-unrelated" not in ids
+
+
+def test_synonyms_fulltext_no_false_positives(index_synonym_docs):
+    """Unrelated documents don't match synonym-expanded queries."""
+    ids = _syndoc_ids("Vladimir", synonyms=True)
+    assert "syn-doc-unrelated" not in ids

@@ -22,6 +22,7 @@ PROP_TRANSLATED = "translatedText"
 DEFAULT_ANALYZER = "default"
 DEFAULT_NORMALIZER = "default"
 ICU_ANALYZER = "icu-default"
+ICU_SEARCH_ANALYZER = "icu-search-synonyms"
 ICU_NORMALIZER = "icu-default"
 HTML_ANALYZER = "strip-html"
 KW_NORMALIZER = "kw-normalizer"
@@ -50,6 +51,11 @@ ANALYZE_SETTINGS = {
                 "preserve_original": False,
                 "patterns": ["([^\u200d]+)"],
             },
+            "person_name_synonyms": {
+                "type": "synonym_graph",
+                "synonyms_path": "person_name_synonyms.txt",
+                "updateable": True,
+            },
         },
         "normalizer": {
             ICU_NORMALIZER: {
@@ -73,6 +79,15 @@ ANALYZE_SETTINGS = {
                 "filter": [
                     "ann_capture",
                     "lowercase",
+                    "icu_folding",
+                ],
+            },
+            ICU_SEARCH_ANALYZER: {
+                "char_filter": ["html_strip"],
+                "tokenizer": "standard",
+                "filter": [
+                    "lowercase",
+                    "person_name_synonyms",
                     "icu_folding",
                 ],
             },

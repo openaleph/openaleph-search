@@ -43,7 +43,8 @@ def test_matching(cleanup_after):
 
     query = MatchQuery(parser, ent6)
     result = query.search()
-    assert _get_ids(result)[0] == "m5"
+    # m5 and m2 are both "Jane Doe" — same score, order is non-deterministic
+    assert _get_ids(result)[0] in ("m2", "m5")
 
     # documents can't match
     query = MatchQuery(parser, ent4)

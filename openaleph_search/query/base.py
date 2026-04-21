@@ -9,6 +9,7 @@ from followthemoney.types import registry
 from openaleph_search.core import get_es
 from openaleph_search.index.mapping import (
     DATE_FORMAT,
+    ICU_SEARCH_ANALYZER,
     NUMERIC_TYPES,
     Field,
     get_field_type,
@@ -53,16 +54,17 @@ class Query:
 
     def get_query_string(self) -> dict[str, Any] | None:
         if self.parser.text:
-            return {
-                "query_string": {
-                    "query": self.parser.text,
-                    "lenient": True,
-                    "fields": self.TEXT_FIELDS,
-                    "default_operator": "AND",
-                    "minimum_should_match": "66%",
-                    "allow_leading_wildcard": settings.allow_leading_wildcard,
-                }
+            qs: dict[str, Any] = {
+                "query": self.parser.text,
+                "lenient": True,
+                "fields": self.TEXT_FIELDS,
+                "default_operator": "AND",
+                "minimum_should_match": "66%",
+                "allow_leading_wildcard": settings.allow_leading_wildcard,
             }
+            if self.parser.synonyms:
+                qs["analyzer"] = ICU_SEARCH_ANALYZER
+            return {"query_string": qs}
 
     def get_text_query(self) -> list[dict[str, Any]]:
         query = []
@@ -378,16 +380,20 @@ class Query:
         if not self.parser.highlight:  # or self.is_empty_query:
             return {}
         text = self.parser.text
+        # Pass synonym analyzer to highlight queries when synonyms are enabled
+        hl_analyzer = ICU_SEARCH_ANALYZER if self.parser.synonyms else None
         fields = {
             self.HIGHLIGHT_FIELD: get_highlighter(
-                self.HIGHLIGHT_FIELD, text, self.parser.highlight_count
+                self.HIGHLIGHT_FIELD, text, self.parser.highlight_count, hl_analyzer
             ),
             Field.NAMES: get_highlighter(Field.NAMES),
         }
         if settings.highlighter_text_field and Field.TEXT not in fields:
-            fields[Field.TEXT] = get_highlighter(Field.TEXT, text)
+            fields[Field.TEXT] = get_highlighter(Field.TEXT, text, analyzer=hl_analyzer)
         if settings.highlighter_translation_field:
-            fields[Field.TRANSLATION] = get_highlighter(Field.TRANSLATION, text)
+            fields[Field.TRANSLATION] = get_highlighter(
+                Field.TRANSLATION, text, analyzer=hl_analyzer
+            )
         # Add filter value highlights to the main highlight field only.
         # Only highlight filter values that are human-readable text.
         # Skip short-code groups (countries, languages, etc.) to avoid

@@ -37,6 +37,14 @@ documentation:
 	mkdocs build
 	aws --profile nbg1 --endpoint-url https://s3.investigativedata.org s3 sync ./site s3://openaleph.org/docs/lib/openaleph-search
 
+SYNONYMS_URL=https://raw.githubusercontent.com/opensanctions/rigour/refs/heads/main/rust/data/names/person_names.txt
+SYNONYMS_FILE=contrib/person_name_synonyms.txt
+
+synonyms:
+	@mkdir -p contrib
+	curl -s "$(SYNONYMS_URL)" | sed 's/ => .*//' > $(SYNONYMS_FILE)
+	@echo "Compiled $$(wc -l < $(SYNONYMS_FILE)) synonym rules to $(SYNONYMS_FILE)"
+
 elastic-build:
 	docker build -t ghcr.io/openaleph/elasticsearch:$(ELASTIC_TAG) .
 

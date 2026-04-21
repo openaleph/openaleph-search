@@ -264,3 +264,35 @@ def test_highlighting_annotated_proximity(cleanup_after):
     assert "highlight" in hit
     highlight_text = " ".join(v for values in hit["highlight"].values() for v in values)
     assert "<em>crime</em>" in highlight_text.lower()
+
+
+def test_highlighting_synonym_match(cleanup_after):
+    """When synonyms expand 'Vladimir' to match 'Wladimir' in document text,
+    the highlight shows the actual indexed text ('Wladimir')."""
+    entity = make_entity(
+        {
+            "id": "syn-hl-1",
+            "schema": "PlainText",
+            "properties": {
+                "bodyText": ["Report on Wladimir Igumnow and associates"],
+            },
+        }
+    )
+    index_bulk("test_syn_highlight", [entity], sync=True)
+
+    args = [
+        ("q", "Vladimir Igumnov"),
+        ("synonyms", "true"),
+        ("highlight", "true"),
+        ("filter:dataset", "test_syn_highlight"),
+    ]
+    query = EntitiesQuery(SearchQueryParser(args, None))
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] == 1
+    hit = result["hits"]["hits"][0]
+    assert "highlight" in hit
+    highlight_text = " ".join(v for values in hit["highlight"].values() for v in values)
+    # The actual indexed text "Wladimir" should be highlighted,
+    # not the query term "Vladimir"
+    assert "<em>Wladimir</em>" in highlight_text

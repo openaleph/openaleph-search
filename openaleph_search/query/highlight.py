@@ -6,24 +6,30 @@ from openaleph_search.settings import Settings
 settings = Settings()
 
 
-def make_field_highlight_query(text: str, fields: str | list[str]) -> dict[str, Any]:
+def make_field_highlight_query(
+    text: str, fields: str | list[str], analyzer: str | None = None
+) -> dict[str, Any]:
     """Build a query_string scoped to specific field(s) for highlighting."""
     if isinstance(fields, str):
         fields = [fields]
-    return {
-        "query_string": {
-            "query": text,
-            "lenient": True,
-            "fields": fields,
-            "default_operator": "AND",
-            "minimum_should_match": "66%",
-            "allow_leading_wildcard": settings.allow_leading_wildcard,
-        }
+    qs: dict[str, Any] = {
+        "query": text,
+        "lenient": True,
+        "fields": fields,
+        "default_operator": "AND",
+        "minimum_should_match": "66%",
+        "allow_leading_wildcard": settings.allow_leading_wildcard,
     }
+    if analyzer:
+        qs["analyzer"] = analyzer
+    return {"query_string": qs}
 
 
 def get_highlighter(
-    field: str, text: str | None = None, count: int | None = None
+    field: str,
+    text: str | None = None,
+    count: int | None = None,
+    analyzer: str | None = None,
 ) -> dict[str, Any]:
     # Content field - configurable highlighting
     if field == Field.CONTENT:
@@ -68,7 +74,7 @@ def get_highlighter(
             # query_string in this configuration; adding a second field
             # triggers an internal multi-field code path that works.
             highlighter["highlight_query"] = make_field_highlight_query(
-                text, [Field.CONTENT, Field.TEXT]
+                text, [Field.CONTENT, Field.TEXT], analyzer=analyzer
             )
         else:
             # Prevent ES from falling back to the main search query for
@@ -107,7 +113,9 @@ def get_highlighter(
         # "post_tags": ["</em>"],
     }
     if text:
-        default["highlight_query"] = make_field_highlight_query(text, field)
+        default["highlight_query"] = make_field_highlight_query(
+            text, field, analyzer=analyzer
+        )
     else:
         default["highlight_query"] = {"match_all": {}}
     return default

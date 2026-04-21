@@ -3,7 +3,10 @@ from urllib.parse import parse_qsl, urlparse
 import pytest
 from ftmq.util import make_entity
 
+from openaleph_search.core import get_es
+from openaleph_search.index.admin import clear_index
 from openaleph_search.index.entities import index_bulk
+from openaleph_search.index.indexes import entities_read_index
 from openaleph_search.model import SearchAuth
 from openaleph_search.parse.parser import SearchQueryParser
 from openaleph_search.query.more_like_this import more_like_this_query
@@ -125,10 +128,7 @@ def index_test_documents(cleanup_after):
     previous tests that can corrupt MLT term statistics (deleted docs remain
     in Lucene segments and skew IDF calculations).
     """
-    from openaleph_search.index.admin import delete_index, upgrade_search
-
-    delete_index()
-    upgrade_search()
+    clear_index()
     entities = [make_entity(doc) for doc in TEST_DOCUMENTS]
     index_bulk("test_mlt", entities, sync=True)
     return entities
@@ -417,14 +417,7 @@ def test_more_like_this_auth(
     """Test that MoreLikeThisQuery respects authentication filters"""
     monkeypatch.setenv("OPENALEPH_SEARCH_AUTH", "true")
 
-    from openaleph_search.core import get_es
-    from openaleph_search.index.admin import delete_index, upgrade_search
-    from openaleph_search.index.indexes import entities_read_index
-
-    # Recreate indexes from scratch to eliminate stale segment metadata from
-    # previous tests that can corrupt MLT term statistics
-    delete_index()
-    upgrade_search()
+    clear_index()
     es = get_es()
 
     # Create test documents for different datasets.
