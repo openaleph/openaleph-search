@@ -706,3 +706,216 @@ def test_search_translation_plaintext(cleanup_after):
     )
     result = query.search()
     assert result["hits"]["total"]["value"] == 0
+
+
+# ── Annotated fulltext tests ──────────────────────────────────────────
+
+ZWJ = "\u200d"
+
+
+@pytest.fixture(scope="module")
+def index_annotated_docs():
+    """Index documents with inline entity annotations."""
+    docs = [
+        {
+            "id": "ann-doc-1",
+            "schema": "PlainText",
+            "properties": {
+                "indexText": [
+                    f"serious crime involving "
+                    f"Jane{ZWJ}__PER__{ZWJ}__doejane__ "
+                    f"Doe{ZWJ}__PER__{ZWJ}__doejane__ "
+                    f"at "
+                    f"Acme{ZWJ}__LTD__{ZWJ}__acmecorp__ "
+                    f"Corp{ZWJ}__LTD__{ZWJ}__acmecorp__"
+                ],
+            },
+        },
+        {
+            "id": "ann-doc-2",
+            "schema": "PlainText",
+            "properties": {
+                "indexText": [
+                    f"The president of "
+                    f"Acme{ZWJ}__LTD__{ZWJ}__acmecorp__ "
+                    f"Corp{ZWJ}__LTD__{ZWJ}__acmecorp__ "
+                    f"donated to charity"
+                ],
+            },
+        },
+        {
+            "id": "ann-doc-3",
+            "schema": "PlainText",
+            "properties": {
+                "indexText": [
+                    "This document has no annotations just plain text about crime"
+                ],
+            },
+        },
+    ]
+    index_bulk("test_annotated", map(make_entity, docs), sync=True)
+    yield
+
+
+def _annotated_search(q):
+    """Search via query_string (same path as user input)."""
+    query = _create_query(f"/search?q={q}&filter:schema=PlainText")
+    return query.search()
+
+
+def _annotated_ids(q):
+    res = _annotated_search(q)
+    return {h["_id"] for h in res["hits"]["hits"]}
+
+
+def test_annotated_term_query(index_annotated_docs):
+    """Searching for an annotation marker finds the right docs.
+    Bare :X: needs quoting in query_string (colons are field syntax);
+    _X_ works unquoted since it's the internal indexed form."""
+    ids = _annotated_ids("__doejane__")
+    assert "ann-doc-1" in ids
+    assert "ann-doc-2" not in ids
+    assert "ann-doc-3" not in ids
+    # Quoted :X: form also works
+    ids2 = _annotated_ids('"__doejane__"')
+    assert ids == ids2
+
+
+def test_annotated_schema_term_query(index_annotated_docs):
+    """Searching for a schema marker finds all docs mentioning that type."""
+    ids = _annotated_ids("__LTD__")
+    assert "ann-doc-1" in ids
+    assert "ann-doc-2" in ids
+    assert "ann-doc-3" not in ids
+
+
+def test_annotated_surface_phrase(index_annotated_docs):
+    """Plain surface text phrase query still works across annotations."""
+    ids = _annotated_ids('"crime involving jane doe"')
+    assert "ann-doc-1" in ids
+
+
+def test_annotated_proximity_crime_near_person(index_annotated_docs):
+    """The core use case: find 'crime' near any person annotation.
+
+    "crime __PER__"~5 via query_string should match doc-1 where
+    'crime' is within 5 positions of a __PER__ marker, but NOT
+    doc-3 which has 'crime' without any person annotations.
+    """
+    ids = _annotated_ids('"crime __PER__"~5')
+    assert "ann-doc-1" in ids
+    assert "ann-doc-3" not in ids
+
+
+def test_annotated_proximity_crime_near_company(index_annotated_docs):
+    """Find 'crime' near any company annotation."""
+    ids = _annotated_ids('"crime __LTD__"~5')
+    assert "ann-doc-1" in ids
+    assert "ann-doc-2" not in ids  # "charity" not "crime"
+
+
+def test_annotated_proximity_entity_near_context(index_annotated_docs):
+    """Find a specific entity mentioned near 'president'."""
+    ids = _annotated_ids('"president __acmecorp__"~3')
+    assert "ann-doc-2" in ids
+    assert "ann-doc-1" not in ids
+
+
+def test_annotated_bool_entity_plus_keyword(index_annotated_docs):
+    """Combine entity annotation with free-text keyword."""
+    ids = _annotated_ids("__acmecorp__ AND crime")
+    assert "ann-doc-1" in ids
+    assert "ann-doc-2" not in ids  # has acmecorp but not crime
+
+
+def test_annotated_no_false_positives_plain_text(index_annotated_docs):
+    """Plain text doc with 'crime' but no annotations never matches
+    annotation-based queries."""
+    ids = _annotated_ids("__PER__")
+    assert "ann-doc-3" not in ids
+
+
+# ── Cyrillic surface annotation tests ────────────────────────────────
+
+
+@pytest.fixture(scope="module")
+def index_annotated_cyrillic_docs():
+    """Index documents with Cyrillic surface text and Latin annotation markers."""
+    docs = [
+        {
+            "id": "ann-cyr-1",
+            "schema": "PlainText",
+            "properties": {
+                "indexText": [
+                    f"Серьёзное преступление с участием "
+                    f"Владимира{ZWJ}__PER__{ZWJ}__putin__ "
+                    f"Путина{ZWJ}__PER__{ZWJ}__putin__ "
+                    f"и Газпрома{ZWJ}__LTD__{ZWJ}__gazprom__"
+                ],
+            },
+        },
+        {
+            "id": "ann-cyr-2",
+            "schema": "PlainText",
+            "properties": {
+                "indexText": [
+                    f"Президент Газпрома{ZWJ}__LTD__{ZWJ}__gazprom__ "
+                    f"пожертвовал на благотворительность"
+                ],
+            },
+        },
+        {
+            "id": "ann-cyr-3",
+            "schema": "PlainText",
+            "properties": {
+                "indexText": ["Преступление без аннотаций"],
+            },
+        },
+    ]
+    index_bulk("test_annotated_cyr", map(make_entity, docs), sync=True)
+    yield
+
+
+def test_annotated_cyrillic_term_query(index_annotated_cyrillic_docs):
+    """Annotation marker on Cyrillic surface text is searchable."""
+    ids = _annotated_ids("__putin__")
+    assert "ann-cyr-1" in ids
+    assert "ann-cyr-2" not in ids
+
+
+def test_annotated_cyrillic_schema_query(index_annotated_cyrillic_docs):
+    """Schema marker on Cyrillic surface finds all matching docs."""
+    ids = _annotated_ids("__LTD__")
+    assert "ann-cyr-1" in ids
+    assert "ann-cyr-2" in ids
+    assert "ann-cyr-3" not in ids
+
+
+def test_annotated_cyrillic_surface_phrase(index_annotated_cyrillic_docs):
+    """Cyrillic surface phrase query works across annotation tokens."""
+    ids = _annotated_ids('"владимира путина"')
+    assert "ann-cyr-1" in ids
+
+
+def test_annotated_cyrillic_proximity_crime_near_person(
+    index_annotated_cyrillic_docs,
+):
+    """Core use case in Cyrillic: 'преступление' near __PER__."""
+    ids = _annotated_ids('"преступление __PER__"~5')
+    assert "ann-cyr-1" in ids
+    assert "ann-cyr-3" not in ids  # has преступление but no annotations
+
+
+def test_annotated_cyrillic_proximity_entity_near_context(
+    index_annotated_cyrillic_docs,
+):
+    """Find Газпром mentioned near 'президент'."""
+    ids = _annotated_ids('"президент __gazprom__"~3')
+    assert "ann-cyr-2" in ids
+    assert "ann-cyr-1" not in ids
+
+
+def test_annotated_cyrillic_no_false_positives(index_annotated_cyrillic_docs):
+    """Plain Cyrillic doc without annotations doesn't match annotation queries."""
+    ids = _annotated_ids("__PER__")
+    assert "ann-cyr-3" not in ids

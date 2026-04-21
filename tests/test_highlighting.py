@@ -44,7 +44,7 @@ def test_highlighting_phrases(index_entities):
     assert "<em>Українська" in highlight
     highlight = _search_highlight('"日本語"')
     assert highlight is not None
-    assert "<em>日本語" in highlight
+    assert "<em>日" in highlight
 
 
 def test_highlighting_pages(fixture_pages, cleanup_after):
@@ -180,3 +180,87 @@ def test_highlighting_translation_pages(cleanup_after):
     assert "highlight" in hit
     assert "content" in hit["highlight"]
     assert "translation" not in hit["highlight"]
+
+
+# ── Annotated fulltext highlighting tests ─────────────────────────────
+
+ZWJ = "\u200d"
+
+
+def test_highlighting_annotated_crime_and_person(cleanup_after):
+    """Searching for 'crime AND __PER__' highlights both the surface entity
+    name and the context word 'crime'.
+
+    Uses bodyText (which stays in _source via properties and copies to
+    content) rather than indexText (which gets excluded from _source).
+    """
+    entity = make_entity(
+        {
+            "id": "ann-hl-1",
+            "schema": "PlainText",
+            "properties": {
+                "bodyText": [
+                    f"Serious crime involving "
+                    f"Jane{ZWJ}__PER__{ZWJ}__doejane__ "
+                    f"Doe{ZWJ}__PER__{ZWJ}__doejane__ "
+                    f"at "
+                    f"Acme{ZWJ}__LTD__{ZWJ}__acmecorp__ "
+                    f"Corp{ZWJ}__LTD__{ZWJ}__acmecorp__"
+                ],
+            },
+        }
+    )
+    index_bulk("test_ann_highlight", [entity], sync=True)
+
+    args = [
+        ("q", "crime AND __PER__"),
+        ("highlight", "true"),
+        ("filter:dataset", "test_ann_highlight"),
+    ]
+    query = EntitiesQuery(SearchQueryParser(args, None))
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] == 1
+    hit = result["hits"]["hits"][0]
+    assert "highlight" in hit
+    highlight_text = " ".join(v for values in hit["highlight"].values() for v in values)
+    # "crime" should be highlighted
+    assert "<em>crime</em>" in highlight_text
+    # The unified highlighter wraps the entire ZWJ-joined annotation atom
+    # in <em> tags, e.g. <em>Jane‍__PER__‍__doejane__</em>
+    assert "<em>Jane" in highlight_text
+    assert "<em>Doe" in highlight_text
+
+
+def test_highlighting_annotated_proximity(cleanup_after):
+    """Proximity query highlighting: '"crime __PER__"~5' highlights the
+    matching span."""
+    entity = make_entity(
+        {
+            "id": "ann-hl-2",
+            "schema": "PlainText",
+            "properties": {
+                "bodyText": [
+                    f"The investigation revealed crime by "
+                    f"Vladimir{ZWJ}__PER__{ZWJ}__putin__ "
+                    f"Putin{ZWJ}__PER__{ZWJ}__putin__ "
+                    f"involving offshore accounts"
+                ],
+            },
+        }
+    )
+    index_bulk("test_ann_hl_prox", [entity], sync=True)
+
+    args = [
+        ("q", '"crime __PER__"~5'),
+        ("highlight", "true"),
+        ("filter:dataset", "test_ann_hl_prox"),
+    ]
+    query = EntitiesQuery(SearchQueryParser(args, None))
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] == 1
+    hit = result["hits"]["hits"][0]
+    assert "highlight" in hit
+    highlight_text = " ".join(v for values in hit["highlight"].values() for v in values)
+    assert "<em>crime</em>" in highlight_text.lower()

@@ -44,6 +44,13 @@ ANALYZE_SETTINGS = {
                 "replacement": " ",
             },
         },
+        "filter": {
+            "ann_capture": {
+                "type": "pattern_capture",
+                "preserve_original": False,
+                "patterns": ["([^\u200d]+)"],
+            },
+        },
         "normalizer": {
             ICU_NORMALIZER: {
                 "type": "custom",
@@ -62,10 +69,11 @@ ANALYZE_SETTINGS = {
         "analyzer": {
             ICU_ANALYZER: {
                 "char_filter": ["html_strip"],
-                "tokenizer": "icu_tokenizer",
+                "tokenizer": "standard",
                 "filter": [
+                    "ann_capture",
+                    "lowercase",
                     "icu_folding",
-                    "icu_normalizer",
                 ],
             },
             HTML_ANALYZER: {

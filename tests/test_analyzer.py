@@ -1,6 +1,9 @@
 from openaleph_search.core import get_es
 from openaleph_search.index.indexes import schema_index
 from openaleph_search.search.logic import analyze_text
+from openaleph_search.settings import Settings
+
+settings = Settings()
 
 
 def test_mapping_analyzer():
@@ -8,7 +11,7 @@ def test_mapping_analyzer():
         return {t["token"] for t in res["tokens"]}
 
     es = get_es()
-    index = schema_index("LegalEntity", "v1")
+    index = schema_index("LegalEntity", settings.index_write)
     tokens = _get_tokens(
         es.indices.analyze(index=index, field="name", text="Vladimir Putin")
     )
@@ -86,3 +89,75 @@ def test_analyze_text_function():
     tokens = analyze_text("hello world hello", field="text", tokens_only=True)
     assert tokens == {"hello", "world"}
     assert len(tokens) == 2  # Only unique tokens
+
+
+ZWJ = "\u200d"
+
+
+def test_annotated_text_latin():
+    """Annotation markers land at the same position as surface words (Latin)."""
+    es = get_es()
+    index = schema_index("LegalEntity", settings.index_write)
+    text = (
+        f"Hello Jane{ZWJ}__PER__{ZWJ}__doejane__ Doe{ZWJ}__PER__{ZWJ}__doejane__ here"
+    )
+    res = es.indices.analyze(index=index, field="content", text=text)
+    by_pos = {}
+    for t in res["tokens"]:
+        by_pos.setdefault(t["position"], set()).add(t["token"])
+    assert by_pos[0] == {"hello"}
+    assert by_pos[1] == {"jane", "__per__", "__doejane__"}
+    assert by_pos[2] == {"doe", "__per__", "__doejane__"}
+    assert by_pos[3] == {"here"}
+
+
+def test_annotated_text_cross_script():
+    """Annotation markers land at same position even for Cyrillic surface text."""
+    es = get_es()
+    index = schema_index("LegalEntity", settings.index_write)
+    text = f"Владимир{ZWJ}__PER__{ZWJ}__putin__ Путин{ZWJ}__PER__{ZWJ}__putin__"
+    res = es.indices.analyze(index=index, field="content", text=text)
+    by_pos = {}
+    for t in res["tokens"]:
+        by_pos.setdefault(t["position"], set()).add(t["token"])
+    assert "владимир" in by_pos[0]
+    assert "__per__" in by_pos[0]
+    assert "__putin__" in by_pos[0]
+    assert "путин" in by_pos[1]
+    assert "__per__" in by_pos[1]
+
+
+def test_annotated_text_surface_phrase_preserved():
+    """Surface words remain adjacent — phrase queries work across annotations."""
+    es = get_es()
+    index = schema_index("LegalEntity", settings.index_write)
+    text = f"Владимир{ZWJ}__PER__{ZWJ}__putin__ Путин{ZWJ}__PER__{ZWJ}__putin__"
+    res = es.indices.analyze(index=index, field="content", text=text)
+    positions = {}
+    for t in res["tokens"]:
+        positions[t["token"]] = t["position"]
+    # Surface words at adjacent positions (0, 1) — no gap from annotations
+    assert positions["путин"] - positions["владимир"] == 1
+
+
+def test_annotated_text_icu_folding():
+    """icu_folding normalizes accented surface words; annotations pass through."""
+    es = get_es()
+    index = schema_index("LegalEntity", settings.index_write)
+    text = f"Café{ZWJ}__PLACE__{ZWJ}__cafe__"
+    res = es.indices.analyze(index=index, field="content", text=text)
+    by_pos = {}
+    for t in res["tokens"]:
+        by_pos.setdefault(t["position"], set()).add(t["token"])
+    assert by_pos[0] == {"cafe", "__place__", "__cafe__"}
+
+
+def test_annotated_text_plain_passthrough():
+    """Plain text without annotations tokenizes normally."""
+    es = get_es()
+    index = schema_index("LegalEntity", settings.index_write)
+    res = es.indices.analyze(
+        index=index, field="content", text="Vladimir Putin is here"
+    )
+    tokens = [t["token"] for t in res["tokens"]]
+    assert tokens == ["vladimir", "putin", "is", "here"]
