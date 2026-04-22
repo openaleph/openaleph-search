@@ -2,7 +2,13 @@ from ftmq.util import make_entity
 
 from openaleph_search.core import get_es
 from openaleph_search.index.admin import clear_index
-from openaleph_search.index.entities import index_bulk, iter_entities, iter_entity_ids
+from openaleph_search.index.entities import (
+    EntityVersion,
+    get_entity_version,
+    index_bulk,
+    iter_entities,
+    iter_entity_ids,
+)
 from openaleph_search.index.util import bulk_indexing_mode
 from openaleph_search.settings import Settings
 from openaleph_search.transform.entity import format_entity
@@ -86,6 +92,42 @@ def test_indexer_with_context(cleanup_after):
     assert indexed_entity["role_id"] == 3
     assert indexed_entity["mutable"] is True
     assert indexed_entity["created_at"] == "2023-04-26"
+
+
+def test_get_entity_version(cleanup_after):
+    """get_entity_version returns (seq_no, primary_term) and bumps on rewrites."""
+    clear_index()
+
+    entity = make_entity(
+        {
+            "id": "version-test-person",
+            "schema": "Person",
+            "properties": {"name": ["Jane Versioned"]},
+        }
+    )
+    index_bulk("test_versions", [entity], sync=True)
+
+    v1 = get_entity_version("version-test-person")
+    assert isinstance(v1, EntityVersion)
+    assert isinstance(v1.seq_no, int)
+    assert isinstance(v1.primary_term, int)
+
+    # Re-indexing the same id bumps the seq_no.
+    entity2 = make_entity(
+        {
+            "id": "version-test-person",
+            "schema": "Person",
+            "properties": {"name": ["Jane Versioned"], "nationality": ["DE"]},
+        }
+    )
+    index_bulk("test_versions", [entity2], sync=True)
+
+    v2 = get_entity_version("version-test-person")
+    assert v2 is not None
+    assert v2.seq_no > v1.seq_no
+
+    # Unknown id returns None.
+    assert get_entity_version("does-not-exist") is None
 
 
 def test_iter_entity_ids(entities, cleanup_after):
