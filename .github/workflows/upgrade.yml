@@ -28,9 +28,14 @@ jobs:
       with:
         python-version: "3.13"
 
-    - name: Install baseline version and create indexes
+    - name: Install 5.1.0 version and create indexes
       run: |
         pip install openaleph-search==5.1.0 "anystore<=1.1.2"
+        openaleph-search upgrade
+
+    - name: Install 5.2.0 version and upgrade
+      run: |
+        pip install openaleph-search==5.2.0
         openaleph-search upgrade
 
     - name: Install current version
