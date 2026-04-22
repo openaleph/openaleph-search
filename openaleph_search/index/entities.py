@@ -14,10 +14,8 @@ from openaleph_search.index.indexer import (
     bulk_actions,
     delete_safe,
 )
-from openaleph_search.index.indexes import (
-    entities_read_index,
-    entities_write_index,
-)
+from openaleph_search.index.indexes import entities_read_index, entities_write_index
+from openaleph_search.index.mapping import Field
 from openaleph_search.index.util import unpack_result
 from openaleph_search.model import SearchAuth
 from openaleph_search.settings import MAX_PAGE
@@ -310,6 +308,43 @@ def get_entity_version(entity_id: str) -> EntityVersion | None:
         return None
     hit = hits[0]
     return EntityVersion(seq_no=hit["_seq_no"], primary_term=hit["_primary_term"])
+
+
+def get_entity_content(entity_id: str) -> str | None:
+    """Fetch the indexed fulltext of a Document or Pages entity by id.
+
+    For Document and its descendants, text lives in `properties.bodyText`
+    (in _source). For Pages, bodyText is empty and the aggregated text is
+    in Field.CONTENT, which the pages bucket persists via store=true (see
+    openaleph_search/index/indexes.py:125). Page entities are deliberately
+    excluded — Page does not inherit from Document, so the schema check
+    rejects them.
+
+    Returns the joined text, or None if the entity is not found, not a
+    Document descendant, or has no retrievable fulltext.
+    """
+    es = get_es()
+    index = entities_read_index(schema="Document")
+    body = {
+        "query": {"ids": {"values": [entity_id]}},
+        "_source": ["schema", "properties.bodyText"],
+        "stored_fields": [Field.CONTENT],
+        "size": 1,
+    }
+    result = es.search(index=index, body=body)
+    hits = result.get("hits", {}).get("hits", [])
+    if not hits:
+        return None
+    hit = hits[0]
+    schema_name = hit.get("_source", {}).get("schema")
+    schema = model.get(schema_name) if schema_name else None
+    if schema is None or not schema.is_a("Document"):
+        return None
+    body_text = hit.get("_source", {}).get("properties", {}).get("bodyText") or []
+    stored_content = hit.get("fields", {}).get(Field.CONTENT) or []
+    parts = body_text or stored_content
+    text = "\n".join(p for p in parts if p)
+    return text or None
 
 
 def index_proxy(dataset: str, proxy: EntityProxy, sync=False, **kwargs):

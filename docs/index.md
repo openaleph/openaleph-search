@@ -48,6 +48,7 @@ openaleph-search search query-string "investigation" --args "highlight=true"
 
 - Full-text search across entity names, properties, and content
 - [Entity matching and deduplication using names, identifiers, and properties](./matching.md)
+- [Percolation: find entities mentioned in arbitrary text](./percolation.md)
 - [Facets and aggregations](./aggregations.md)
 - [Search result highlighting](./highlighting.md)
 - Multi-language support via Unicode normalization and [rigour symbols](https://rigour.followthemoney.tech/names/)
