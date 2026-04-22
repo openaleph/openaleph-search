@@ -6,6 +6,7 @@ from typing import Any
 from banal import ensure_list
 from elastic_transport import ObjectApiResponse
 from followthemoney import EntityProxy, model
+from followthemoney.types import registry
 from ftmq.util import get_name_symbols
 
 from openaleph_search.index.entities import ENTITY_SOURCE, PROXY_INCLUDES
@@ -52,7 +53,62 @@ EXCLUDE_SCHEMATA = [
 EXCLUDE_DEHYDRATE = ["properties"]
 
 
-class EntitiesQuery(Query):
+class ExpandNameSynonymsMixin:
+    """Shared synonym-expansion clauses for `parser.synonyms=true` paths.
+
+    Both `EntitiesQuery` (expanding the user's free-text query) and
+    `MentionsQuery` (expanding a target entity's names) add the same
+    shape of `terms` clauses over the indexed keyword fields
+    `Field.NAME_SYMBOLS` and `Field.NAME_KEYS`. The NAME_SYMBOLS path is
+    identical across both; the NAME_KEYS path differs only in how keys
+    are derived — `EntitiesQuery` generates n-gram keys from user query
+    tokens, `MentionsQuery` hashes the entity's discrete names via
+    `index_name_keys`. This mixin exposes both pieces separately so each
+    subclass builds the clause list from whichever key source applies.
+
+    The LegalEntity schema is used throughout to match how the indexer
+    populates `Field.NAME_SYMBOLS` / `Field.NAME_KEYS` on all named
+    entities (see `transform.entity._get_symbols`), including Documents.
+    """
+
+    NAME_SYMBOLS_BOOST = 0.5
+    NAME_KEYS_BOOST = 0.3
+
+    @staticmethod
+    def name_symbols_clause(*names: str) -> dict[str, Any] | None:
+        """`terms` clause over Field.NAME_SYMBOLS for NAME-category symbols
+        derived from *names*. Returns None when no symbols are found."""
+        if not names:
+            return None
+        schema = model["LegalEntity"]
+        symbols = get_name_symbols(schema, *names)
+        ids = [str(s) for s in symbols if s.category.name == "NAME"]
+        if not ids:
+            return None
+        return {
+            "terms": {
+                Field.NAME_SYMBOLS: ids,
+                "boost": ExpandNameSynonymsMixin.NAME_SYMBOLS_BOOST,
+            }
+        }
+
+    @staticmethod
+    def name_keys_clause(name_keys: list[str]) -> dict[str, Any] | None:
+        """`terms` clause over Field.NAME_KEYS from pre-computed keys.
+        Returns None when the key list is empty. Callers produce keys
+        via the strategy that fits their input shape (n-grams vs
+        `index_name_keys`)."""
+        if not name_keys:
+            return None
+        return {
+            "terms": {
+                Field.NAME_KEYS: list(name_keys),
+                "boost": ExpandNameSynonymsMixin.NAME_KEYS_BOOST,
+            }
+        }
+
+
+class EntitiesQuery(ExpandNameSynonymsMixin, Query):
     TEXT_FIELDS = [
         f"{Field.NAME}^4",
         f"{Field.NAMES}^3",
@@ -106,21 +162,17 @@ class EntitiesQuery(Query):
         if self.parser.synonyms and self.parser.text:
             schema = model["LegalEntity"]
             # Extract symbols and filter only NAME category symbols
-            symbols = get_name_symbols(schema, self.parser.text)
-            name_symbols = [str(s) for s in symbols if s.category.name == "NAME"]
-            if name_symbols:
-                query.append(
-                    {"terms": {Field.NAME_SYMBOLS: name_symbols, "boost": 0.5}}
-                )
+            symbols_clause = self.name_symbols_clause(self.parser.text)
+            if symbols_clause is not None:
+                query.append(symbols_clause)
 
             # Generate name_keys from n-grams of query tokens
             # For a query like "acme corporation corruption", we want to match
             # entities with name_keys like "acmecorporation" (ACME Corporation)
             name_keys = self._get_name_keys_ngrams(schema, self.parser.text)
-            if name_keys:
-                query.append(
-                    {"terms": {Field.NAME_KEYS: list(name_keys), "boost": 0.3}}
-                )
+            keys_clause = self.name_keys_clause(list(name_keys))
+            if keys_clause is not None:
+                query.append(keys_clause)
 
         return query
 
@@ -465,6 +517,167 @@ class PercolatorQuery(EntitiesQuery):
             source["surface_forms"] = spans
             source["percolator_match"] = sorted(set(matched))
         return result
+
+
+class MentionsQuery(EntitiesQuery):
+    """Find Document-family entities that mention a given named entity.
+
+    Inverse of PercolatorQuery. Given a named entity (Person, Company,
+    Organization, Vessel, …) identified by `entity_id`, returns Documents
+    (and their descendants — PlainText, HyperText, Pages, …) whose
+    indexed text contains the entity's caption or any of its matchable
+    name variants as a phrase.
+
+    All standard `EntitiesQuery` parser knobs apply: `filter:schema`
+    narrows within the Document hierarchy (e.g. to `Pages`),
+    `filter:dataset`, `filter:countries`, `highlight`,
+    `highlight_count`, `limit`, `offset`, `sort`, auth. `parser.text`
+    ANDs with the mention requirement (free-text narrowing of mention
+    hits). `parser.synonyms=true` mirrors `EntitiesQuery.get_text_query`
+    by adding `terms` clauses on the indexed `Field.NAME_SYMBOLS` and
+    `Field.NAME_KEYS` keyword fields derived from the entity's names
+    — these fields are populated on Documents too (see
+    `transform.entity._get_symbols`) from extracted name properties.
+
+    Unlike `PercolatorQuery`, no `surface_forms` post-processing is
+    performed — the standard `EntitiesQuery` highlight block is
+    returned untouched.
+    """
+
+    _SCHEMA = "Document"
+
+    def __init__(self, parser, entity_id: str):
+        if not entity_id:
+            raise ValueError("MentionsQuery requires an `entity_id`.")
+        # Local import mirrors the PercolatorQuery pattern; avoids the
+        # index/entities.py → query/base.py circular dependency.
+        from openaleph_search.index.entities import get_entity
+
+        data = get_entity(entity_id)
+        if data is None:
+            raise ValueError(f"Entity {entity_id!r} not found.")
+        proxy = model.get_proxy(data)
+        names = proxy.get_type_values(registry.name, matchable=True)
+        if not names:
+            raise ValueError(
+                f"Entity {entity_id!r} has no matchable names — "
+                f"MentionsQuery requires a named entity (Person, Company, ...)."
+            )
+        self.entity_id = entity_id
+        self.entity = proxy
+        self.names = names
+        super().__init__(parser)
+
+    @cached_property
+    def schemata(self) -> list[SchemaType]:
+        # Default to [_SCHEMA] rather than EntitiesQuery's ["Thing"] so
+        # downstream schema-sensitive logic (e.g. get_negative_filters)
+        # operates against the Document hierarchy. A caller-supplied
+        # filter:schema / filter:schemata still wins.
+        schemata = self.parser.getlist("filter:schema")
+        if schemata:
+            return schemata
+        schemata = self.parser.getlist("filter:schemata")
+        if schemata:
+            return schemata
+        return [self._SCHEMA]
+
+    def get_index(self) -> str:
+        return entities_read_index(schema=self.schemata)
+
+    def _name_phrase_shoulds(self) -> list[dict[str, Any]]:
+        # multi_match phrase across both fulltext fields keeps clause
+        # count linear in len(names). slop=0 → exact token order.
+        return [
+            {
+                "multi_match": {
+                    "query": name,
+                    "type": "phrase",
+                    "fields": [Field.CONTENT, f"{Field.TEXT}^0.8"],
+                    "slop": 0,
+                }
+            }
+            for name in self.names
+        ]
+
+    def get_inner_query(self) -> dict[str, Any]:
+        # Parent builds parser text + filters + negative filters + auth.
+        # AND in a mention_clause requiring at least one of the entity's
+        # names (or synonym expansions) to appear as a phrase in a
+        # document text field.
+        inner = super().get_inner_query()
+        shoulds: list[dict[str, Any]] = self._name_phrase_shoulds()
+        # Structured-mention bonus: the entity already appears as a name
+        # property on the document (e.g. extracted into `names`).
+        # Field.NAMES is a keyword field — exact-match `terms` across
+        # every matchable name variant.
+        shoulds.append(
+            {
+                "terms": {
+                    Field.NAMES: self.names,
+                    "boost": 2.0,
+                }
+            }
+        )
+        if self.parser.synonyms:
+            # Synonym expansion is shared with EntitiesQuery via
+            # ExpandNameSynonymsMixin — see that class for rationale. The
+            # only difference from the user-text path is how name_keys
+            # are derived: MentionsQuery has discrete entity names, so
+            # `index_name_keys` is a direct hash (no n-gram walk needed).
+            symbols_clause = self.name_symbols_clause(*self.names)
+            if symbols_clause is not None:
+                shoulds.append(symbols_clause)
+            name_keys = list(index_name_keys(model["LegalEntity"], self.names))
+            keys_clause = self.name_keys_clause(name_keys)
+            if keys_clause is not None:
+                shoulds.append(keys_clause)
+        mention_clause = {"bool": {"should": shoulds, "minimum_should_match": 1}}
+        inner.setdefault("bool", {}).setdefault("must", []).append(mention_clause)
+        return inner
+
+    def get_sort(self) -> list[str | dict[str, dict[str, Any]]]:
+        # The mention-clause carries scoring signals even when the parser
+        # has no user text (`is_empty_query=True`), so the base
+        # `Query.get_sort` fallback of `["_doc"]` for empty queries
+        # would hide the best matches. Force `_score` when the caller
+        # didn't pass an explicit sort; otherwise respect it.
+        if not len(self.parser.sorts):
+            return ["_score"]
+        return super().get_sort()
+
+    def get_highlight(self) -> dict[str, Any]:
+        # Base `get_highlight` builds highlight_queries from `parser.text`
+        # via `get_highlighter(..., text, ...)`. MentionsQuery carries its
+        # signals in the mention-clause, not in `parser.text`, so when no
+        # `q=` is passed the base helper substitutes `{match_all: {}}` and
+        # the highlighter returns unmarked `no_match_size` fallback snippets.
+        # Replace the highlight_query on text-oriented field configs with
+        # the same phrase shoulds the mention-clause uses, preserving any
+        # filter-value clauses the base class merged in.
+        highlight = super().get_highlight()
+        if not highlight:
+            return highlight
+        name_shoulds = self._name_phrase_shoulds()
+        for field_name in (self.HIGHLIGHT_FIELD, Field.TEXT, Field.TRANSLATION):
+            cfg = highlight["fields"].get(field_name)
+            if cfg is None:
+                continue
+            existing = cfg.get("highlight_query")
+            extra: list[dict[str, Any]] = []
+            if existing and existing != {"match_all": {}}:
+                existing_shoulds = existing.get("bool", {}).get("should")
+                if existing_shoulds is not None:
+                    extra = [c for c in existing_shoulds if c != {"match_all": {}}]
+                else:
+                    extra = [existing]
+            cfg["highlight_query"] = {
+                "bool": {
+                    "should": name_shoulds + extra,
+                    "minimum_should_match": 1,
+                }
+            }
+        return highlight
 
 
 class MoreLikeThisQuery(EntitiesQuery):
