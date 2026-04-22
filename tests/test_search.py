@@ -706,3 +706,400 @@ def test_search_translation_plaintext(cleanup_after):
     )
     result = query.search()
     assert result["hits"]["total"]["value"] == 0
+
+
+# ── Annotated fulltext tests ──────────────────────────────────────────
+
+ZWJ = "\u200d"
+
+
+@pytest.fixture(scope="module")
+def index_annotated_docs():
+    """Index documents with inline entity annotations."""
+    docs = [
+        {
+            "id": "ann-doc-1",
+            "schema": "PlainText",
+            "properties": {
+                "indexText": [
+                    f"serious crime involving "
+                    f"Jane{ZWJ}__PER__{ZWJ}__doejane__ "
+                    f"Doe{ZWJ}__PER__{ZWJ}__doejane__ "
+                    f"at "
+                    f"Acme{ZWJ}__LTD__{ZWJ}__acmecorp__ "
+                    f"Corp{ZWJ}__LTD__{ZWJ}__acmecorp__"
+                ],
+            },
+        },
+        {
+            "id": "ann-doc-2",
+            "schema": "PlainText",
+            "properties": {
+                "indexText": [
+                    f"The president of "
+                    f"Acme{ZWJ}__LTD__{ZWJ}__acmecorp__ "
+                    f"Corp{ZWJ}__LTD__{ZWJ}__acmecorp__ "
+                    f"donated to charity"
+                ],
+            },
+        },
+        {
+            "id": "ann-doc-3",
+            "schema": "PlainText",
+            "properties": {
+                "indexText": [
+                    "This document has no annotations just plain text about crime"
+                ],
+            },
+        },
+    ]
+    index_bulk("test_annotated", map(make_entity, docs), sync=True)
+    yield
+
+
+def _annotated_search(q):
+    """Search via query_string (same path as user input)."""
+    query = _create_query(f"/search?q={q}&filter:schema=PlainText")
+    return query.search()
+
+
+def _annotated_ids(q):
+    res = _annotated_search(q)
+    return {h["_id"] for h in res["hits"]["hits"]}
+
+
+def test_annotated_term_query(index_annotated_docs):
+    """Searching for an annotation marker finds the right docs.
+    Bare :X: needs quoting in query_string (colons are field syntax);
+    _X_ works unquoted since it's the internal indexed form."""
+    ids = _annotated_ids("__doejane__")
+    assert "ann-doc-1" in ids
+    assert "ann-doc-2" not in ids
+    assert "ann-doc-3" not in ids
+    # Quoted :X: form also works
+    ids2 = _annotated_ids('"__doejane__"')
+    assert ids == ids2
+
+
+def test_annotated_schema_term_query(index_annotated_docs):
+    """Searching for a schema marker finds all docs mentioning that type."""
+    ids = _annotated_ids("__LTD__")
+    assert "ann-doc-1" in ids
+    assert "ann-doc-2" in ids
+    assert "ann-doc-3" not in ids
+
+
+def test_annotated_surface_phrase(index_annotated_docs):
+    """Plain surface text phrase query still works across annotations."""
+    ids = _annotated_ids('"crime involving jane doe"')
+    assert "ann-doc-1" in ids
+
+
+def test_annotated_proximity_crime_near_person(index_annotated_docs):
+    """The core use case: find 'crime' near any person annotation.
+
+    "crime __PER__"~5 via query_string should match doc-1 where
+    'crime' is within 5 positions of a __PER__ marker, but NOT
+    doc-3 which has 'crime' without any person annotations.
+    """
+    ids = _annotated_ids('"crime __PER__"~5')
+    assert "ann-doc-1" in ids
+    assert "ann-doc-3" not in ids
+
+
+def test_annotated_proximity_crime_near_company(index_annotated_docs):
+    """Find 'crime' near any company annotation."""
+    ids = _annotated_ids('"crime __LTD__"~5')
+    assert "ann-doc-1" in ids
+    assert "ann-doc-2" not in ids  # "charity" not "crime"
+
+
+def test_annotated_proximity_entity_near_context(index_annotated_docs):
+    """Find a specific entity mentioned near 'president'."""
+    ids = _annotated_ids('"president __acmecorp__"~3')
+    assert "ann-doc-2" in ids
+    assert "ann-doc-1" not in ids
+
+
+def test_annotated_bool_entity_plus_keyword(index_annotated_docs):
+    """Combine entity annotation with free-text keyword."""
+    ids = _annotated_ids("__acmecorp__ AND crime")
+    assert "ann-doc-1" in ids
+    assert "ann-doc-2" not in ids  # has acmecorp but not crime
+
+
+def test_annotated_no_false_positives_plain_text(index_annotated_docs):
+    """Plain text doc with 'crime' but no annotations never matches
+    annotation-based queries."""
+    ids = _annotated_ids("__PER__")
+    assert "ann-doc-3" not in ids
+
+
+# ── Cyrillic surface annotation tests ────────────────────────────────
+
+
+@pytest.fixture(scope="module")
+def index_annotated_cyrillic_docs():
+    """Index documents with Cyrillic surface text and Latin annotation markers."""
+    docs = [
+        {
+            "id": "ann-cyr-1",
+            "schema": "PlainText",
+            "properties": {
+                "indexText": [
+                    f"Серьёзное преступление с участием "
+                    f"Владимира{ZWJ}__PER__{ZWJ}__putin__ "
+                    f"Путина{ZWJ}__PER__{ZWJ}__putin__ "
+                    f"и Газпрома{ZWJ}__LTD__{ZWJ}__gazprom__"
+                ],
+            },
+        },
+        {
+            "id": "ann-cyr-2",
+            "schema": "PlainText",
+            "properties": {
+                "indexText": [
+                    f"Президент Газпрома{ZWJ}__LTD__{ZWJ}__gazprom__ "
+                    f"пожертвовал на благотворительность"
+                ],
+            },
+        },
+        {
+            "id": "ann-cyr-3",
+            "schema": "PlainText",
+            "properties": {
+                "indexText": ["Преступление без аннотаций"],
+            },
+        },
+    ]
+    index_bulk("test_annotated_cyr", map(make_entity, docs), sync=True)
+    yield
+
+
+def test_annotated_cyrillic_term_query(index_annotated_cyrillic_docs):
+    """Annotation marker on Cyrillic surface text is searchable."""
+    ids = _annotated_ids("__putin__")
+    assert "ann-cyr-1" in ids
+    assert "ann-cyr-2" not in ids
+
+
+def test_annotated_cyrillic_schema_query(index_annotated_cyrillic_docs):
+    """Schema marker on Cyrillic surface finds all matching docs."""
+    ids = _annotated_ids("__LTD__")
+    assert "ann-cyr-1" in ids
+    assert "ann-cyr-2" in ids
+    assert "ann-cyr-3" not in ids
+
+
+def test_annotated_cyrillic_surface_phrase(index_annotated_cyrillic_docs):
+    """Cyrillic surface phrase query works across annotation tokens."""
+    ids = _annotated_ids('"владимира путина"')
+    assert "ann-cyr-1" in ids
+
+
+def test_annotated_cyrillic_proximity_crime_near_person(
+    index_annotated_cyrillic_docs,
+):
+    """Core use case in Cyrillic: 'преступление' near __PER__."""
+    ids = _annotated_ids('"преступление __PER__"~5')
+    assert "ann-cyr-1" in ids
+    assert "ann-cyr-3" not in ids  # has преступление but no annotations
+
+
+def test_annotated_cyrillic_proximity_entity_near_context(
+    index_annotated_cyrillic_docs,
+):
+    """Find Газпром mentioned near 'президент'."""
+    ids = _annotated_ids('"президент __gazprom__"~3')
+    assert "ann-cyr-2" in ids
+    assert "ann-cyr-1" not in ids
+
+
+def test_annotated_cyrillic_no_false_positives(index_annotated_cyrillic_docs):
+    """Plain Cyrillic doc without annotations doesn't match annotation queries."""
+    ids = _annotated_ids("__PER__")
+    assert "ann-cyr-3" not in ids
+
+
+# ── Search-time synonym tests ────────────────────────────────────────
+
+
+@pytest.fixture(scope="module")
+def index_synonym_entities():
+    """Index persons with different name spelling variants for synonym testing."""
+    entities = [
+        {
+            "id": "syn-wladimir",
+            "schema": "Person",
+            "properties": {"name": ["Wladimir Igumnow"]},
+        },
+        {
+            "id": "syn-vladimir",
+            "schema": "Person",
+            "properties": {"name": ["Vladimir Igumnov"]},
+        },
+        {
+            "id": "syn-volodymyr",
+            "schema": "Person",
+            "properties": {"name": ["Volodymyr Shkuro"]},
+        },
+        {
+            "id": "syn-unrelated",
+            "schema": "Person",
+            "properties": {"name": ["John Smith"]},
+        },
+    ]
+    index_bulk("test_synonyms", map(make_entity, entities), sync=True)
+    yield
+
+
+def _synonym_search(q, synonyms=False):
+    url = f"/search?q={q}&filter:dataset=test_synonyms"
+    if synonyms:
+        url += "&synonyms=true"
+    query = _create_query(url)
+    return query.search()
+
+
+def _synonym_ids(q, synonyms=False):
+    res = _synonym_search(q, synonyms=synonyms)
+    return {h["_id"] for h in res["hits"]["hits"]}
+
+
+def test_synonyms_off_exact_match_only(index_synonym_entities):
+    """Without synonyms, only exact spelling matches."""
+    ids = _synonym_ids("Wladimir")
+    assert "syn-wladimir" in ids
+    assert "syn-vladimir" not in ids
+
+
+def test_synonyms_on_expands_name_variants(index_synonym_entities):
+    """With synonyms, 'Vladimir' also matches 'Wladimir' and vice versa."""
+    ids = _synonym_ids("Vladimir", synonyms=True)
+    assert "syn-wladimir" in ids
+    assert "syn-vladimir" in ids
+
+
+def test_synonyms_on_both_directions(index_synonym_entities):
+    """Synonym expansion works in both directions."""
+    ids = _synonym_ids("Wladimir", synonyms=True)
+    assert "syn-wladimir" in ids
+    assert "syn-vladimir" in ids
+
+
+def test_synonyms_on_combined_name(index_synonym_entities):
+    """Full name query with synonyms matches across spelling variants."""
+    # "Vladimir Igumnov" should match "Wladimir Igumnow"
+    ids = _synonym_ids("Vladimir Igumnov", synonyms=True)
+    assert "syn-wladimir" in ids
+    assert "syn-vladimir" in ids
+    assert "syn-unrelated" not in ids
+
+
+def test_synonyms_off_combined_name_no_cross_match(index_synonym_entities):
+    """Without synonyms, 'Vladimir Igumnov' does NOT match 'Wladimir Igumnow'."""
+    ids = _synonym_ids("Vladimir Igumnov")
+    assert "syn-vladimir" in ids
+    assert "syn-wladimir" not in ids
+
+
+def test_synonyms_no_false_positives(index_synonym_entities):
+    """Synonyms don't cause unrelated entities to match."""
+    ids = _synonym_ids("Vladimir", synonyms=True)
+    assert "syn-unrelated" not in ids
+    assert "syn-volodymyr" not in ids  # Volodymyr is a different name
+
+
+def test_synonyms_different_synonym_group(index_synonym_entities):
+    """shkuro/schkuro/škuro are a separate synonym group."""
+    ids = _synonym_ids("schkuro", synonyms=True)
+    assert "syn-volodymyr" in ids  # indexed as "Shkuro"
+    assert "syn-wladimir" not in ids
+
+
+# ── Fulltext synonym tests (content/text fields, no keyword expansion) ──
+
+
+@pytest.fixture(scope="module")
+def index_synonym_docs():
+    """Index documents with name variants in body text for fulltext synonym testing."""
+    docs = [
+        {
+            "id": "syn-doc-wladimir",
+            "schema": "PlainText",
+            "properties": {
+                "bodyText": ["Report on Wladimir Igumnow and his business dealings"],
+            },
+        },
+        {
+            "id": "syn-doc-vladimir",
+            "schema": "PlainText",
+            "properties": {
+                "bodyText": ["Vladimir Igumnov testified before the committee"],
+            },
+        },
+        {
+            "id": "syn-doc-cyrillic",
+            "schema": "PlainText",
+            "properties": {
+                "bodyText": ["Доклад про Владимир и его компанию"],
+            },
+        },
+        {
+            "id": "syn-doc-unrelated",
+            "schema": "PlainText",
+            "properties": {
+                "bodyText": ["Unrelated document about cooking recipes"],
+            },
+        },
+    ]
+    index_bulk("test_syn_docs", map(make_entity, docs), sync=True)
+    yield
+
+
+def _syndoc_search(q, synonyms=False):
+    url = f"/search?q={q}&filter:dataset=test_syn_docs&filter:schema=PlainText"
+    if synonyms:
+        url += "&synonyms=true"
+    query = _create_query(url)
+    return query.search()
+
+
+def _syndoc_ids(q, synonyms=False):
+    res = _syndoc_search(q, synonyms=synonyms)
+    return {h["_id"] for h in res["hits"]["hits"]}
+
+
+def test_synonyms_fulltext_off(index_synonym_docs):
+    """Without synonyms, only exact name in body text matches."""
+    ids = _syndoc_ids("Wladimir")
+    assert "syn-doc-wladimir" in ids
+    assert "syn-doc-vladimir" not in ids
+
+
+def test_synonyms_fulltext_on(index_synonym_docs):
+    """With synonyms, 'Vladimir' in query matches 'Wladimir' in body text."""
+    ids = _syndoc_ids("Vladimir", synonyms=True)
+    assert "syn-doc-wladimir" in ids
+    assert "syn-doc-vladimir" in ids
+    assert "syn-doc-unrelated" not in ids
+
+
+def test_synonyms_fulltext_cyrillic(index_synonym_docs):
+    """Cyrillic synonym: 'Vladimir' matches Cyrillic 'Владимира' in body text."""
+    ids = _syndoc_ids("Vladimir", synonyms=True)
+    assert "syn-doc-cyrillic" in ids
+
+
+def test_synonyms_fulltext_combined(index_synonym_docs):
+    """Full name with synonyms matches across spelling variants in body text."""
+    ids = _syndoc_ids("Vladimir Igumnov", synonyms=True)
+    assert "syn-doc-wladimir" in ids
+    assert "syn-doc-vladimir" in ids
+    assert "syn-doc-unrelated" not in ids
+
+
+def test_synonyms_fulltext_no_false_positives(index_synonym_docs):
+    """Unrelated documents don't match synonym-expanded queries."""
+    ids = _syndoc_ids("Vladimir", synonyms=True)
+    assert "syn-doc-unrelated" not in ids

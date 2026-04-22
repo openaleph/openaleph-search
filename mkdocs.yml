@@ -9,6 +9,8 @@ nav:
     - Significant Terms: significant_terms.md
     - Facets & Aggregations: aggregations.md
     - Highlighting: highlighting.md
+    - Synonyms: synonyms.md
+    - Annotations: annotations.md
     - Mentions: mentions.md
     - Percolation: percolation.md
   - Reference:

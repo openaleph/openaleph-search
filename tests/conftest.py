@@ -7,6 +7,7 @@ from ftmq.util import make_entity
 from openaleph_search.core import get_es
 from openaleph_search.index.admin import clear_index, delete_index, upgrade_search
 from openaleph_search.index.entities import index_bulk
+from openaleph_search.index.indexes import entities_read_index
 from openaleph_search.model import SearchAuth
 
 FIXTURES_PATH = (Path(__file__).parent / "fixtures").absolute()
@@ -105,8 +106,15 @@ def clear_es():
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_es():
-    delete_index()
-    upgrade_search()
+    # Only recreate indexes if they don't exist — avoids the expensive
+    # ~70s synonym compilation on every test run.
+    es = get_es()
+    indexes = entities_read_index().split(",")
+    if all(es.indices.exists(index=ix) for ix in indexes):
+        clear_index()
+    else:
+        delete_index()
+        upgrade_search()
 
 
 @pytest.fixture(scope="session")
