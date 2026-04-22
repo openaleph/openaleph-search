@@ -104,6 +104,14 @@ class Settings(BaseSettings):
     match_phonetic: bool = False
     match_symbols: bool = False
 
+    # Globally enable per-entity stored percolator queries. When false,
+    # `format_entity` does NOT add a `query` field to things-bucket
+    # entities, and `PercolatorQuery.search()` short-circuits to an
+    # empty result. The `query` percolator field is always present in
+    # the things bucket mapping (so toggling this on later just requires
+    # a re-index, not a remap).
+    percolation: bool = False
+
     # Pre-build global ordinals on frequently-aggregated keyword fields
     # during refresh. Eliminates first-query latency spikes at the cost of
     # slightly slower refreshes.

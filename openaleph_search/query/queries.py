@@ -1,15 +1,19 @@
 import logging
+import re
 from functools import cached_property
 from typing import Any
 
 from banal import ensure_list
+from elastic_transport import ObjectApiResponse
 from followthemoney import EntityProxy, model
+from followthemoney.types import registry
 from ftmq.util import get_name_symbols
 
 from openaleph_search.index.entities import ENTITY_SOURCE, PROXY_INCLUDES
 from openaleph_search.index.indexes import entities_read_index
 from openaleph_search.index.mapping import Field
 from openaleph_search.query.base import Query
+from openaleph_search.query.highlight import get_highlighter
 from openaleph_search.query.matching import match_query
 from openaleph_search.query.more_like_this import more_like_this_query
 from openaleph_search.query.util import field_filter_query
@@ -49,7 +53,62 @@ EXCLUDE_SCHEMATA = [
 EXCLUDE_DEHYDRATE = ["properties"]
 
 
-class EntitiesQuery(Query):
+class ExpandNameSynonymsMixin:
+    """Shared synonym-expansion clauses for `parser.synonyms=true` paths.
+
+    Both `EntitiesQuery` (expanding the user's free-text query) and
+    `MentionsQuery` (expanding a target entity's names) add the same
+    shape of `terms` clauses over the indexed keyword fields
+    `Field.NAME_SYMBOLS` and `Field.NAME_KEYS`. The NAME_SYMBOLS path is
+    identical across both; the NAME_KEYS path differs only in how keys
+    are derived — `EntitiesQuery` generates n-gram keys from user query
+    tokens, `MentionsQuery` hashes the entity's discrete names via
+    `index_name_keys`. This mixin exposes both pieces separately so each
+    subclass builds the clause list from whichever key source applies.
+
+    The LegalEntity schema is used throughout to match how the indexer
+    populates `Field.NAME_SYMBOLS` / `Field.NAME_KEYS` on all named
+    entities (see `transform.entity._get_symbols`), including Documents.
+    """
+
+    NAME_SYMBOLS_BOOST = 0.5
+    NAME_KEYS_BOOST = 0.3
+
+    @staticmethod
+    def name_symbols_clause(*names: str) -> dict[str, Any] | None:
+        """`terms` clause over Field.NAME_SYMBOLS for NAME-category symbols
+        derived from *names*. Returns None when no symbols are found."""
+        if not names:
+            return None
+        schema = model["LegalEntity"]
+        symbols = get_name_symbols(schema, *names)
+        ids = [str(s) for s in symbols if s.category.name == "NAME"]
+        if not ids:
+            return None
+        return {
+            "terms": {
+                Field.NAME_SYMBOLS: ids,
+                "boost": ExpandNameSynonymsMixin.NAME_SYMBOLS_BOOST,
+            }
+        }
+
+    @staticmethod
+    def name_keys_clause(name_keys: list[str]) -> dict[str, Any] | None:
+        """`terms` clause over Field.NAME_KEYS from pre-computed keys.
+        Returns None when the key list is empty. Callers produce keys
+        via the strategy that fits their input shape (n-grams vs
+        `index_name_keys`)."""
+        if not name_keys:
+            return None
+        return {
+            "terms": {
+                Field.NAME_KEYS: list(name_keys),
+                "boost": ExpandNameSynonymsMixin.NAME_KEYS_BOOST,
+            }
+        }
+
+
+class EntitiesQuery(ExpandNameSynonymsMixin, Query):
     TEXT_FIELDS = [
         f"{Field.NAME}^4",
         f"{Field.NAMES}^3",
@@ -103,21 +162,17 @@ class EntitiesQuery(Query):
         if self.parser.synonyms and self.parser.text:
             schema = model["LegalEntity"]
             # Extract symbols and filter only NAME category symbols
-            symbols = get_name_symbols(schema, self.parser.text)
-            name_symbols = [str(s) for s in symbols if s.category.name == "NAME"]
-            if name_symbols:
-                query.append(
-                    {"terms": {Field.NAME_SYMBOLS: name_symbols, "boost": 0.5}}
-                )
+            symbols_clause = self.name_symbols_clause(self.parser.text)
+            if symbols_clause is not None:
+                query.append(symbols_clause)
 
             # Generate name_keys from n-grams of query tokens
             # For a query like "acme corporation corruption", we want to match
             # entities with name_keys like "acmecorporation" (ACME Corporation)
             name_keys = self._get_name_keys_ngrams(schema, self.parser.text)
-            if name_keys:
-                query.append(
-                    {"terms": {Field.NAME_KEYS: list(name_keys), "boost": 0.3}}
-                )
+            keys_clause = self.name_keys_clause(list(name_keys))
+            if keys_clause is not None:
+                query.append(keys_clause)
 
         return query
 
@@ -278,6 +333,351 @@ class MatchQuery(EntitiesQuery):
             exclude = {"ids": {"values": self.exclude}}
             query["bool"]["must_not"].append(exclude)
         return query
+
+
+_PERCOLATOR_EM_RE = re.compile(r"<em>(.*?)</em>", re.DOTALL)
+
+
+def _extract_surface_forms(highlight: dict[str, list[str]] | None) -> list[str]:
+    """Pull <em>…</em> spans from a hit's highlight block, deduped.
+
+    The unified highlighter wraps each whole matched phrase in a single
+    `<em>…</em>` tag (e.g. `<em>Banana ba Nana</em>`), so each match is
+    a complete surface form. Result list is deduped and sorted
+    alphabetically.
+    """
+    if not highlight:
+        return []
+    return sorted(
+        {
+            match
+            for fragment in highlight.get(Field.CONTENT, [])
+            for match in _PERCOLATOR_EM_RE.findall(fragment)
+        }
+    )
+
+
+def _empty_search_response() -> dict[str, Any]:
+    """Synthetic empty ES search response, ObjectApiResponse-shaped."""
+    return {
+        "took": 0,
+        "timed_out": False,
+        "hits": {
+            "total": {"value": 0, "relation": "eq"},
+            "max_score": None,
+            "hits": [],
+        },
+    }
+
+
+class PercolatorQuery(EntitiesQuery):
+    """Find entities mentioned in a document.
+
+    Each entity in the things bucket carries a stored percolator query
+    built at index time from its cleaned name variants (see
+    `openaleph_search.transform.entity.format_entity`). Percolating a
+    document is then a normal entity search against the things bucket
+    with a `percolate` clause added to the bool query and an always-on
+    highlight on `Field.CONTENT` to extract the surface forms.
+
+    All standard `EntitiesQuery` parser knobs apply: filters
+    (`filter:dataset`, `filter:countries`, `filter:schema`, …),
+    `dehydrate`, `limit`, `offset`, `sort`, auth.
+
+    Each returned hit has a `surface_forms` list on its `_source` —
+    the actual `<mark>…</mark>` spans from the highlight, parsed and
+    deduped — so callers don't have to deal with the raw highlight HTML.
+    """
+
+    # Only matchable named entities live in the things bucket; this is
+    # also the only bucket that has the `query` percolator field.
+    _SCHEMA = "LegalEntity"
+
+    def __init__(
+        self,
+        parser,
+        text: str | None = None,
+        entity_id: str | None = None,
+    ):
+        if (text is None) == (entity_id is None):
+            raise ValueError(
+                "PercolatorQuery requires exactly one of `text` or `entity_id`"
+            )
+        if entity_id is not None:
+            # Local import to avoid circular dependency: index/entities.py
+            # transitively imports from query/base.py via Query.
+            from openaleph_search.index.entities import get_entity_content
+
+            content = get_entity_content(entity_id)
+            if not content:
+                raise ValueError(
+                    f"No percolatable fulltext for entity {entity_id!r}. "
+                    f"Only Document descendants (incl. Pages) carry indexable "
+                    f"text; Page entities and non-document entities are excluded."
+                )
+            text = content
+        self.text = text
+        self.entity_id = entity_id
+        super().__init__(parser)
+
+    def get_index(self) -> str:
+        return entities_read_index(schema=self._SCHEMA)
+
+    def get_inner_query(self) -> dict[str, Any]:
+        # Wrap whatever the parent built (parser filters, text query,
+        # negative filters, …) inside a bool that also requires the
+        # percolate clause to fire. Then wrap the whole thing in
+        # `constant_score` so ES skips relevance scoring of the matched
+        # stored queries — we don't need server-side ranking, the
+        # `_name` tags on each stored clause give downstream apps the
+        # signal-type info they need to do their own weighting.
+        inner = super().get_inner_query()
+        percolate_clause = {
+            "percolate": {
+                "field": Field.QUERY,
+                "document": {Field.CONTENT: self.text},
+            }
+        }
+        return {
+            "constant_score": {"filter": {"bool": {"must": [inner, percolate_clause]}}}
+        }
+
+    def get_highlight(self) -> dict[str, Any]:
+        """Highlight on the percolated content, opt-in via `parser.highlight`.
+
+        Returns an empty dict (ES skips the highlighter entirely) when
+        `highlight=true` is not in the parser args, matching the
+        contract of every other Query subclass. When highlights are
+        off, the derived `_source.surface_forms` list will be empty
+        for every hit; `_source.percolator_match` is independent of
+        highlights and still populates correctly.
+
+        When highlights are on, the format mirrors `EntitiesQuery` —
+        a top-level dict with `encoder` and a `fields` map. The
+        content highlighter is the same unified highlighter
+        `get_highlighter(Field.CONTENT)` returns — same fragment size,
+        same boundary scanner — minus two `EntitiesQuery`-isms that
+        don't apply here:
+
+        - `highlight_query` (set to `{"match_all": {}}` by
+          `get_highlighter` when no text is provided) is dropped so ES
+          uses the matching stored percolator query as the highlight
+          query, which is the percolator default and what we want.
+        - `require_field_match: False` is NOT set. With it, the
+          unified highlighter switches to per-token marking
+          (`<em>Banana</em> <em>ba</em> <em>Nana</em>`); without it,
+          whole phrases are wrapped in a single `<em>…</em>` tag
+          (`<em>Banana ba Nana</em>`). For percolator queries the
+          highlight always targets the same field as the query
+          (`content`), so cross-field matching isn't needed.
+
+        `parser.highlight_count` flows through to control the number
+        of fragments returned (default 3), same as on search-side
+        queries. Default ES tags `<em>…</em>` are used.
+        """
+        if not self.parser.highlight:
+            return {}
+        highlighter = get_highlighter(Field.CONTENT, count=self.parser.highlight_count)
+        highlighter["no_match_size"] = 0
+        # we really want to find all surface forms
+        highlighter["max_analyzed_offset"] = 9999999
+        highlighter.pop("highlight_query", None)
+        return {
+            "encoder": "html",
+            "fields": {Field.CONTENT: highlighter},
+        }
+
+    def search(self) -> ObjectApiResponse:
+        if not settings.percolation:
+            log.warning(
+                "Percolation is globally disabled "
+                "(set OPENALEPH_SEARCH_PERCOLATION=1 to enable). "
+                "PercolatorQuery returning an empty result."
+            )
+            return _empty_search_response()  # type: ignore[return-value]
+        result = super().search()
+        # Post-process per hit:
+        #
+        # - The `highlight` block stays on the hit unchanged (same
+        #   shape as EntitiesQuery responses).
+        # - We additionally parse the `<em>…</em>` spans into a
+        #   `surface_forms` convenience list on `_source`.
+        # - The matched named queries from the stored percolator
+        #   clauses go into `_source.percolator_match`. ES surfaces
+        #   them under `hit.fields._percolator_document_slot_0_matched_queries`
+        #   — NOT `hit.matched_queries`, which is for top-level query
+        #   named clauses. The slot is always 0 because we percolate
+        #   a single document per request. The `fields` block is
+        #   dropped after we've extracted what we need.
+        for hit in result.get("hits", {}).get("hits", []) or []:
+            spans = _extract_surface_forms(hit.get("highlight"))
+            fields = hit.pop("fields", None) or {}
+            matched = fields.get("_percolator_document_slot_0_matched_queries") or []
+            source = hit.setdefault("_source", {})
+            source["surface_forms"] = spans
+            source["percolator_match"] = sorted(set(matched))
+        return result
+
+
+class MentionsQuery(EntitiesQuery):
+    """Find Document-family entities that mention a given named entity.
+
+    Inverse of PercolatorQuery. Given a named entity (Person, Company,
+    Organization, Vessel, …) identified by `entity_id`, returns Documents
+    (and their descendants — PlainText, HyperText, Pages, …) whose
+    indexed text contains the entity's caption or any of its matchable
+    name variants as a phrase.
+
+    All standard `EntitiesQuery` parser knobs apply: `filter:schema`
+    narrows within the Document hierarchy (e.g. to `Pages`),
+    `filter:dataset`, `filter:countries`, `highlight`,
+    `highlight_count`, `limit`, `offset`, `sort`, auth. `parser.text`
+    ANDs with the mention requirement (free-text narrowing of mention
+    hits). `parser.synonyms=true` mirrors `EntitiesQuery.get_text_query`
+    by adding `terms` clauses on the indexed `Field.NAME_SYMBOLS` and
+    `Field.NAME_KEYS` keyword fields derived from the entity's names
+    — these fields are populated on Documents too (see
+    `transform.entity._get_symbols`) from extracted name properties.
+
+    Unlike `PercolatorQuery`, no `surface_forms` post-processing is
+    performed — the standard `EntitiesQuery` highlight block is
+    returned untouched.
+    """
+
+    _SCHEMA = "Document"
+
+    def __init__(self, parser, entity_id: str):
+        if not entity_id:
+            raise ValueError("MentionsQuery requires an `entity_id`.")
+        # Local import mirrors the PercolatorQuery pattern; avoids the
+        # index/entities.py → query/base.py circular dependency.
+        from openaleph_search.index.entities import get_entity
+
+        data = get_entity(entity_id)
+        if data is None:
+            raise ValueError(f"Entity {entity_id!r} not found.")
+        proxy = model.get_proxy(data)
+        names = proxy.get_type_values(registry.name, matchable=True)
+        if not names:
+            raise ValueError(
+                f"Entity {entity_id!r} has no matchable names — "
+                f"MentionsQuery requires a named entity (Person, Company, ...)."
+            )
+        self.entity_id = entity_id
+        self.entity = proxy
+        self.names = names
+        super().__init__(parser)
+
+    @cached_property
+    def schemata(self) -> list[SchemaType]:
+        # Default to [_SCHEMA] rather than EntitiesQuery's ["Thing"] so
+        # downstream schema-sensitive logic (e.g. get_negative_filters)
+        # operates against the Document hierarchy. A caller-supplied
+        # filter:schema / filter:schemata still wins.
+        schemata = self.parser.getlist("filter:schema")
+        if schemata:
+            return schemata
+        schemata = self.parser.getlist("filter:schemata")
+        if schemata:
+            return schemata
+        return [self._SCHEMA]
+
+    def get_index(self) -> str:
+        return entities_read_index(schema=self.schemata)
+
+    def _name_phrase_shoulds(self) -> list[dict[str, Any]]:
+        # multi_match phrase across both fulltext fields keeps clause
+        # count linear in len(names). slop=0 → exact token order.
+        return [
+            {
+                "multi_match": {
+                    "query": name,
+                    "type": "phrase",
+                    "fields": [Field.CONTENT, f"{Field.TEXT}^0.8"],
+                    "slop": 0,
+                }
+            }
+            for name in self.names
+        ]
+
+    def get_inner_query(self) -> dict[str, Any]:
+        # Parent builds parser text + filters + negative filters + auth.
+        # AND in a mention_clause requiring at least one of the entity's
+        # names (or synonym expansions) to appear as a phrase in a
+        # document text field.
+        inner = super().get_inner_query()
+        shoulds: list[dict[str, Any]] = self._name_phrase_shoulds()
+        # Structured-mention bonus: the entity already appears as a name
+        # property on the document (e.g. extracted into `names`).
+        # Field.NAMES is a keyword field — exact-match `terms` across
+        # every matchable name variant.
+        shoulds.append(
+            {
+                "terms": {
+                    Field.NAMES: self.names,
+                    "boost": 2.0,
+                }
+            }
+        )
+        if self.parser.synonyms:
+            # Synonym expansion is shared with EntitiesQuery via
+            # ExpandNameSynonymsMixin — see that class for rationale. The
+            # only difference from the user-text path is how name_keys
+            # are derived: MentionsQuery has discrete entity names, so
+            # `index_name_keys` is a direct hash (no n-gram walk needed).
+            symbols_clause = self.name_symbols_clause(*self.names)
+            if symbols_clause is not None:
+                shoulds.append(symbols_clause)
+            name_keys = list(index_name_keys(model["LegalEntity"], self.names))
+            keys_clause = self.name_keys_clause(name_keys)
+            if keys_clause is not None:
+                shoulds.append(keys_clause)
+        mention_clause = {"bool": {"should": shoulds, "minimum_should_match": 1}}
+        inner.setdefault("bool", {}).setdefault("must", []).append(mention_clause)
+        return inner
+
+    def get_sort(self) -> list[str | dict[str, dict[str, Any]]]:
+        # The mention-clause carries scoring signals even when the parser
+        # has no user text (`is_empty_query=True`), so the base
+        # `Query.get_sort` fallback of `["_doc"]` for empty queries
+        # would hide the best matches. Force `_score` when the caller
+        # didn't pass an explicit sort; otherwise respect it.
+        if not len(self.parser.sorts):
+            return ["_score"]
+        return super().get_sort()
+
+    def get_highlight(self) -> dict[str, Any]:
+        # Base `get_highlight` builds highlight_queries from `parser.text`
+        # via `get_highlighter(..., text, ...)`. MentionsQuery carries its
+        # signals in the mention-clause, not in `parser.text`, so when no
+        # `q=` is passed the base helper substitutes `{match_all: {}}` and
+        # the highlighter returns unmarked `no_match_size` fallback snippets.
+        # Replace the highlight_query on text-oriented field configs with
+        # the same phrase shoulds the mention-clause uses, preserving any
+        # filter-value clauses the base class merged in.
+        highlight = super().get_highlight()
+        if not highlight:
+            return highlight
+        name_shoulds = self._name_phrase_shoulds()
+        for field_name in (self.HIGHLIGHT_FIELD, Field.TEXT, Field.TRANSLATION):
+            cfg = highlight["fields"].get(field_name)
+            if cfg is None:
+                continue
+            existing = cfg.get("highlight_query")
+            extra: list[dict[str, Any]] = []
+            if existing and existing != {"match_all": {}}:
+                existing_shoulds = existing.get("bool", {}).get("should")
+                if existing_shoulds is not None:
+                    extra = [c for c in existing_shoulds if c != {"match_all": {}}]
+                else:
+                    extra = [existing]
+            cfg["highlight_query"] = {
+                "bool": {
+                    "should": name_shoulds + extra,
+                    "minimum_should_match": 1,
+                }
+            }
+        return highlight
 
 
 class MoreLikeThisQuery(EntitiesQuery):
