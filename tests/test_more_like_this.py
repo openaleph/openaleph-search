@@ -422,7 +422,8 @@ def test_more_like_this_auth(
     """Test that MoreLikeThisQuery respects authentication filters"""
     monkeypatch.setenv("OPENALEPH_SEARCH_AUTH", "true")
 
-    clear_index()
+    delete_index()
+    upgrade_search()
     es = get_es()
 
     # Create test documents for different datasets.
