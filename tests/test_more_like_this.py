@@ -4,7 +4,7 @@ import pytest
 from ftmq.util import make_entity
 
 from openaleph_search.core import get_es
-from openaleph_search.index.admin import clear_index
+from openaleph_search.index.admin import delete_index, upgrade_search
 from openaleph_search.index.entities import index_bulk
 from openaleph_search.index.indexes import entities_read_index
 from openaleph_search.model import SearchAuth
@@ -121,17 +121,22 @@ TEST_DOCUMENTS = [
 
 
 @pytest.fixture(scope="function")
-def index_test_documents(cleanup_after):
+def index_test_documents():
     """Index test documents for more_like_this testing.
 
-    Recreates indexes from scratch to eliminate stale segment metadata from
-    previous tests that can corrupt MLT term statistics (deleted docs remain
-    in Lucene segments and skew IDF calculations).
+    Drops and recreates indexes on every run. `clear_index` leaves tombstoned
+    docs in Lucene segments, which still count toward MLT term statistics
+    (IDF) until merged away — the resulting flakiness is why we pay the cost
+    of a full recreate here. Only viable because the test-image synonyms file
+    is tiny; compiling the full 156k-rule graph would be prohibitive.
     """
-    clear_index()
+    delete_index()
+    upgrade_search()
     entities = [make_entity(doc) for doc in TEST_DOCUMENTS]
     index_bulk("test_mlt", entities, sync=True)
-    return entities
+    yield entities
+    delete_index()
+    upgrade_search()
 
 
 def test_more_like_this_query_function():

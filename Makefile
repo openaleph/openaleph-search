@@ -46,7 +46,10 @@ synonyms:
 	@echo "Compiled $$(wc -l < $(SYNONYMS_FILE)) synonym rules to $(SYNONYMS_FILE)"
 
 elastic-build:
-	docker build -t ghcr.io/openaleph/elasticsearch:$(ELASTIC_TAG) .
+	docker build --target full -t ghcr.io/openaleph/elasticsearch:$(ELASTIC_TAG) .
+
+elastic-build-test:
+	docker build --target test -t ghcr.io/openaleph/elasticsearch:$(ELASTIC_TAG)-test .
 
 elastic: elastic-build
 	docker run -p 9200:9200 -ti -v ./elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml ghcr.io/openaleph/elasticsearch:$(ELASTIC_TAG)
