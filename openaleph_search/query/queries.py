@@ -426,11 +426,13 @@ class PercolatorQuery(EntitiesQuery):
     def get_inner_query(self) -> dict[str, Any]:
         # Wrap whatever the parent built (parser filters, text query,
         # negative filters, …) inside a bool that also requires the
-        # percolate clause to fire. Then wrap the whole thing in
-        # `constant_score` so ES skips relevance scoring of the matched
-        # stored queries — we don't need server-side ranking, the
-        # `_name` tags on each stored clause give downstream apps the
-        # signal-type info they need to do their own weighting.
+        # percolate clause to fire. BM25 scoring is preserved: each
+        # matching `match_phrase` clause in the stored percolator query
+        # contributes its score, and the hit's `_score` is the sum of
+        # those contributions. This ranks entities with more matching
+        # name variants and longer / rarer phrases higher. `_name` tags
+        # on the stored clauses still surface independently via
+        # `hit.fields._percolator_document_slot_0_matched_queries`.
         inner = super().get_inner_query()
         percolate_clause = {
             "percolate": {
@@ -438,9 +440,16 @@ class PercolatorQuery(EntitiesQuery):
                 "document": {Field.CONTENT: self.text},
             }
         }
-        return {
-            "constant_score": {"filter": {"bool": {"must": [inner, percolate_clause]}}}
-        }
+        return {"bool": {"must": [inner, percolate_clause]}}
+
+    def get_sort(self) -> list[str | dict[str, dict[str, Any]]]:
+        # Percolator hits have no parser text (the "query" lives in the
+        # stored percolator docs), so the base Query.get_sort fallback
+        # of `["_doc"]` for empty queries would hide the best matches.
+        # Force `_score` when the caller didn't pass an explicit sort.
+        if not len(self.parser.sorts):
+            return ["_score"]
+        return super().get_sort()
 
     def get_highlight(self) -> dict[str, Any]:
         """Highlight on the percolated content, opt-in via `parser.highlight`.

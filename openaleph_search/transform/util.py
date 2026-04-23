@@ -96,8 +96,12 @@ def index_name_parts(schema: Schema, names: list[str]) -> set[str]:
 def clean_percolator_names(names: list[str]) -> list[str]:
     """Drop names that are too noisy to percolate.
 
-    - Multi-token names are kept (specific enough for phrase matching).
-    - Single-token names are discarded entirely, too many false positives
+    - Multi-token names are always kept (specific enough for phrase matching).
+    - Single-token names are kept only when at least 7 characters. Short
+      single-token names (e.g. "John", "Khan") match too many documents
+      even with BM25 downweighting; at 7+ chars the term is specific
+      enough that the BM25 IDF weighting + per-group boosts reliably
+      rank real matches above noise.
     - Empty / whitespace-only entries are dropped.
     """
     cleaned: list[str] = []
@@ -106,7 +110,7 @@ def clean_percolator_names(names: list[str]) -> list[str]:
         if not stripped:
             continue
         tokens = stripped.split()
-        if len(tokens) > 1:
+        if len(tokens) > 1 or len(stripped) >= 7:
             cleaned.append(stripped)
     return cleaned
 
@@ -133,11 +137,30 @@ def clean_percolator_identifiers(identifiers: list[str]) -> list[str]:
     return cleaned
 
 
+NAME_BOOST = 2.0
+OTHER_NAME_BOOST = 0.8  # demoted below identifier (implicit 1.0)
+
+
 def make_percolator_query(
     names: list[str],
+    other_name: list[str] | None = None,
     identifiers: list[str] | None = None,
 ) -> dict[str, Any] | None:
     """Build a stored percolator query from name + identifier signals.
+
+    Signals come from three separate lists, each producing its own
+    `match_phrase` clauses with a distinct `_name` tag (so downstream
+    can tell via `matched_queries` which signal fired):
+
+    - `names` — primary names (`name` property). Boosted by `NAME_BOOST`
+      (2.0) so canonical-name matches rank highest. Tagged `_name="name"`.
+    - `other_name` — secondary name signals (`previousName`, `alias`).
+      Demoted by `OTHER_NAME_BOOST` (0.8), below identifier. Tagged
+      `_name="other_name"`.
+    - `identifiers` — exact identifier matches. No boost (implicit 1.0).
+      Tagged `_name="identifier"`.
+
+    Net ranking tier: name (2.0) > identifier (1.0) > other_name (0.8).
 
     Names use `match_phrase` with `slop: 2` — tolerant of inserted
     middle initials (`"Jane Doe"` matches `"Jane A. Doe"`), reversed
@@ -148,32 +171,22 @@ def make_percolator_query(
     Identifiers use `match_phrase` with `slop: 0` — they must appear
     exactly as stored, no slop tolerated.
 
-    All cleaned name and identifier values become clauses — there is
-    no cap. OpenSanctions-style entities with many language variants
-    or aliases produce many clauses per stored query, which favours
-    recall (every variant a document might use is matchable). The
-    downstream app or user is responsible for disambiguating among
-    matched entities, e.g. via `entity.topics`, `entity.position`, or
-    similar entity-level signals.
+    All cleaned values become clauses — there is no cap. OpenSanctions-
+    style entities with many language variants or aliases produce many
+    clauses per stored query, which favours recall (every variant a
+    document might use is matchable). `PercolatorQuery` preserves BM25
+    scoring, so more matching clauses and rarer/longer phrases bubble
+    up naturally; the name-vs-previous split just tilts that ranking
+    toward canonical names when both match.
 
-    Each clause is tagged with `_name` ("name" or "identifier") so the
-    percolate response can surface which clause(s) fired per hit via
-    `matched_queries`. ES tracks named queries independently of scoring,
-    so this works inside the `constant_score.filter` wrap that
-    `PercolatorQuery.get_inner_query` applies.
-
-    No `boost` values: `PercolatorQuery` wraps the query in
-    `constant_score`, so server-side relevance scoring is skipped.
-    Downstream apps consume `matched_queries` and decide their own
-    weighting between name and identifier signals.
-
-    Returns `None` if both cleaned lists are empty, in which case the
+    Returns `None` if every cleaned list is empty, in which case the
     caller should NOT add a percolator field to the entity (so the entity
     stays out of the percolator candidate set).
     """
     cleaned_names = clean_percolator_names(names)
+    cleaned_others = clean_percolator_names(other_name or [])
     cleaned_ids = clean_percolator_identifiers(identifiers or [])
-    if not cleaned_names and not cleaned_ids:
+    if not cleaned_names and not cleaned_others and not cleaned_ids:
         return None
 
     shoulds: list[dict[str, Any]] = []
@@ -184,7 +197,21 @@ def make_percolator_query(
                     Field.CONTENT: {
                         "query": n,
                         "slop": 2,
+                        "boost": NAME_BOOST,
                         "_name": "name",
+                    }
+                }
+            }
+        )
+    for n in cleaned_others:
+        shoulds.append(
+            {
+                "match_phrase": {
+                    Field.CONTENT: {
+                        "query": n,
+                        "slop": 2,
+                        "boost": OTHER_NAME_BOOST,
+                        "_name": "other_name",
                     }
                 }
             }

@@ -330,13 +330,26 @@ def test_percolator_query_highlight_off_by_default(cleanup_after):
     assert hit["_source"]["percolator_match"] == ["identifier"]
 
 
-def test_percolator_query_constant_score(cleanup_after):
-    """All hits get the same _score — server-side scoring is disabled."""
+def test_percolator_scoring_tier_ordering(cleanup_after):
+    """BM25 scoring honours the per-clause boost tiers.
+
+    Three entities are indexed so each matches the percolation text via a
+    different clause kind — their summed `_score`s reflect the boost tier:
+
+    - `scoring-company`: primary name (boost 2.0) + identifier (boost 1.0)
+      both fire → two clauses contribute → highest score.
+    - `scoring-person`: primary name only (boost 2.0) → single clause.
+    - `scoring-alias`: only `previousName` (in the `other_name` group,
+      boost 0.8) fires → single clause, demoted below identifier.
+
+    Expected `_score` ordering: company > person > alias.
+    Default sort is `_score` desc, so the hits list is already ordered.
+    """
     person = make_entity(
         {
             "id": "scoring-person",
             "schema": "Person",
-            "properties": {"name": ["Alexandra Kowalski"]},
+            "properties": {"name": ["Alexandra Bouchard"]},
         }
     )
     company = make_entity(
@@ -349,21 +362,47 @@ def test_percolator_query_constant_score(cleanup_after):
             },
         }
     )
-    index_bulk("test_scoring", [person, company], sync=True)
+    alias_person = make_entity(
+        {
+            "id": "scoring-alias",
+            "schema": "Person",
+            "properties": {
+                "name": ["Unrelated Primary Name"],
+                "previousName": ["Jonas Oberlehrer"],
+            },
+        }
+    )
+    index_bulk("test_scoring", [person, company, alias_person], sync=True)
 
     result = _percolate(
-        "Alexandra Kowalski signed off on Quantum Industries Limited "
-        "(reg. QI789456) at the meeting."
+        "Alexandra Bouchard met Jonas Oberlehrer at Quantum Industries "
+        "Limited (reg. QI789456)."
     )
-
     hits = result["hits"]["hits"]
     scores = {h["_id"]: h["_score"] for h in hits}
-    assert "scoring-person" in scores
-    assert "scoring-company" in scores
 
-    # Constant_score wrap means every hit shares the same score, even
-    # though the company also fired its identifier clause.
-    assert scores["scoring-person"] == scores["scoring-company"]
+    # All three fixture entities are found.
+    assert {"scoring-company", "scoring-person", "scoring-alias"} <= set(scores)
+
+    # Tier ordering: name+identifier (2.0+1.0) > name (2.0) > other_name (0.8).
+    assert scores["scoring-company"] > scores["scoring-person"]
+    assert scores["scoring-person"] > scores["scoring-alias"]
+
+    # Default sort is _score desc — filtering to our three fixture entities
+    # they should appear in that order within the hits list.
+    relevant = ["scoring-company", "scoring-person", "scoring-alias"]
+    ordered = [h["_id"] for h in hits if h["_id"] in relevant]
+    assert ordered == relevant
+
+    # Each hit surfaces the clause kinds it matched via `_name` tags.
+    matched = {
+        h["_id"]: set(h["_source"]["percolator_match"])
+        for h in hits
+        if h["_id"] in relevant
+    }
+    assert matched["scoring-company"] == {"name", "identifier"}
+    assert matched["scoring-person"] == {"name"}
+    assert matched["scoring-alias"] == {"other_name"}
 
 
 # ---------------------------------------------------------------------------
