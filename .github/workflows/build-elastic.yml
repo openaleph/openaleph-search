@@ -28,7 +28,7 @@ jobs:
             type=ref,event=branch
             type=sha
             type=raw,value=9
-            type=raw,value=9.1.1
+            type=raw,value=9.3.3
             type=raw,value=latest
 
       - name: Set up Docker Buildx

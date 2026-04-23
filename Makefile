@@ -1,4 +1,4 @@
-ELASTIC_TAG=9.1.1
+ELASTIC_TAG=9.3.3
 
 all: clean install test
 
