@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - Dockerfile
+      - tests/fixtures/person_name_synonyms.txt
       - .github/workflows/build-elastic.yml
 
 permissions:
@@ -19,11 +20,25 @@ jobs:
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
 
-      - name: Docker meta
+      - name: Docker meta (full)
         id: meta
         uses: docker/metadata-action@v6
         with:
           images: ghcr.io/openaleph/elasticsearch
+          tags: |
+            type=ref,event=branch
+            type=sha
+            type=raw,value=9
+            type=raw,value=9.3.3
+            type=raw,value=latest
+
+      - name: Docker meta (test)
+        id: meta-test
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/openaleph/elasticsearch
+          flavor: |
+            suffix=-test,onlatest=true
           tags: |
             type=ref,event=branch
             type=sha
@@ -43,13 +58,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push release
+      - name: Build and push release (full synonyms)
         uses: docker/build-push-action@v7
         with:
           context: .
+          target: full
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name == 'push' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push test (fixture synonyms)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: test
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta-test.outputs.tags }}
+          labels: ${{ steps.meta-test.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
