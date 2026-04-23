@@ -1,7 +1,7 @@
 import itertools
 import unicodedata
 from functools import lru_cache
-from typing import Any, List, Optional, Set
+from typing import Any
 
 from anystore.logging import get_logger
 from followthemoney import EntityProxy
@@ -40,7 +40,7 @@ def get_geopoints(entity: EntityProxy) -> list[dict[str, str]]:
     return points
 
 
-def preprocess_name(name: Optional[str]) -> Optional[str]:
+def preprocess_name(name: str | None) -> str | None:
     """Preprocess a name for comparison."""
     if name is None:
         return None
@@ -50,7 +50,7 @@ def preprocess_name(name: Optional[str]) -> Optional[str]:
 
 
 @lru_cache(maxsize=2000)
-def clean_tokenize_name(schema: Schema, name: str) -> List[str]:
+def clean_tokenize_name(schema: Schema, name: str) -> list[str]:
     """Tokenize a name and clean it up."""
     name = preprocess_name(name) or name
     if schema.name in ("LegalEntity", "Organization", "Company", "PublicBody"):
@@ -60,9 +60,9 @@ def clean_tokenize_name(schema: Schema, name: str) -> List[str]:
     return tokenize_name(name)
 
 
-def phonetic_names(schema: Schema, names: List[str]) -> Set[str]:
+def phonetic_names(schema: Schema, names: list[str]) -> set[str]:
     """Generate phonetic forms of the given names."""
-    phonemes: Set[str] = set()
+    phonemes: set[str] = set()
     if schema.is_a("LegalEntity"):  # only include namy things
         for name in names:
             for token in clean_tokenize_name(schema, name):
@@ -76,9 +76,9 @@ def phonetic_names(schema: Schema, names: List[str]) -> Set[str]:
     return phonemes
 
 
-def index_name_parts(schema: Schema, names: List[str]) -> Set[str]:
+def index_name_parts(schema: Schema, names: list[str]) -> set[str]:
     """Generate a list of indexable name parts from the given names."""
-    parts: Set[str] = set()
+    parts: set[str] = set()
     if schema.is_a("LegalEntity"):  # only include namy things
         for name in names:
             for token in clean_tokenize_name(schema, name):
@@ -93,27 +93,25 @@ def index_name_parts(schema: Schema, names: List[str]) -> Set[str]:
     return parts
 
 
-def clean_percolator_names(names: List[str]) -> List[str]:
+def clean_percolator_names(names: list[str]) -> list[str]:
     """Drop names that are too noisy to percolate.
 
     - Multi-token names are kept (specific enough for phrase matching).
-    - Single-token names are kept only if at least 7 characters long;
-      shorter single tokens (e.g. "Doe", "Acme") produce too many false
-      positives when percolated against arbitrary text.
+    - Single-token names are discarded entirely, too many false positives
     - Empty / whitespace-only entries are dropped.
     """
-    cleaned: List[str] = []
+    cleaned: list[str] = []
     for name in names:
         stripped = (name or "").strip()
         if not stripped:
             continue
         tokens = stripped.split()
-        if len(tokens) > 1 or len(tokens[0]) >= 7:
+        if len(tokens) > 1:
             cleaned.append(stripped)
     return cleaned
 
 
-def clean_percolator_identifiers(identifiers: List[str]) -> List[str]:
+def clean_percolator_identifiers(identifiers: list[str]) -> list[str]:
     """Drop identifiers too short or noisy to percolate.
 
     - Strip whitespace.
@@ -124,8 +122,8 @@ def clean_percolator_identifiers(identifiers: List[str]) -> List[str]:
       under multiple property paths (e.g. registrationNumber AND
       taxNumber) doesn't produce duplicate clauses.
     """
-    seen: Set[str] = set()
-    cleaned: List[str] = []
+    seen: set[str] = set()
+    cleaned: list[str] = []
     for ident in identifiers:
         stripped = (ident or "").strip()
         if len(stripped) < 5 or stripped in seen:
@@ -136,8 +134,8 @@ def clean_percolator_identifiers(identifiers: List[str]) -> List[str]:
 
 
 def make_percolator_query(
-    names: List[str],
-    identifiers: List[str] | None = None,
+    names: list[str],
+    identifiers: list[str] | None = None,
 ) -> dict[str, Any] | None:
     """Build a stored percolator query from name + identifier signals.
 
@@ -178,7 +176,7 @@ def make_percolator_query(
     if not cleaned_names and not cleaned_ids:
         return None
 
-    shoulds: List[dict[str, Any]] = []
+    shoulds: list[dict[str, Any]] = []
     for n in cleaned_names:
         shoulds.append(
             {
@@ -206,12 +204,12 @@ def make_percolator_query(
     return {"bool": {"minimum_should_match": 1, "should": shoulds}}
 
 
-def index_name_keys(schema: Schema, names: List[str]) -> Set[str]:
+def index_name_keys(schema: Schema, names: list[str]) -> set[str]:
     """Generate a indexable name keys from the given names."""
-    keys: Set[str] = set()
+    keys: set[str] = set()
     for name in names:
         tokens = clean_tokenize_name(schema, name)
-        ascii_tokens: List[str] = []
+        ascii_tokens: list[str] = []
         for token in tokens:
             if token.isnumeric() or not is_modern_alphabet(token):
                 ascii_tokens.append(token)
