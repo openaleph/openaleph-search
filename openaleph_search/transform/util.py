@@ -115,38 +115,15 @@ def clean_percolator_names(names: list[str]) -> list[str]:
     return cleaned
 
 
-def clean_percolator_identifiers(identifiers: list[str]) -> list[str]:
-    """Drop identifiers too short or noisy to percolate.
-
-    - Strip whitespace.
-    - Drop empty entries.
-    - Drop very short identifiers (< 5 characters), which are too generic
-      to be useful as percolator triggers (e.g. country codes, stub IDs).
-    - Deduplicate while preserving order so the same identifier listed
-      under multiple property paths (e.g. registrationNumber AND
-      taxNumber) doesn't produce duplicate clauses.
-    """
-    seen: set[str] = set()
-    cleaned: list[str] = []
-    for ident in identifiers:
-        stripped = (ident or "").strip()
-        if len(stripped) < 5 or stripped in seen:
-            continue
-        seen.add(stripped)
-        cleaned.append(stripped)
-    return cleaned
-
-
 NAME_BOOST = 2.0
-OTHER_NAME_BOOST = 0.8  # demoted below identifier (implicit 1.0)
+OTHER_NAME_BOOST = 0.8
 
 
 def make_percolator_query(
     names: list[str],
-    other_name: list[str] | None = None,
-    identifiers: list[str] | None = None,
+    other_names: list[str] | None = None,
 ) -> dict[str, Any] | None:
-    """Build a stored percolator query from name + identifier signals.
+    """Build a stored percolator query from name signals.
 
     Signals come from three separate lists, each producing its own
     `match_phrase` clauses with a distinct `_name` tag (so downstream
@@ -155,12 +132,9 @@ def make_percolator_query(
     - `names` — primary names (`name` property). Boosted by `NAME_BOOST`
       (2.0) so canonical-name matches rank highest. Tagged `_name="name"`.
     - `other_name` — secondary name signals (`previousName`, `alias`).
-      Demoted by `OTHER_NAME_BOOST` (0.8), below identifier. Tagged
-      `_name="other_name"`.
-    - `identifiers` — exact identifier matches. No boost (implicit 1.0).
-      Tagged `_name="identifier"`.
+      Demoted by `OTHER_NAME_BOOST` (0.8). Tagged `_name="other_name"`.
 
-    Net ranking tier: name (2.0) > identifier (1.0) > other_name (0.8).
+    Net ranking tier: name (2.0) > other_name (0.8).
 
     Names use `match_phrase` with `slop: 2` — tolerant of inserted
     middle initials (`"Jane Doe"` matches `"Jane A. Doe"`), reversed
@@ -168,8 +142,6 @@ def make_percolator_query(
     Performance is essentially the same as `slop: 1`; both fall off
     the `index_phrases` shingle fast path that `slop: 0` uses, and the
     slop value only affects a constant-time budget check at match time.
-    Identifiers use `match_phrase` with `slop: 0` — they must appear
-    exactly as stored, no slop tolerated.
 
     All cleaned values become clauses — there is no cap. OpenSanctions-
     style entities with many language variants or aliases produce many
@@ -184,9 +156,8 @@ def make_percolator_query(
     stays out of the percolator candidate set).
     """
     cleaned_names = clean_percolator_names(names)
-    cleaned_others = clean_percolator_names(other_name or [])
-    cleaned_ids = clean_percolator_identifiers(identifiers or [])
-    if not cleaned_names and not cleaned_others and not cleaned_ids:
+    cleaned_others = clean_percolator_names(other_names or [])
+    if not cleaned_names and not cleaned_others:
         return None
 
     shoulds: list[dict[str, Any]] = []
@@ -212,18 +183,6 @@ def make_percolator_query(
                         "slop": 2,
                         "boost": OTHER_NAME_BOOST,
                         "_name": "other_name",
-                    }
-                }
-            }
-        )
-    for i in cleaned_ids:
-        shoulds.append(
-            {
-                "match_phrase": {
-                    Field.CONTENT: {
-                        "query": i,
-                        "slop": 0,  # identifiers must match exactly
-                        "_name": "identifier",
                     }
                 }
             }

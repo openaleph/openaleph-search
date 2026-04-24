@@ -136,117 +136,6 @@ def test_percolator_query_globally_disabled(index_entities):
     assert result["hits"]["hits"] == []
 
 
-# ---------------------------------------------------------------------------
-# Identifier tests (self-contained — each indexes its own entities into a
-# dedicated dataset and uses `cleanup_after` to wipe between tests).
-# ---------------------------------------------------------------------------
-
-
-def test_percolator_query_matches_identifier(cleanup_after):
-    """A document mentioning an identifier matches the entity by id alone."""
-    vessel = make_entity(
-        {
-            "id": "vessel-1",
-            "schema": "Vessel",
-            "properties": {
-                "name": ["MV Example"],
-                "imoNumber": ["9123456"],
-            },
-        }
-    )
-    index_bulk("test_vessels", [vessel], sync=True)
-
-    result = _percolate(
-        "The vessel 9123456 was sighted near the canal.",
-        args=[("highlight", "true")],
-    )
-
-    hits = result["hits"]["hits"]
-    by_id = {h["_id"]: h for h in hits}
-    assert "vessel-1" in by_id, f"vessel-1 missing from {list(by_id)}"
-
-    hit = by_id["vessel-1"]
-    assert hit["_source"]["surface_forms"] == ["9123456"]
-    assert hit["_source"]["percolator_match"] == ["identifier"]
-
-
-def test_percolator_query_short_identifier_dropped(cleanup_after):
-    """An entity whose only identifier is < 5 chars gets no `query` field."""
-    company = make_entity(
-        {
-            "id": "tiny-id-co",
-            "schema": "Company",
-            # 3-char identifier — dropped by clean_percolator_identifiers.
-            # No name either, so the entity ends up with no usable signals.
-            "properties": {"registrationNumber": ["GB1"]},
-        }
-    )
-    index_bulk("test_short_ids", [company], sync=True)
-
-    result = _percolate("The reference GB1 was noted in the filings.")
-    ids = {h["_id"] for h in result["hits"]["hits"]}
-
-    assert "tiny-id-co" not in ids
-
-
-def test_percolator_query_match_signals_combined(cleanup_after):
-    """Both name and identifier matching → percolator_match has both tags."""
-    vessel = make_entity(
-        {
-            "id": "vessel-2",
-            "schema": "Vessel",
-            "properties": {
-                "name": ["MV Example Two"],
-                "imoNumber": ["9876543"],
-            },
-        }
-    )
-    index_bulk("test_vessels_combined", [vessel], sync=True)
-
-    result = _percolate(
-        "The vessel MV Example Two (IMO 9876543) cleared customs.",
-        args=[("highlight", "true")],
-    )
-
-    hits = result["hits"]["hits"]
-    by_id = {h["_id"]: h for h in hits}
-    assert "vessel-2" in by_id
-
-    hit = by_id["vessel-2"]
-    # Both signals fired → deduped + sorted alphabetically: identifier, name
-    assert hit["_source"]["percolator_match"] == ["identifier", "name"]
-    # Surface forms include both the name and the identifier spans
-    surface_forms = set(hit["_source"]["surface_forms"])
-    assert "MV Example Two" in surface_forms
-    assert "9876543" in surface_forms
-
-
-def test_percolator_query_identifier_no_slop(cleanup_after):
-    """Multi-token identifiers must match exactly — slop=0.
-
-    A multi-token identifier like "DE HRB 12345" should NOT match a
-    document where its tokens are split across other words. Names with
-    slop=2 would match a similar split; identifiers must not.
-    """
-    company = make_entity(
-        {
-            "id": "de-company",
-            "schema": "Company",
-            "properties": {
-                # No `name` so the only signal is the multi-token identifier.
-                "registrationNumber": ["DE HRB 12345"],
-            },
-        }
-    )
-    index_bulk("test_no_slop", [company], sync=True)
-
-    # The identifier tokens (de, hrb, 12345) are all present in the doc but
-    # separated by other tokens — `slop=0` rejects this.
-    result = _percolate("Filed in DE under HRB category as serial 12345 reference.")
-    ids = {h["_id"] for h in result["hits"]["hits"]}
-    assert "de-company" not in ids
-
-
 def test_percolator_query_highlight_snippets(cleanup_after):
     """Each hit carries an EntitiesQuery-format highlight block.
 
@@ -315,7 +204,7 @@ def test_percolator_query_highlight_off_by_default(cleanup_after):
     index_bulk("test_no_highlight", [vessel], sync=True)
 
     # Default args — no highlight=true
-    result = _percolate("The vessel 1112223 was sighted near the canal.")
+    result = _percolate("The vessel MV Quiet Tester was sighted near the canal.")
 
     hits = result["hits"]["hits"]
     by_id = {h["_id"]: h for h in hits}
@@ -327,22 +216,24 @@ def test_percolator_query_highlight_off_by_default(cleanup_after):
     # surface_forms is empty without highlights
     assert hit["_source"]["surface_forms"] == []
     # percolator_match is independent of highlights and still works
-    assert hit["_source"]["percolator_match"] == ["identifier"]
+    assert hit["_source"]["percolator_match"] == ["name"]
 
 
 def test_percolator_scoring_tier_ordering(cleanup_after):
     """BM25 scoring honours the per-clause boost tiers.
 
     Three entities are indexed so each matches the percolation text via a
-    different clause kind — their summed `_score`s reflect the boost tier:
+    different combination of clause kinds — their summed `_score`s
+    reflect the boost tier:
 
-    - `scoring-company`: primary name (boost 2.0) + identifier (boost 1.0)
-      both fire → two clauses contribute → highest score.
+    - `scoring-both`: primary name (boost 2.0) + alias (in the
+      `other_name` group, boost 0.8) both fire → two clauses contribute
+      → highest score.
     - `scoring-person`: primary name only (boost 2.0) → single clause.
     - `scoring-alias`: only `previousName` (in the `other_name` group,
-      boost 0.8) fires → single clause, demoted below identifier.
+      boost 0.8) fires → single clause, demoted below name.
 
-    Expected `_score` ordering: company > person > alias.
+    Expected `_score` ordering: both > person > alias.
     Default sort is `_score` desc, so the hits list is already ordered.
     """
     person = make_entity(
@@ -352,13 +243,13 @@ def test_percolator_scoring_tier_ordering(cleanup_after):
             "properties": {"name": ["Alexandra Bouchard"]},
         }
     )
-    company = make_entity(
+    both = make_entity(
         {
-            "id": "scoring-company",
+            "id": "scoring-both",
             "schema": "Company",
             "properties": {
                 "name": ["Quantum Industries Limited"],
-                "registrationNumber": ["QI789456"],
+                "alias": ["Quantum Holdings International"],
             },
         }
     )
@@ -372,25 +263,25 @@ def test_percolator_scoring_tier_ordering(cleanup_after):
             },
         }
     )
-    index_bulk("test_scoring", [person, company, alias_person], sync=True)
+    index_bulk("test_scoring", [person, both, alias_person], sync=True)
 
     result = _percolate(
         "Alexandra Bouchard met Jonas Oberlehrer at Quantum Industries "
-        "Limited (reg. QI789456)."
+        "Limited, also known as Quantum Holdings International."
     )
     hits = result["hits"]["hits"]
     scores = {h["_id"]: h["_score"] for h in hits}
 
     # All three fixture entities are found.
-    assert {"scoring-company", "scoring-person", "scoring-alias"} <= set(scores)
+    assert {"scoring-both", "scoring-person", "scoring-alias"} <= set(scores)
 
-    # Tier ordering: name+identifier (2.0+1.0) > name (2.0) > other_name (0.8).
-    assert scores["scoring-company"] > scores["scoring-person"]
+    # Tier ordering: name+other_name (2.0+0.8) > name (2.0) > other_name (0.8).
+    assert scores["scoring-both"] > scores["scoring-person"]
     assert scores["scoring-person"] > scores["scoring-alias"]
 
     # Default sort is _score desc — filtering to our three fixture entities
     # they should appear in that order within the hits list.
-    relevant = ["scoring-company", "scoring-person", "scoring-alias"]
+    relevant = ["scoring-both", "scoring-person", "scoring-alias"]
     ordered = [h["_id"] for h in hits if h["_id"] in relevant]
     assert ordered == relevant
 
@@ -400,7 +291,7 @@ def test_percolator_scoring_tier_ordering(cleanup_after):
         for h in hits
         if h["_id"] in relevant
     }
-    assert matched["scoring-company"] == {"name", "identifier"}
+    assert matched["scoring-both"] == {"name", "other_name"}
     assert matched["scoring-person"] == {"name"}
     assert matched["scoring-alias"] == {"other_name"}
 
@@ -453,8 +344,7 @@ def test_percolator_query_by_document_entity_id(cleanup_after):
     hit = by_id["doc-target-vessel"]
     surface_forms = set(hit["_source"]["surface_forms"])
     assert "MV Indexed Document" in surface_forms
-    assert "1230098" in surface_forms
-    assert hit["_source"]["percolator_match"] == ["identifier", "name"]
+    assert hit["_source"]["percolator_match"] == ["name"]
 
 
 def test_percolator_query_by_pages_entity_id(cleanup_after):
@@ -500,7 +390,6 @@ def test_percolator_query_by_pages_entity_id(cleanup_after):
     hit = by_id["pages-target-vessel"]
     surface_forms = set(hit["_source"]["surface_forms"])
     assert "MV Pages Aggregator" in surface_forms
-    assert "7779991" in surface_forms
 
 
 def test_percolator_query_entity_id_rejects_page(cleanup_after):

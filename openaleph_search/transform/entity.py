@@ -147,16 +147,14 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
     #
     # Canonical `name` is passed separately so `make_percolator_query`
     # can boost it above `previousName`/`alias` (which go into one
-    # `other_name` group, demoted below identifier in BM25 ranking).
+    # `other_name` group, demoted in ranking)
     if settings.percolation and schema_bucket(data["schema"]) == "things":
         names = list(entity.get("name", quiet=True))
-        other_name = list(entity.get("previousName", quiet=True))
-        other_name.extend(entity.get("alias", quiet=True))
-        identifiers = list(entity.get_type_values(registry.identifier))
+        other_names = list(entity.get("previousName", quiet=True))
+        other_names.extend(entity.get("alias", quiet=True))
         percolator_query = make_percolator_query(
             names,
-            other_name=other_name,
-            identifiers=identifiers,
+            other_names=other_names,
         )
         if percolator_query is not None:
             data[Field.QUERY] = percolator_query
