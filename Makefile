@@ -34,7 +34,7 @@ clean:
 	find . -name '__pycache__' -exec rm -fr {} +
 
 documentation:
-	mkdocs build
+	zensical build
 	aws --profile nbg1 --endpoint-url https://s3.investigativedata.org s3 sync ./site s3://openaleph.org/docs/lib/openaleph-search
 
 SYNONYMS_URL=https://raw.githubusercontent.com/opensanctions/rigour/refs/heads/main/rust/data/names/person_names.txt
@@ -53,3 +53,6 @@ elastic-build-test:
 
 elastic: elastic-build
 	docker run -p 9200:9200 -ti -v ./elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml ghcr.io/openaleph/elasticsearch:$(ELASTIC_TAG)
+
+elastic-test: elastic-build-test
+	docker run -p 9200:9200 -ti -v ./elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml ghcr.io/openaleph/elasticsearch:$(ELASTIC_TAG)-test

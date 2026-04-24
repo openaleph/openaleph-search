@@ -53,11 +53,11 @@ bump2version = "^1.0.1"
 mkdocs = "^1.6.1"
 mkdocstrings-python = "^2.0.3"
 mkdocs-autorefs = "^1.4.1"
-mkdocs-material = "^9.6.15"
 mkdocs-click = "^0.9.0"
 jupyterlab = "^4.4.5"
 mkdocs-typer2 = "^0.2.1"
 griffe = "<2"
+zensical = "^0.0.36"
 
 [build-system]
 requires = ["poetry-core"]
