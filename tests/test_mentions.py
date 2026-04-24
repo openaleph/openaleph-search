@@ -14,7 +14,7 @@ from ftmq.util import make_entity
 
 from openaleph_search.index.entities import index_bulk
 from openaleph_search.parse.parser import SearchQueryParser
-from openaleph_search.query.queries import MentionsQuery
+from openaleph_search.query.mentions import MentionsQuery
 
 
 def _mentions(entity_id: str, args: list[tuple[str, str]] | None = None):

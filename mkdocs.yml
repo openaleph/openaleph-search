@@ -53,7 +53,7 @@ extra:
     - icon: lucide/globe
       link: https://openaleph.org
     - icon: simple/github
-      link: https://github.com/openaleph/openaleph
+      link: https://github.com/openaleph/openaleph-search
     - icon: fontawesome/brands/linkedin
       link: https://www.linkedin.com/company/dataresearchcenter/
 markdown_extensions:

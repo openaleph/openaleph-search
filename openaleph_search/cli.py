@@ -165,6 +165,81 @@ def cli_search_body(
     smart_write(output_uri, data)
 
 
+OPT_SOURCE_ARGS = Annotated[
+    str,
+    typer.Option(
+        "--source-args",
+        help="Source-side parser args (source entity filter). Required.",
+    ),
+]
+
+
+@cli_search.command("mentions")
+def cli_search_mentions(
+    entity_id: Annotated[
+        str,
+        typer.Argument(
+            help="ID of a named entity (Person, Company, Organization, Vessel, …) "
+            "whose mentions to find in the documents bucket."
+        ),
+    ],
+    args: OPT_SEARCH_ARGS = None,
+    output_uri: str = OPT_OUTPUT_URI,
+):
+    """Find documents that mention a given named entity.
+
+    Runs `MentionsQuery` against the Document hierarchy — phrase-matches the
+    entity's matchable name variants on `Field.CONTENT` (slop 2) and adds a
+    structured-name bonus via `Field.NAMES`. Results rank by `_score` desc.
+
+    Standard parser knobs apply via `--args`, e.g.:
+
+      --args "filter:dataset=news_archive&highlight=true&limit=50"
+      --args "synonyms=true&highlight=true"   # name_symbols / name_keys expansion
+    """
+    with ErrorHandler(log):
+        from openaleph_search.query.mentions import MentionsQuery
+
+        parser = make_parser(args=args)
+        query = MentionsQuery(parser, entity_id=entity_id)
+        result = query.search()
+        data = dump_json(dict(result), clean=True, newline=True)
+        smart_write(output_uri, data)
+
+
+@cli_search.command("multi-mentions")
+def cli_search_multi_mentions(
+    source_args: OPT_SOURCE_ARGS,
+    args: OPT_SEARCH_ARGS = None,
+    output_uri: str = OPT_OUTPUT_URI,
+):
+    """Batch list search — filter a source entity set → find documents that
+    mention any of the filtered entities.
+
+    Two parser-arg strings:
+    - `--source-args` filters the source entity set (any number of
+      collections). Typical:
+      `filter:dataset=watchlist&filter:schema=Person&filter:countries=ru`.
+    - `--args` filters the target document set. Typical:
+      `filter:dataset=news_docs&highlight=true&limit=50`.
+
+    Names are scrolled from the source-side matches (primary `name` property
+    by default — see `SOURCE_NAME_PROPS` in query/mentions.py) and fed into a
+    `MentionsQuery`-style search over the target side. Source scale is capped
+    at `MAX_SOURCE_NAMES` (10k); exceeding raises. Add `synonyms=true` to
+    the target args for `name_symbols` / `name_keys` expansion.
+    """
+    with ErrorHandler(log):
+        from openaleph_search.query.mentions import MultiMentionsQuery
+
+        source_parser = make_parser(args=source_args)
+        target_parser = make_parser(args=args)
+        query = MultiMentionsQuery(target_parser, source_parser)
+        result = query.search()
+        data = dump_json(dict(result), clean=True, newline=True)
+        smart_write(output_uri, data)
+
+
 @cli.command("delete")
 def cli_delete(
     input_uri: str = OPT_INPUT_URI,
