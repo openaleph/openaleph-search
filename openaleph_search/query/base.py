@@ -8,7 +8,7 @@ from followthemoney.types import registry
 
 from openaleph_search.core import get_es
 from openaleph_search.index.mapping import (
-    DATE_FORMAT,
+    DATE_AGG_FORMAT,
     ICU_SEARCH_ANALYZER,
     NUMERIC_TYPES,
     Field,
@@ -172,7 +172,11 @@ class Query:
                     "date_histogram": {
                         "field": facet_name,
                         "calendar_interval": interval,
-                        "format": DATE_FORMAT,
+                        # ISO 8601 first → canonical `key_as_string`;
+                        # partial-date entries cover any FtM-shaped
+                        # bound values pulled into `extended_bounds`
+                        # below. See `DATE_AGG_FORMAT` for details.
+                        "format": DATE_AGG_FORMAT,
                         "min_doc_count": 0,
                     }
                 }

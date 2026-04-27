@@ -27,10 +27,28 @@ ICU_NORMALIZER = "icu-default"
 HTML_ANALYZER = "strip-html"
 KW_NORMALIZER = "kw-normalizer"
 NAME_KW_NORMALIZER = "name-kw-normalizer"
-# `strict_date_optional_time` first so ES uses it for output serialization
-# (ISO 8601, e.g. aggregation `key_as_string`); the partial-date variants
-# follow for tolerant input parsing of `yyyy`, `yyyy-MM`, etc.
-DATE_FORMAT = "strict_date_optional_time||yyyy-MM-dd'T'HH||yyyy-MM-dd'T'HH:mm||yyyy-MM-dd'T'HH:mm:ss||yyyy-MM-dd||yyyy-MM||yyyy"  # noqa: B950
+# Field-level `format` for date properties. The hour-only-after-T variant
+# (`yyyy-MM-dd'T'HH`) is **load-bearing** — FtM's `prefixdate.parse(...).text`
+# canonically emits that shape, and ES `strict_date_optional_time` does
+# *not* parse it (it requires `HH:mm` minimum after the `T`). Order is
+# the historical one so existing indexes don't see a `format` change at
+# upgrade time (ES blocks mutating the `format` parameter on a live
+# date field).
+DATE_FORMAT = "yyyy-MM-dd'T'HH||yyyy-MM-dd'T'HH:mm||yyyy-MM-dd'T'HH:mm:ss||yyyy-MM-dd||yyyy-MM||yyyy||strict_date_optional_time"  # noqa: B950
+# Format used by date aggregations (`date_histogram`, etc.) for two
+# things:
+#   1. Output serialization of bucket `key_as_string` — ES uses the first
+#      entry in a `||` list, so leading with `strict_date_optional_time`
+#      gives canonical ISO 8601 (e.g. `1970-08-21T00:00:00.000Z`).
+#   2. Input parsing of `extended_bounds.min` / `max` — ES falls through
+#      the `||` list until one entry parses the bound value. The trailing
+#      partial-date entries cover FtM-emitted shapes (`2021`, `2021-02`,
+#      `2021-02-16T21`, …) that a caller might pass as a filter bound;
+#      `strict_date_optional_time` alone would reject the hour-only form.
+# Decoupled from `DATE_FORMAT` so the field-level format can keep its
+# original order (upgrade-stable on existing indexes) while aggregation
+# output stays canonical for downstream consumers.
+DATE_AGG_FORMAT = "strict_date_optional_time||yyyy-MM-dd'T'HH||yyyy-MM-dd'T'HH:mm||yyyy-MM-dd'T'HH:mm:ss||yyyy-MM-dd||yyyy-MM||yyyy"  # noqa: B950
 NUMERIC_TYPES = (registry.number, registry.date)
 
 # INDEX SETTINGS #
