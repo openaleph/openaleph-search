@@ -195,19 +195,11 @@ Entities with many aliases use representative names only.
 
 Two stages run in sequence before any name flows into a query clause:
 
-### 1. `clean_matching_names` (shared cleaner)
+### 1. `clean_matching_names` (shared cleaner, recall mode)
 
-Both `match_query` and `blocking_query` (and `MentionsQuery`, `MultiMentionsQuery`, the percolator transform) run the entity's matchable names through `openaleph_search.transform.util:clean_matching_names`. The cleaner returns a `set[str]` so callers can rely on uniqueness without re-deduping.
+Both `match_query` and `blocking_query` run the entity's matchable names through `openaleph_search.transform.util:clean_matching_names` with `discard_single_token=False`. In this mode the cleaner only drops empty / whitespace-only entries and de-duplicates — short single tokens, long single tokens, and singles shadowed by a multi-token variant all flow through. Returns a `set[str]` so callers can rely on uniqueness without re-deduping.
 
-Rules:
-
-- **Multi-token names** are always kept.
-- **Single-token names** are kept only when both (a) their length is ≥ `OPENALEPH_SEARCH_MATCHING_SINGLE_TOKEN_MIN_LENGTH` (default `10`) and (b) the same input list contains no multi-token variant — so `["Vladimir Putin", "Vladimir"]` reduces to `{"Vladimir Putin"}`, while `["Microsoft"]` is kept and `["Doe"]` is dropped.
-- **Empty / whitespace-only** entries are dropped.
-
-Lowering the threshold globally (via the env var) widens recall everywhere at the cost of more false positives in the percolator and mention paths. The test suite lowers it to `7` via pytest-env so fixtures like `KwaZulu` (7 chars) keep matching.
-
-Note the recall trade-off for `match_query`: an entity with `["Vladimir Putin", "Vladimir", "VP"]` previously gave `pick_names` three diverse picks; after cleaning, only the multi-token form survives and short aliases like `"VP"` never reach `Field.NAMES` / `name_keys` / `name_parts`. Lower the threshold or enrich the source data with longer multi-token variants if those aliases matter for blocking.
+This is intentionally looser than the percolator / mentions paths: matching scores against the normalized name fields (`names`, `name_keys`, `name_phonetic`, `name_symbols`) rather than arbitrary fulltext prose, so an alias like `"VP"` is a useful candidate-expansion signal rather than the noise it would be in a `match_phrase` against a news article. The percolator and mention paths use the default `discard_single_token=True` mode (the threshold + shadow rules described in [Percolation → Signal cleaning](./percolation.md#signal-cleaning)).
 
 ### 2. `pick_names` (budget cap)
 
@@ -217,7 +209,7 @@ See `openaleph_search.query.matching:pick_names`. The cleaner's output then flow
 2. Pick the most dissimilar remaining names using Levenshtein distance.
 3. Cap at 5 names total.
 
-After cleaning, most entities are already under the 5-name cap and `pick_names` is a no-op — its diversification cost only kicks in for alias-rich entities (sanctions data with many spellings).
+For alias-rich entities (sanctions data with many spellings) `pick_names` does the diversification work; for typical entities with a handful of names it's a no-op (input ≤ cap).
 
 ## Query structure
 

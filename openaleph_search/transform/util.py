@@ -95,7 +95,11 @@ def index_name_parts(schema: Schema, names: Iterable[str]) -> set[str]:
     return parts
 
 
-def clean_matching_names(names: Iterable[str]) -> set[str]:
+def clean_matching_names(
+    names: Iterable[str],
+    *,
+    discard_single_token: bool = True,
+) -> set[str]:
     """Shared cleaner for entity names used in any matching context.
 
     Returns a **set** so callers can rely on uniqueness without
@@ -105,8 +109,10 @@ def clean_matching_names(names: Iterable[str]) -> set[str]:
     Applied wherever raw entity names become query clauses — percolator
     queries (`make_percolator_query`), document-mentions queries
     (`MentionsQuery`, `MultiMentionsQuery`), and entity-vs-entity matching
-    (`match_query`, `blocking_query`). One cleaner = one knob to tune
-    recall vs precision globally.
+    (`match_query`, `blocking_query`).
+
+    With `discard_single_token=True` (default — used by the percolator
+    and mention paths, which match against arbitrary fulltext prose):
 
     - Multi-token names are always kept (specific enough for phrase matching).
     - Single-token names are kept only when their length is at least
@@ -116,21 +122,32 @@ def clean_matching_names(names: Iterable[str]) -> set[str]:
       with BM25 downweighting; even longer single tokens are skipped
       whenever a more specific multi-token phrase is available, since
       that phrase already covers any document mentioning the bare name.
-    - Empty / whitespace-only entries are dropped.
+
+    With `discard_single_token=False` (used by `match_query` /
+    `blocking_query`): every non-empty name is kept verbatim. Entity-vs-
+    entity matching scores against the normalized name fields (`names`,
+    `name_keys`, `name_phonetic`, `name_symbols`) rather than arbitrary
+    prose, so short single tokens and singles-shadowed-by-multi-token
+    variants are useful candidate-expansion signals, not noise.
+
+    Empty / whitespace-only entries are always dropped.
     """
+    if not discard_single_token:
+        return {stripped for stripped in (n.strip() for n in names if n) if stripped}
+
     min_single = settings.matching_single_token_min_length
-    cleaned: set[str] = set()
-    single_tokens: set[str] = set()
+    multi: set[str] = set()
+    single: set[str] = set()
     for name in names:
         stripped = (name or "").strip()
         if not stripped:
             continue
         tokens = stripped.split()
         if len(tokens) > 1:
-            cleaned.add(stripped)
+            multi.add(stripped)
         elif len(stripped) >= min_single:
-            single_tokens.add(stripped)
-    return cleaned if cleaned else single_tokens
+            single.add(stripped)
+    return multi if multi else single
 
 
 NAME_BOOST = 2.0

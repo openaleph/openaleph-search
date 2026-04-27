@@ -198,10 +198,17 @@ def match_query(
     elif datasets:
         query["bool"]["filter"].append({"terms": {Field.DATASET: datasets}})
 
-    # match on magic names — feed through the shared cleaner so short
-    # single tokens and singles-shadowed-by-multi-token variants are
-    # dropped (same knob as percolator / mentions paths).
-    names = clean_matching_names(entity.get_type_values(registry.name, matchable=True))
+    # match on magic names — feed through the shared cleaner with
+    # `discard_single_token=False` so short single tokens and
+    # singles-shadowed-by-multi-token variants survive. Matching scores
+    # against normalized name fields (`names`, `name_keys`, `name_phonetic`,
+    # `name_symbols`) rather than arbitrary prose, so wider candidate
+    # recall is the goal — short aliases like "VP" expand candidates
+    # rather than polluting them.
+    names = clean_matching_names(
+        entity.get_type_values(registry.name, matchable=True),
+        discard_single_token=False,
+    )
     names_lookup = names_query(entity.schema, names)
     if names_lookup:
         query["bool"]["must"].append(
@@ -266,7 +273,12 @@ def blocking_query(
     if not entity.schema.matchable:
         return {"match_none": {}}
 
-    names = clean_matching_names(entity.get_type_values(registry.name, matchable=True))
+    # Same wider-recall posture as `match_query`: keep all single tokens
+    # so short aliases contribute blocking signals.
+    names = clean_matching_names(
+        entity.get_type_values(registry.name, matchable=True),
+        discard_single_token=False,
+    )
     if not names:
         return {"match_none": {}}
 
