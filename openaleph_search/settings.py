@@ -112,6 +112,14 @@ class Settings(BaseSettings):
     # a re-index, not a remap).
     percolation: bool = False
 
+    # Minimum length for a single-token name to be kept by
+    # `clean_percolator_names`. Multi-token names are always kept; short
+    # single tokens (e.g. "John") match too much arbitrary prose. Single
+    # tokens are also dropped entirely whenever the input list contains
+    # any multi-token variant. Lowering this widens the percolator's
+    # candidate set at the cost of more false positives.
+    percolator_single_token_min_length: int = 10
+
     # Pre-build global ordinals on frequently-aggregated keyword fields
     # during refresh. Eliminates first-query latency spikes at the cost of
     # slightly slower refreshes.

@@ -16,8 +16,10 @@ from rigour.text import metaphone
 from rigour.text.scripts import is_modern_alphabet
 
 from openaleph_search.index.mapping import Field
+from openaleph_search.settings import Settings
 
 log = get_logger(__name__)
+settings = Settings()
 
 
 def _clean_number(val: str) -> str:
@@ -97,22 +99,30 @@ def clean_percolator_names(names: list[str]) -> list[str]:
     """Drop names that are too noisy to percolate.
 
     - Multi-token names are always kept (specific enough for phrase matching).
-    - Single-token names are kept only when at least 7 characters. Short
-      single-token names (e.g. "John", "Khan") match too many documents
-      even with BM25 downweighting; at 7+ chars the term is specific
-      enough that the BM25 IDF weighting + per-group boosts reliably
-      rank real matches above noise.
+    - Single-token names are kept only when their length is at least
+      `settings.percolator_single_token_min_length` (default 10) **and**
+      the input list contains no multi-token variant. Short single-token
+      names (e.g. "John", "Khan") match too much arbitrary prose even
+      with BM25 downweighting; even longer single tokens are skipped
+      whenever a more specific multi-token phrase is available, since
+      that phrase already covers any document mentioning the bare name.
     - Empty / whitespace-only entries are dropped.
     """
-    cleaned: list[str] = []
+    min_single = settings.percolator_single_token_min_length
+    cleaned: set[str] = set()
+    single_tokens: set[str] = set()
     for name in names:
         stripped = (name or "").strip()
         if not stripped:
             continue
         tokens = stripped.split()
-        if len(tokens) > 1 or len(stripped) >= 7:
-            cleaned.append(stripped)
-    return cleaned
+        if len(tokens) > 1:
+            cleaned.add(stripped)
+        elif len(stripped) >= min_single:
+            single_tokens.add(stripped)
+    if cleaned:  # multi-token variants present → drop bare singles
+        return list(cleaned)
+    return list(single_tokens)
 
 
 NAME_BOOST = 2.0

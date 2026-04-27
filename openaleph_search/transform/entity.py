@@ -137,18 +137,14 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
     # `query` field at all so they stay out of the percolator candidate
     # set. Globally gated by the `percolation` setting.
     #
-    # Source the percolator names from `name` (canonical) + `previousName`
-    # + `alias` only — NOT `weakAlias`, which in OpenSanctions data is
-    # too loose and causes significant false positives. The full
-    # `entity.names` list is still used above for the entity-matching
-    # path's `name_keys`/`name_parts`/`name_phonetic` fields where those
-    # weaker variants are useful — they are just too noisy to percolate
-    # against arbitrary text.
+    # Source the percolator names from `name` + `previousName` + `alias` only —
+    # NOT `weakAlias`, which is too loose and causes significant false
+    # positives.
     #
-    # Canonical `name` is passed separately so `make_percolator_query`
-    # can boost it above `previousName`/`alias` (which go into one
-    # `other_name` group, demoted in ranking)
-    if settings.percolation and schema_bucket(data["schema"]) == "things":
+    # Main `name`s are passed separately so `make_percolator_query` can boost it
+    # above `previousName`/`alias` (which go into one `other_name` group,
+    # demoted in ranking)
+    if settings.percolation and entity.schema.is_a("Thing"):
         names = list(entity.get("name", quiet=True))
         other_names = list(entity.get("previousName", quiet=True))
         other_names.extend(entity.get("alias", quiet=True))
