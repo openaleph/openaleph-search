@@ -16,13 +16,20 @@ Both return entities from the Document hierarchy (Document, PlainText, HyperText
 
 At query time, `MentionsQuery` loads the target entity via `get_entity` and extracts its matchable names (`registry.name`, `matchable=True` – typically `name`, `alias`, `previousName` …). It then builds the same shape of search query a user would write against the documents bucket, with a `mention_clause` ANDed into the bool body.
 
-The mention clause is a `bool.should` with `minimum_should_match: 1` combining:
+The mention clause is a `bool.should` of **per-entity sub-bools** with `minimum_should_match: 1` at the outer level. Each source entity contributes one sub-bool — itself a `bool.should` with `minimum_should_match: 1` — tagged with `_name=<entity_id>` so ES reports on each hit which entities fired (via `hit.matched_queries`; the mentions search post-processing writes this into `_source.mention_sources`, see [Attribution](#attribution) below).
 
-1. **Fulltext phrase match** – one `match_phrase` clause per matchable name on `Field.CONTENT`, with `slop: 2`. Slop 2 matches the percolator's ingest clauses, tolerating inserted middle initials (`"Jane Doe"` matches `"Jane A. Doe"`) and reversed last-name-first variants (`"Doe, Jane"`). `Field.TEXT` (the per-property text group) is deliberately excluded – `content` already aggregates every text-type value, and matching both fields double-counts the same mention.
-2. **Structured-name bonus** – a `terms` clause over `Field.NAMES` (keyword) across all matchable name variants, boosted to `2.0`. This catches documents that carry the entity's name as an extracted property value (`names` group) rather than only as free text.
-3. **Optional synonym expansion** – when `parser.synonyms=true`, two extra clauses are added via `ExpandNameSynonymsMixin` (shared with `EntitiesQuery`): a `terms` clause over `Field.NAME_SYMBOLS` from the entity's NAME-category symbols (boost `0.5`), and a `terms` clause over `Field.NAME_KEYS` from `index_name_keys` of the entity's names (boost `0.3`). Mirrors the user-text synonyms path in `EntitiesQuery.get_text_query` – same fields, same boosts – but derives keys directly from the entity's discrete names rather than n-gramming user query tokens.
+Each per-entity sub-bool combines two clauses:
+
+1. **Fulltext phrase match** – one `match_phrase` clause per matchable name on `Field.CONTENT`, with `slop: 2`. Slop 2 matches the percolator's ingest clauses, tolerating inserted middle initials (`"Jane Doe"` matches `"Jane A. Doe"`) and reversed last-name-first variants (`"Doe, Jane"`). `Field.TEXT` (the per-property text group) is deliberately excluded – `content` already aggregates every text-type value, and matching both fields double-counts the same mention. Name-synonym matching is handled by the `Field.CONTENT` analyzer at search time (ICU + rigour name synonyms), so an explicit `name_symbols` / `name_keys` keyword expansion is *not* added.
+2. **Structured-name bonus** – a `terms` clause over `Field.NAMES` (keyword) across this entity's matchable name variants, boosted to `2.0`. This catches documents that carry the entity's name as an extracted property value (`names` group) rather than only as free text.
 
 The mention clause is ANDed (`bool.must`) with the rest of the query built by `EntitiesQuery` – `parser.text`, filters, negative filters, auth – so `parser.text` narrows mention hits instead of replacing them.
+
+`parser.synonyms=true` is a no-op for the mention path: the name-synonym clauses `EntitiesQuery` adds on user text (`name_symbols` / `name_keys` terms over the user's `q=` tokens) are suppressed here because the analyzer already performs synonym expansion against `Field.CONTENT` at search time.
+
+### Attribution
+
+Every hit carries `_source.mention_sources`: a sorted list of source entity IDs whose sub-bool fired on that document. For `MentionsQuery` the list is always the single subject entity's ID; for `MultiMentionsQuery` it lists every source entity whose name matched. Name collisions across source entities (e.g. two Persons both called "John Smith") surface all matching IDs — ES can't disambiguate from a text match alone, so the full candidate set is returned.
 
 ### Default schema scope
 
@@ -48,7 +55,9 @@ result = query.search()
 
 for hit in result["hits"]["hits"]:
     doc = hit["_source"]
-    print(doc["caption"], "→", hit.get("highlight", {}).get("content", []))
+    sources = doc["mention_sources"]  # always ["person-abc"] for MentionsQuery
+    snippets = hit.get("highlight", {}).get("content", [])
+    print(doc["caption"], "←", sources, "→", snippets)
 ```
 
 Or via CLI:
@@ -62,7 +71,7 @@ Standard parser knobs flow through automatically:
 
 - `filter:*` – applied as filters on the document search (`filter:dataset`, `filter:countries`, `filter:schema=Pages`, …).
 - `q=…` – free-text narrowing that ANDs with the mention requirement (e.g. "documents that mention this person *and* contain the word 'invoice'").
-- `synonyms=true` – opt-in symbol / name-key expansion of the entity's names (see above).
+- `synonyms=true` – accepted for parser compatibility but does not add any clauses in the mentions path; name synonyms are provided by the target-side `Field.CONTENT` analyzer at search time.
 - `highlight=true` + `highlight_count=N` – fragment snippets with `<em>…</em>` markup around matched phrases, same shape as `EntitiesQuery` highlights.
 - `limit` / `offset` – pagination.
 - `sort` – overrides the default `_score` sort.
@@ -106,6 +115,12 @@ target = SearchQueryParser([
 
 query = MultiMentionsQuery(target, source)
 result = query.search()
+
+for hit in result["hits"]["hits"]:
+    doc = hit["_source"]
+    # Which source entities caused this document to match?
+    sources = doc["mention_sources"]  # e.g. ["watchlist-p1", "watchlist-p7"]
+    print(hit["_id"], "←", sources)
 ```
 
 Also exposed via the CLI:
@@ -122,40 +137,39 @@ The source parser can span **multiple datasets** at once (repeat `filter:dataset
 
 The match surface, ranking, and highlight behaviour are identical:
 
-- Same `match_phrase` clauses on `Field.CONTENT` (slop 2).
+- Same `match_phrase` clauses on `Field.CONTENT` (slop 2), with the same reliance on the analyzer for name-synonym matching.
 - Same structured-name bonus on `Field.NAMES` (boost 2.0).
-- Same optional `synonyms=true` expansion (`Field.NAME_SYMBOLS` + `Field.NAME_KEYS`).
 - Same default schema scope (`["Document"]`), overridable via `filter:schema`.
 - Same `_score` default sort and same `content` highlight injection.
 
-A target document that mentions *more* of the filtered entities' names ranks higher (BM25 summing over the matched phrase clauses), so the natural answer to "which news doc is most relevant to my watchlist?" falls out of the default ordering.
+A target document that mentions *more* of the filtered entities' names ranks higher (sub-bool scores sum at the outer `should` level), so the natural answer to "which news doc is most relevant to my watchlist?" falls out of the default ordering.
 
 ### What differs
 
-- **Name source.** Stage 1 scrolls the source parser and extracts values from a small subset of name-typed properties (`SOURCE_NAME_PROPS` in `query/mentions.py`, currently `("name",)` – primary names only). Aliases / previousNames are intentionally excluded at the source side to keep recall deliberate; they're available on the matchable-names side via `MentionsQuery` on a single entity.
+- **Name source.** Stage 1 scrolls the source parser and pulls `(entity_id, names)` tuples from each hit, reading only the configured name-typed property arrays (`SOURCE_NAME_PROPS` in `query/mentions.py`, currently `("name",)` – primary names only). Aliases / previousNames are intentionally excluded at the source side to keep recall deliberate; they're available on the matchable-names side via `MentionsQuery` on a single entity. Names are NOT deduped across entities, so a name shared by two source entities produces two separate tagged sub-bools (one per entity) and both IDs surface on any hit that fires on that name.
 - **Scale budget.** `MAX_SOURCE_NAMES = 10_000`. Two guards:
-    1. On the first response, `track_total_hits: max_names + 1` short-circuits if the source filter matches more entities than the budget can ever accommodate.
-    2. During the scroll, a per-hit check on the deduped name set catches the case where multi-valued `name` arrays push name count past entity count.
+    1. An `es.count` short-circuit before the scroll fires when the source filter matches more entities than the name budget can ever accommodate (every entity contributes ≥1 name).
+    2. During the scroll, a running sum of name occurrences across all entities catches the case where multi-valued `name` arrays push total names past the cap even if entity count is below it.
     Either trip raises `ValueError` with a message pointing at the source filter.
-- **Response shape.** The response is a flat ranked list of matching documents. It does *not* say *which* of the filtered entities each document mentioned – for that attribution, use the [Percolation](./percolation.md) path with its `percolator_match` signal on each hit.
+- **Response shape.** Each hit carries `_source.mention_sources` — the sorted list of source entity IDs whose sub-bool fired on that document, same as the single-entity path but with more than one ID possible per hit. See [Attribution](#attribution) above.
 
 ### Limits specific to the multi variant
 
 - **10k names cap.** Sources that exceed the cap raise before running Stage 2. Narrow the source filter.
-- **No per-document attribution.** As noted above.
+- **Clause count.** Each source entity contributes one sub-bool containing its phrase clauses plus one `terms` clause. For a 10k-entity source filter this is on the order of `2 × MAX_SOURCE_NAMES` recursive bool clauses; the cluster's `indices.query.bool.max_clause_count` must accommodate it.
 - **Stage 1 cost.** One `es.count` request upfront (shard-level; near-free) followed by one scroll session (with continuations if the filter is large). The count fail-fasts when the source filter is grossly oversized without touching the scroll at all.
 
 ## Limits and trade-offs
 
 ### Recall is bounded by the entity's stored names
 
-The mention clause is built from the entity's matchable name properties only. Variants the entity doesn't know about won't match a document: a PDF that says `"Müller"` against an entity stored only as `"Mueller"` will not fire unless `synonyms=true` lifts them into the same name-symbol / name-key bucket.
+The mention clause is built from the entity's matchable name properties only. Variants the entity doesn't know about won't match a document unless the `Field.CONTENT` analyzer bridges them at search time (ICU + rigour name synonyms handle the common transliteration / accent cases — e.g. `"Müller"` ↔ `"Mueller"`).
 
-If recall matters, either enrich the entity with aliases / `previousName` values, or opt in to `synonyms=true`.
+If recall matters beyond what the analyzer provides, enrich the entity with aliases / `previousName` values on the source side so the mention clause picks them up directly.
 
 ### Phrase matching tolerates small slop
 
-`match_phrase` clauses use `slop: 2`, matching the percolator's ingest side. That tolerates inserted middle initials (`"Jane Doe"` matches `"Jane A. Doe"`) and reversed last-name-first variants (`"Doe, Jane"` / `"Doe Jane"`). It does *not* tolerate large token gaps or out-of-order rearrangements beyond two positions – for those, store explicit alias variants or opt in to `synonyms=true`.
+`match_phrase` clauses use `slop: 2`, matching the percolator's ingest side. That tolerates inserted middle initials (`"Jane Doe"` matches `"Jane A. Doe"`) and reversed last-name-first variants (`"Doe, Jane"` / `"Doe Jane"`). It does *not* tolerate large token gaps or out-of-order rearrangements beyond two positions – for those, store explicit alias variants on the source side.
 
 ### No identifier signal
 

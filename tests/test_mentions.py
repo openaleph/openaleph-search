@@ -5,9 +5,12 @@ Document-family entities whose indexed text contains the entity's
 caption or any of its matchable name variants as a phrase. Standard
 `EntitiesQuery` parser knobs apply: `filter:schema` narrows within
 the Document hierarchy, `parser.text` ANDs with the mention
-requirement, `parser.synonyms=true` folds name_symbols / name_keys
-expansions into the should set via `ExpandNameSynonymsMixin`.
+requirement. Name-synonym matching is handled by the target-side
+`Field.CONTENT` analyzer at search time — `parser.synonyms=true`
+adds no extra clauses in the mentions path.
 """
+
+from unittest.mock import patch
 
 import pytest
 from ftmq.util import make_entity
@@ -44,11 +47,13 @@ def test_mentions_query_single_name(cleanup_after):
     index_bulk("test_mentions_single", [person, doc], sync=True)
 
     result = _mentions("mentions-p1")
-    ids = {h["_id"] for h in result["hits"]["hits"]}
-    assert "mentions-doc-1" in ids
+    hits = {h["_id"]: h for h in result["hits"]["hits"]}
+    assert "mentions-doc-1" in hits
     # The subject entity itself lives in the things bucket and must not
     # appear in the Document-scoped results.
-    assert "mentions-p1" not in ids
+    assert "mentions-p1" not in hits
+    # Single-entity attribution: every hit lists just the subject entity.
+    assert hits["mentions-doc-1"]["_source"]["mention_sources"] == ["mentions-p1"]
 
 
 def test_mentions_query_multiple_variants(cleanup_after):
@@ -230,66 +235,28 @@ def test_mentions_query_highlight(cleanup_after):
     assert "surface_forms" not in hit.get("_source", {})
 
 
-def test_mentions_query_synonyms(cleanup_after):
-    """`synonyms=true` matches documents whose extracted name_symbols /
-    name_keys overlap with the target entity's, even if the exact
-    spelling does not appear in fulltext.
-
-    Documents carry `name_symbols` / `name_keys` derived from their
-    `names` group (see `transform.entity._get_symbols`). A document
-    that lists a related name (e.g. the same WikiData NAME symbol) will
-    match under synonyms even if that exact name string is absent from
-    the fulltext."""
-    person = make_entity(
-        {
-            "id": "mentions-p7",
-            "schema": "Person",
-            "properties": {"name": ["William Synonymtest"]},
-        }
-    )
-    # Document whose bodyText is unrelated but whose `names` property
-    # carries a sibling name — this populates Field.NAME_SYMBOLS /
-    # Field.NAME_KEYS and should match under synonyms.
-    doc = make_entity(
-        {
-            "id": "mentions-doc-syn",
-            "schema": "PlainText",
-            "properties": {
-                "bodyText": ["The board discussed regulatory compliance."],
-                "namesMentioned": ["William Synonymtest"],
-            },
-        }
-    )
-    index_bulk("test_mentions_synonyms", [person, doc], sync=True)
-
-    # Without synonyms: no phrase overlap in the bodyText → no hit on
-    # the multi_match, but the structured Field.NAMES `terms` clause
-    # fires because `namesMentioned` copies into `names`.
-    # To isolate the synonym effect, we check that the symbol_clauses
-    # get added when synonyms=true by inspecting the compiled body.
-    parser_plain = SearchQueryParser([])
-    q_plain = MentionsQuery(parser_plain, entity_id="mentions-p7")
-    body_plain = q_plain.get_body()
-    parser_syn = SearchQueryParser([("synonyms", "true")])
-    q_syn = MentionsQuery(parser_syn, entity_id="mentions-p7")
-    body_syn = q_syn.get_body()
-
-    # The synonym run must have *more* clauses in the mention-bool should
-    # list than the plain run — at minimum one name_symbols terms clause.
-    def _count_mention_shoulds(body):
-        # walk the bool.must for the bool wrapping the mention should-list
-        musts = body["query"]["bool"]["must"]
-        for clause in musts:
-            if (
-                isinstance(clause, dict)
-                and "bool" in clause
-                and "should" in clause["bool"]
-                and clause["bool"].get("minimum_should_match") == 1
-            ):
-                return len(clause["bool"]["should"])
-        return 0
-
-    assert _count_mention_shoulds(body_syn) > _count_mention_shoulds(body_plain)
+def test_mentions_query_synonyms_noop():
+    """`parser.synonyms=true` is accepted for parser compatibility but
+    does not add any clauses in the mentions path — name-synonym
+    matching is left to the `Field.CONTENT` analyzer at search time,
+    so the compiled body is identical with and without the flag."""
+    fake_entity = {
+        "id": "mentions-p-syn",
+        "schema": "Person",
+        "properties": {"name": ["William Synonymtest"]},
+    }
+    with patch(
+        "openaleph_search.index.entities.get_entity",
+        return_value=fake_entity,
+    ):
+        body_plain = MentionsQuery(
+            SearchQueryParser([]), entity_id="mentions-p-syn"
+        ).get_body()
+        body_syn = MentionsQuery(
+            SearchQueryParser([("synonyms", "true")]),
+            entity_id="mentions-p-syn",
+        ).get_body()
+    assert body_plain["query"] == body_syn["query"]
 
 
 def test_mentions_query_entity_without_names_raises(cleanup_after):

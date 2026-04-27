@@ -7,10 +7,7 @@ from openaleph_search.index.admin import clear_index
 from openaleph_search.index.entities import index_bulk
 from openaleph_search.model import SearchAuth
 from openaleph_search.parse.parser import SearchQueryParser
-from openaleph_search.query.mentions import (
-    MultiMentionsQuery,
-    collect_source_names,
-)
+from openaleph_search.query.mentions import MultiMentionsQuery, collect_source_entities
 
 SOURCE_DATASET = "test_watchlist"
 TARGET_DATASET = "test_news"
@@ -109,10 +106,10 @@ def _ids(result) -> list[str]:
     return [h["_id"] for h in result["hits"]["hits"]]
 
 
-# --- collect_source_names -----------------------------------------------
+# --- collect_source_entities --------------------------------------------
 
 
-def test_collect_source_names_country_filter(index_multi_mentions_fixtures):
+def test_collect_source_entities_country_filter(index_multi_mentions_fixtures):
     parser = _parser(
         [
             ("filter:dataset", SOURCE_DATASET),
@@ -120,10 +117,10 @@ def test_collect_source_names_country_filter(index_multi_mentions_fixtures):
         ],
         auth=_admin(),
     )
-    assert collect_source_names(parser) == ["Angela Merkel"]
+    assert collect_source_entities(parser) == [("p-merkel", ["Angela Merkel"])]
 
 
-def test_collect_source_names_multi_country(index_multi_mentions_fixtures):
+def test_collect_source_entities_multi_country(index_multi_mentions_fixtures):
     parser = _parser(
         [
             ("filter:dataset", SOURCE_DATASET),
@@ -132,13 +129,16 @@ def test_collect_source_names_multi_country(index_multi_mentions_fixtures):
         ],
         auth=_admin(),
     )
-    names = collect_source_names(parser)
+    entities = collect_source_entities(parser)
+    ids = {eid for eid, _ in entities}
+    assert ids == {"p-merkel", "p-putin"}
+    names = {n for _, ns in entities for n in ns}
     assert "Angela Merkel" in names
     assert "Vladimir Putin" in names
     assert "John Smith" not in names
 
 
-def test_collect_source_names_empty(index_multi_mentions_fixtures):
+def test_collect_source_entities_empty(index_multi_mentions_fixtures):
     parser = _parser(
         [
             ("filter:dataset", SOURCE_DATASET),
@@ -146,10 +146,10 @@ def test_collect_source_names_empty(index_multi_mentions_fixtures):
         ],
         auth=_admin(),
     )
-    assert collect_source_names(parser) == []
+    assert collect_source_entities(parser) == []
 
 
-def test_collect_source_names_cap(index_multi_mentions_fixtures):
+def test_collect_source_entities_cap(index_multi_mentions_fixtures):
     parser = _parser(
         [("filter:dataset", SOURCE_DATASET)],
         auth=_admin(),
@@ -158,7 +158,7 @@ def test_collect_source_names_cap(index_multi_mentions_fixtures):
     # the per-hit check ("yielded > N names") fires during the scroll when
     # multi-valued names push past the cap. Either trip is valid at cap=1.
     with pytest.raises(ValueError, match=r"Source filter (matched|yielded)"):
-        collect_source_names(parser, max_names=1)
+        collect_source_entities(parser, max_names=1)
 
 
 # --- MultiMentionsQuery --------------------------------------------
@@ -181,18 +181,22 @@ def test_multi_mentions_single_country(index_multi_mentions_fixtures):
         auth=_admin(),
     )
     result = MultiMentionsQuery(_target(), source).search()
-    ids = set(_ids(result))
-    assert "d-merkel" in ids
-    assert "d-both" in ids  # also mentions Merkel (plus Putin)
-    assert "d-putin" not in ids
-    assert "d-smith" not in ids
-    assert "d-unrelated" not in ids
+    by_id = {h["_id"]: h for h in result["hits"]["hits"]}
+    assert "d-merkel" in by_id
+    assert "d-both" in by_id  # also mentions Merkel (plus Putin)
+    assert "d-putin" not in by_id
+    assert "d-smith" not in by_id
+    assert "d-unrelated" not in by_id
+    # Single source entity → every hit attributes to p-merkel.
+    assert by_id["d-merkel"]["_source"]["mention_sources"] == ["p-merkel"]
+    assert by_id["d-both"]["_source"]["mention_sources"] == ["p-merkel"]
 
 
 def test_multi_mentions_multi_country_ranking(
     index_multi_mentions_fixtures,
 ):
-    """Docs mentioning multiple filtered persons rank highest."""
+    """Docs mentioning multiple filtered persons rank highest, and each
+    hit's `mention_sources` lists exactly the source entities it matched."""
     source = _parser(
         [
             ("filter:dataset", SOURCE_DATASET),
@@ -202,11 +206,21 @@ def test_multi_mentions_multi_country_ranking(
         auth=_admin(),
     )
     result = MultiMentionsQuery(_target(), source).search()
-    ids = _ids(result)
+    hits = result["hits"]["hits"]
+    by_id = {h["_id"]: h for h in hits}
+    ids = [h["_id"] for h in hits]
     assert ids[0] == "d-both"  # mentions both Merkel AND Putin
-    assert "d-merkel" in ids
-    assert "d-putin" in ids
-    assert "d-smith" not in ids
+    assert "d-merkel" in by_id
+    assert "d-putin" in by_id
+    assert "d-smith" not in by_id
+    # Per-hit attribution: each document lists the specific source
+    # entities whose sub-bool fired on it.
+    assert by_id["d-both"]["_source"]["mention_sources"] == ["p-merkel", "p-putin"]
+    assert by_id["d-merkel"]["_source"]["mention_sources"] == ["p-merkel"]
+    assert by_id["d-putin"]["_source"]["mention_sources"] == ["p-putin"]
+    # Defensive: the key is always present.
+    for hit in hits:
+        assert "mention_sources" in hit["_source"]
 
 
 def test_multi_mentions_empty_source(index_multi_mentions_fixtures):
@@ -237,9 +251,11 @@ def test_multi_mentions_reversed_order_via_slop(index_multi_mentions_fixtures):
     assert "d-merkel-reversed" in ids
 
 
-def test_multi_mentions_synonyms_monotone(index_multi_mentions_fixtures):
-    """`parser.synonyms=true` flows through without error and only adds
-    recall — every non-synonym hit remains a synonym hit."""
+def test_multi_mentions_synonyms_noop(index_multi_mentions_fixtures):
+    """`parser.synonyms=true` is a no-op for the mention path — the
+    result set is identical because name synonyms are resolved by the
+    target-side analyzer at search time rather than via explicit
+    `name_symbols` / `name_keys` clauses."""
     source = _parser(
         [
             ("filter:dataset", SOURCE_DATASET),
@@ -251,9 +267,7 @@ def test_multi_mentions_synonyms_monotone(index_multi_mentions_fixtures):
     ids_syn = set(
         _ids(MultiMentionsQuery(_target([("synonyms", "true")]), source).search())
     )
-    assert ids_no_syn <= ids_syn
-    assert "d-merkel" in ids_syn
-    assert "d-merkel-reversed" in ids_syn
+    assert ids_no_syn == ids_syn
 
 
 def test_multi_mentions_parity_with_mentions_query(
@@ -297,3 +311,73 @@ def test_multi_mentions_auth_on_target(index_multi_mentions_fixtures):
     )
     result = MultiMentionsQuery(target, source).search()
     assert result["hits"]["total"]["value"] == 0
+
+
+# --- shared-name attribution --------------------------------------------
+
+
+SHARED_DATASET = "test_watchlist_shared"
+SHARED_TARGET_DATASET = "test_news_shared"
+
+SHARED_SOURCES = [
+    {
+        "id": "p-smith-a",
+        "schema": "Person",
+        "properties": {"name": ["John Smith"], "country": ["us"]},
+    },
+    {
+        "id": "p-smith-b",
+        "schema": "Person",
+        "properties": {"name": ["John Smith"], "country": ["gb"]},
+    },
+    {
+        "id": "p-jones",
+        "schema": "Person",
+        "properties": {"name": ["Mary Jones"], "country": ["us"]},
+    },
+]
+
+SHARED_TARGETS = [
+    {
+        "id": "d-shared-smith",
+        "schema": "PlainText",
+        "properties": {
+            "bodyText": ["John Smith signed the declaration at the event."],
+        },
+    },
+    {
+        "id": "d-shared-jones",
+        "schema": "PlainText",
+        "properties": {
+            "bodyText": ["Mary Jones replied to the inquiry on Tuesday."],
+        },
+    },
+]
+
+
+def test_multi_mentions_shared_name_attribution(cleanup_after):
+    """Two source entities share a name — both IDs surface on hits
+    matching that name. ES can't disambiguate from a text match alone,
+    so the full candidate set is returned."""
+    index_bulk(SHARED_DATASET, map(make_entity, SHARED_SOURCES), sync=True)
+    index_bulk(SHARED_TARGET_DATASET, map(make_entity, SHARED_TARGETS), sync=True)
+
+    source = _parser(
+        [("filter:dataset", SHARED_DATASET)],
+        auth=_admin(),
+    )
+    target = _parser(
+        [("filter:dataset", SHARED_TARGET_DATASET)],
+        auth=_admin(),
+    )
+    result = MultiMentionsQuery(target, source).search()
+    by_id = {h["_id"]: h for h in result["hits"]["hits"]}
+
+    # Both John Smith source entities attribute to the shared-name hit.
+    assert by_id["d-shared-smith"]["_source"]["mention_sources"] == [
+        "p-smith-a",
+        "p-smith-b",
+    ]
+    # Jones hit attributes to p-jones only — collision logic doesn't
+    # bleed across non-overlapping names.
+    assert by_id["d-shared-jones"]["_source"]["mention_sources"] == ["p-jones"]

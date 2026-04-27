@@ -9,11 +9,16 @@ Two variants share a common base (`_Mentions`):
   filters), collect the matching entities' names and return Documents
   that mention **any** of them.
 
-Both build the same mention-clause shape — phrase-match on CONTENT +
-TEXT, `terms` on `Field.NAMES` for structured mentions, optional
-synonym expansion under `parser.synonyms=true` — the only difference
-is how `self.names` is populated (one entity's matchable names vs. a
-scroll-and-collect over a filtered entity set).
+Both build the same mention-clause shape — a `bool.should` of
+per-entity sub-bools, each sub-bool wrapping that entity's phrase
+clauses on `Field.CONTENT` and its structured `terms` clause on
+`Field.NAMES`. Name-synonym expansion is left to the target-side
+`Field.CONTENT` analyzer (search-time synonyms), so an explicit
+`name_symbols` / `name_keys` clause is not added — the analyzer
+already matches known name variants without diluting per-entity
+attribution. The sub-bool is tagged with `_name=<entity_id>` so ES
+reports which source entities fired on each hit (surfaced as
+`_source.mention_sources` after post-processing).
 
 Scale (MultiMentionsQuery only): supports up to `MAX_SOURCE_NAMES`
 collected names (10k). Larger sets raise `ValueError`.
@@ -22,6 +27,7 @@ collected names (10k). Larger sets raise `ValueError`.
 from functools import cached_property
 from typing import Any
 
+from elastic_transport import ObjectApiResponse
 from followthemoney import model
 from followthemoney.types import registry
 
@@ -31,10 +37,7 @@ from openaleph_search.index.mapping import Field
 from openaleph_search.parse.parser import SearchQueryParser
 from openaleph_search.query.queries import EntitiesQuery
 from openaleph_search.query.util import bool_query, none_query
-from openaleph_search.transform.util import index_name_keys
 from openaleph_search.util import SchemaType
-
-# --- source-name collection (MultiMentionsQuery only) ---------------------
 
 MAX_SOURCE_NAMES = 10_000
 SCROLL_PAGE_SIZE = 500
@@ -43,21 +46,30 @@ SCROLL_KEEPALIVE = "2m"
 SOURCE_NAME_PROPS: tuple[str, ...] = ("name",)
 
 
-def collect_source_names(
+def collect_source_entities(
     parser: SearchQueryParser,
     *,
     max_names: int = MAX_SOURCE_NAMES,
-) -> list[str]:
-    """Scroll the source-side filter and return deduped matchable names.
+) -> list[tuple[str, list[str]]]:
+    """Scroll the source-side filter and return matchable names per entity.
+
+    Returns `[(entity_id, sorted(unique_names)), ...]` sorted by
+    `entity_id` for stable query hashes. Names are NOT deduped *across*
+    entities — a name shared by two source entities appears once under
+    each of their IDs, so the downstream mention-clause emits a separate
+    tagged sub-bool per entity (each contributing its own attribution).
 
     Reads only the configured name-typed property arrays from `_source`
     (no full-proxy load). Dataset ACL applies via the parser's auth;
     the source parser can filter across one or many collections.
-    Raises `ValueError` if the filter yields more than `max_names`.
+    Raises `ValueError` if the filter yields more than `max_names`
+    total name occurrences (summed across entities), or if the source
+    entity count alone exceeds the budget.
     """
     query = EntitiesQuery(parser)
     es = get_es()
-    names: set[str] = set()
+    entities: list[tuple[str, list[str]]] = []
+    total_names = 0
     index = query.get_index()
     source_query = query.get_query()
 
@@ -86,21 +98,27 @@ def collect_source_names(
     try:
         while resp["hits"]["hits"]:
             for hit in resp["hits"]["hits"]:
+                entity_id = hit["_id"]
                 props = (hit.get("_source") or {}).get("properties", {}) or {}
+                per_entity: set[str] = set()
                 for prop in SOURCE_NAME_PROPS:
-                    names.update(props.get(prop) or [])
-                    # Multi-valued `name` arrays are common (FtM Persons
-                    # often carry several variants: "Jane Doe", "Doe,
-                    # Jane", "J. Doe", …). The deduped name set routinely
-                    # grows faster than the entity count, so this
-                    # per-hit check is the primary budget enforcement —
-                    # the entity-count short-circuit above is only a
-                    # fast upper-bound gate.
-                    if len(names) > max_names:
-                        raise ValueError(
-                            f"Source filter yielded > {max_names} names. "
-                            "Narrow the source filter."
-                        )
+                    per_entity.update(props.get(prop) or [])
+                if not per_entity:
+                    continue
+                entities.append((entity_id, sorted(per_entity)))
+                total_names += len(per_entity)
+                # Multi-valued `name` arrays are common (FtM Persons
+                # often carry several variants: "Jane Doe", "Doe,
+                # Jane", "J. Doe", …). The summed name count routinely
+                # grows faster than the entity count, so this per-hit
+                # check is the primary budget enforcement — the
+                # entity-count short-circuit above is only a fast
+                # upper-bound gate.
+                if total_names > max_names:
+                    raise ValueError(
+                        f"Source filter yielded > {max_names} names. "
+                        "Narrow the source filter."
+                    )
             scroll_id = resp.get("_scroll_id")
             if not scroll_id:
                 break
@@ -112,10 +130,7 @@ def collect_source_names(
                 es.clear_scroll(scroll_id=scroll_id)
             except Exception:
                 pass
-    return sorted(names)
-
-
-# --- shared helpers -------------------------------------------------------
+    return sorted(entities, key=lambda e: e[0])
 
 
 def name_phrase_shoulds(names: list[str]) -> list[dict[str, Any]]:
@@ -149,12 +164,20 @@ def name_phrase_shoulds(names: list[str]) -> list[dict[str, Any]]:
 
 class _Mentions(EntitiesQuery):
     """Internal base: builds the mention-clause + default sort/highlight
-    from `self.names`. Subclasses populate `self.names` in `__init__`
-    before calling `super().__init__(parser)`.
+    from `self.source_entities`. Subclasses populate
+    `self.source_entities` (and the flat `self.names` used for
+    highlighting) in `__init__` before calling `super().__init__(parser)`.
     """
 
     _SCHEMA = "Document"
 
+    # Per-entity (id, names) tuples driving the mention-clause shape.
+    # Each tuple produces one `_name`-tagged sub-bool so ES can report
+    # which source entities fired on each hit via `hit.matched_queries`.
+    source_entities: list[tuple[str, list[str]]]
+    # Flat, deduped list of all names across source_entities. Retained
+    # because `get_highlight` and any name-aggregating post-processing
+    # want to work over the union rather than per-entity.
     names: list[str]
 
     @cached_property
@@ -174,41 +197,74 @@ class _Mentions(EntitiesQuery):
     def get_index(self) -> str:
         return entities_read_index(schema=self.schemata)
 
+    def get_text_query(self) -> list[dict[str, Any]]:
+        # Bypass `EntitiesQuery.get_text_query`'s `parser.synonyms`-gated
+        # user-text expansion. Name-synonym matching on `Field.CONTENT`
+        # is provided by the target index's analyzer at search time, so
+        # the explicit `name_symbols` / `name_keys` terms clauses add
+        # nothing for mention queries and would dilute per-entity
+        # attribution.
+        return super(EntitiesQuery, self).get_text_query()
+
     def get_inner_query(self) -> dict[str, Any]:
         # Parent builds parser text + filters + negative filters + auth.
-        # AND in a mention_clause requiring at least one of the tracked
-        # names (or synonym expansions) to appear as a phrase in a
-        # document text field.
+        # AND in a mention_clause whose should list holds one sub-bool
+        # per source entity; each sub-bool carries that entity's phrase
+        # clauses + structured-names clause, tagged with
+        # `_name=<entity_id>` so ES reports which entities fired on each
+        # hit via `hit.matched_queries`.
+        #
+        # No explicit name-symbols / name-keys synonym expansion is added
+        # here — the target-side `Field.CONTENT` analyzer already applies
+        # search-time name synonyms to phrase matches, so an explicit
+        # terms-on-keyword synonym clause would only duplicate what the
+        # analyzer provides (and dilute per-entity attribution).
         inner = super().get_inner_query()
-        if not self.names:
+        if not self.source_entities:
+            return none_query()
+
+        per_entity: list[dict[str, Any]] = []
+        for entity_id, names in self.source_entities:
+            if not names:
+                continue
+            sub = bool_query()
+            sub["bool"]["should"].extend(name_phrase_shoulds(names))
+            # Structured-mention bonus: the target Document already carries
+            # one of these names as a name property (extracted into
+            # Field.NAMES). Field.NAMES is a keyword field — exact-match
+            # `terms` across the entity's name variants.
+            sub["bool"]["should"].append({"terms": {Field.NAMES: names, "boost": 2.0}})
+            sub["bool"]["minimum_should_match"] = 1
+            # `_name` on a bool fires when the bool matches as a whole,
+            # so a single entity_id tag covers all of its sub-clauses
+            # without having to tag each one individually.
+            sub["bool"]["_name"] = entity_id
+            per_entity.append(sub)
+
+        if not per_entity:
             return none_query()
 
         mention_clause = bool_query()
-        mention_clause["bool"]["should"].extend(name_phrase_shoulds(self.names))
-        # Structured-mention bonus: the target Document already carries
-        # one of these names as a name property (extracted into Field.NAMES).
-        # Field.NAMES is a keyword field — exact-match `terms` across
-        # every matchable name variant.
-        mention_clause["bool"]["should"].append(
-            {"terms": {Field.NAMES: self.names, "boost": 2.0}}
-        )
-
-        if self.parser.synonyms:
-            # Synonym expansion is shared with EntitiesQuery via
-            # ExpandNameSynonymsMixin. Mentions queries have discrete
-            # entity names, so `index_name_keys` is a direct hash (no
-            # n-gram walk needed).
-            symbols_clause = self.name_symbols_clause(*self.names)
-            if symbols_clause is not None:
-                mention_clause["bool"]["should"].append(symbols_clause)
-            name_keys = list(index_name_keys(model["LegalEntity"], self.names))
-            keys_clause = self.name_keys_clause(name_keys)
-            if keys_clause is not None:
-                mention_clause["bool"]["should"].append(keys_clause)
-
+        mention_clause["bool"]["should"] = per_entity
         mention_clause["bool"]["minimum_should_match"] = 1
         inner.setdefault("bool", {}).setdefault("must", []).append(mention_clause)
         return inner
+
+    def search(self) -> ObjectApiResponse:
+        # Attach per-hit source-entity attribution. ES populates
+        # `hit.matched_queries` with the `_name` tags of every named
+        # clause that fired on that hit — for mentions queries that's
+        # the per-entity sub-bool tags, i.e. the source entity IDs.
+        # (Note: `hit.matched_queries` is the TOP-level named-queries
+        # slot; the percolator path reads from
+        # `hit.fields._percolator_document_slot_0_matched_queries`
+        # instead — see comment at
+        # openaleph_search/query/queries.py:515–517.)
+        result = super().search()
+        for hit in result.get("hits", {}).get("hits", []) or []:
+            matched = hit.get("matched_queries") or []
+            hit.setdefault("_source", {})["mention_sources"] = sorted(matched)
+        return result
 
     def get_sort(self) -> list[str | dict[str, dict[str, Any]]]:
         # The mention-clause carries scoring signals even when the parser
@@ -260,9 +316,6 @@ class _Mentions(EntitiesQuery):
         return highlight
 
 
-# --- public subclasses ----------------------------------------------------
-
-
 class MentionsQuery(_Mentions):
     """Find Document-family entities that mention a given named entity.
 
@@ -276,12 +329,10 @@ class MentionsQuery(_Mentions):
     narrows within the Document hierarchy (e.g. to `Pages`),
     `filter:dataset`, `filter:countries`, `highlight`, `highlight_count`,
     `limit`, `offset`, `sort`, auth. `parser.text` ANDs with the mention
-    requirement (free-text narrowing of mention hits).
-    `parser.synonyms=true` mirrors `EntitiesQuery.get_text_query` by
-    adding `terms` clauses on the indexed `Field.NAME_SYMBOLS` and
-    `Field.NAME_KEYS` keyword fields derived from the entity's names —
-    these fields are populated on Documents too (see
-    `transform.entity._get_symbols`) from extracted name properties.
+    requirement (free-text narrowing of mention hits). Name-synonym
+    matching is provided by the target-side `Field.CONTENT` analyzer at
+    search time; `parser.synonyms=true` no longer adds any extra
+    clauses to the mention path.
 
     Unlike `PercolatorQuery`, no `surface_forms` post-processing is
     performed — the standard `EntitiesQuery` highlight block is
@@ -307,7 +358,8 @@ class MentionsQuery(_Mentions):
             )
         self.entity_id = entity_id
         self.entity = proxy
-        self.names = names
+        self.names = sorted(set(names))
+        self.source_entities = [(entity_id, self.names)]
         super().__init__(parser)
 
 
@@ -320,7 +372,13 @@ class MultiMentionsQuery(_Mentions):
     or multiple collections (`filter:dataset=a&filter:dataset=b` etc.).
 
     Construction does Stage 1 eagerly (one ES scroll) to materialize
-    the `self.names` list; Stage 2 runs on `.search()`.
+    the `self.source_entities` list; Stage 2 runs on `.search()`.
+
+    Each hit returned by `.search()` carries a
+    `_source.mention_sources` list — the source entity IDs whose
+    per-entity sub-bool fired on that document. Name collisions across
+    source entities (e.g. two Persons both named "John Smith") surface
+    all matching IDs.
     """
 
     def __init__(
@@ -329,5 +387,6 @@ class MultiMentionsQuery(_Mentions):
         source_parser: SearchQueryParser,
     ):
         self.source_parser = source_parser
-        self.names = collect_source_names(source_parser)
+        self.source_entities = collect_source_entities(source_parser)
+        self.names = sorted({n for _, names in self.source_entities for n in names})
         super().__init__(parser)
