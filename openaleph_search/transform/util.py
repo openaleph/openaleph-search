@@ -1,7 +1,7 @@
 import itertools
 import unicodedata
 from functools import lru_cache
-from typing import Any
+from typing import Any, Iterable
 
 from anystore.logging import get_logger
 from followthemoney import EntityProxy
@@ -62,7 +62,7 @@ def clean_tokenize_name(schema: Schema, name: str) -> list[str]:
     return tokenize_name(name)
 
 
-def phonetic_names(schema: Schema, names: list[str]) -> set[str]:
+def phonetic_names(schema: Schema, names: Iterable[str]) -> set[str]:
     """Generate phonetic forms of the given names."""
     phonemes: set[str] = set()
     if schema.is_a("LegalEntity"):  # only include namy things
@@ -78,7 +78,7 @@ def phonetic_names(schema: Schema, names: list[str]) -> set[str]:
     return phonemes
 
 
-def index_name_parts(schema: Schema, names: list[str]) -> set[str]:
+def index_name_parts(schema: Schema, names: Iterable[str]) -> set[str]:
     """Generate a list of indexable name parts from the given names."""
     parts: set[str] = set()
     if schema.is_a("LegalEntity"):  # only include namy things
@@ -95,12 +95,22 @@ def index_name_parts(schema: Schema, names: list[str]) -> set[str]:
     return parts
 
 
-def clean_percolator_names(names: list[str]) -> list[str]:
-    """Drop names that are too noisy to percolate.
+def clean_matching_names(names: Iterable[str]) -> set[str]:
+    """Shared cleaner for entity names used in any matching context.
+
+    Returns a **set** so callers can rely on uniqueness without
+    re-deduping; convert to `list` (or `sorted(...)`) only at the ES
+    JSON boundary.
+
+    Applied wherever raw entity names become query clauses — percolator
+    queries (`make_percolator_query`), document-mentions queries
+    (`MentionsQuery`, `MultiMentionsQuery`), and entity-vs-entity matching
+    (`match_query`, `blocking_query`). One cleaner = one knob to tune
+    recall vs precision globally.
 
     - Multi-token names are always kept (specific enough for phrase matching).
     - Single-token names are kept only when their length is at least
-      `settings.percolator_single_token_min_length` (default 10) **and**
+      `settings.matching_single_token_min_length` (default 10) **and**
       the input list contains no multi-token variant. Short single-token
       names (e.g. "John", "Khan") match too much arbitrary prose even
       with BM25 downweighting; even longer single tokens are skipped
@@ -108,7 +118,7 @@ def clean_percolator_names(names: list[str]) -> list[str]:
       that phrase already covers any document mentioning the bare name.
     - Empty / whitespace-only entries are dropped.
     """
-    min_single = settings.percolator_single_token_min_length
+    min_single = settings.matching_single_token_min_length
     cleaned: set[str] = set()
     single_tokens: set[str] = set()
     for name in names:
@@ -120,9 +130,7 @@ def clean_percolator_names(names: list[str]) -> list[str]:
             cleaned.add(stripped)
         elif len(stripped) >= min_single:
             single_tokens.add(stripped)
-    if cleaned:  # multi-token variants present → drop bare singles
-        return list(cleaned)
-    return list(single_tokens)
+    return cleaned if cleaned else single_tokens
 
 
 NAME_BOOST = 2.0
@@ -165,13 +173,15 @@ def make_percolator_query(
     caller should NOT add a percolator field to the entity (so the entity
     stays out of the percolator candidate set).
     """
-    cleaned_names = clean_percolator_names(names)
-    cleaned_others = clean_percolator_names(other_names or [])
+    cleaned_names = clean_matching_names(names)
+    cleaned_others = clean_matching_names(other_names or [])
     if not cleaned_names and not cleaned_others:
         return None
 
+    # Iterate sorted so the stored percolator JSON is deterministic
+    # across re-indexing (cleaner returns a set).
     shoulds: list[dict[str, Any]] = []
-    for n in cleaned_names:
+    for n in sorted(cleaned_names):
         shoulds.append(
             {
                 "match_phrase": {
@@ -184,7 +194,7 @@ def make_percolator_query(
                 }
             }
         )
-    for n in cleaned_others:
+    for n in sorted(cleaned_others):
         shoulds.append(
             {
                 "match_phrase": {
@@ -200,7 +210,7 @@ def make_percolator_query(
     return {"bool": {"minimum_should_match": 1, "should": shoulds}}
 
 
-def index_name_keys(schema: Schema, names: list[str]) -> set[str]:
+def index_name_keys(schema: Schema, names: Iterable[str]) -> set[str]:
     """Generate a indexable name keys from the given names."""
     keys: set[str] = set()
     for name in names:

@@ -193,15 +193,31 @@ Entities with many aliases use representative names only.
 
 ## Name selection
 
-See `openaleph_search.query.matching:pick_names`
+Two stages run in sequence before any name flows into a query clause:
 
-For entities with many aliases, the system selects representative names:
+### 1. `clean_matching_names` (shared cleaner)
 
-1. Pick centroid name (most representative)
-2. Pick most dissimilar names using Levenshtein distance
-3. Use up to 5 names total
+Both `match_query` and `blocking_query` (and `MentionsQuery`, `MultiMentionsQuery`, the percolator transform) run the entity's matchable names through `openaleph_search.transform.util:clean_matching_names`. The cleaner returns a `set[str]` so callers can rely on uniqueness without re-deduping.
 
-This prevents performance issues while maintaining matching quality.
+Rules:
+
+- **Multi-token names** are always kept.
+- **Single-token names** are kept only when both (a) their length is ≥ `OPENALEPH_SEARCH_MATCHING_SINGLE_TOKEN_MIN_LENGTH` (default `10`) and (b) the same input list contains no multi-token variant — so `["Vladimir Putin", "Vladimir"]` reduces to `{"Vladimir Putin"}`, while `["Microsoft"]` is kept and `["Doe"]` is dropped.
+- **Empty / whitespace-only** entries are dropped.
+
+Lowering the threshold globally (via the env var) widens recall everywhere at the cost of more false positives in the percolator and mention paths. The test suite lowers it to `7` via pytest-env so fixtures like `KwaZulu` (7 chars) keep matching.
+
+Note the recall trade-off for `match_query`: an entity with `["Vladimir Putin", "Vladimir", "VP"]` previously gave `pick_names` three diverse picks; after cleaning, only the multi-token form survives and short aliases like `"VP"` never reach `Field.NAMES` / `name_keys` / `name_parts`. Lower the threshold or enrich the source data with longer multi-token variants if those aliases matter for blocking.
+
+### 2. `pick_names` (budget cap)
+
+See `openaleph_search.query.matching:pick_names`. The cleaner's output then flows through `pick_names`, which budgets the number of names submitted to the index for cheap candidate retrieval:
+
+1. Pick a centroid name (`registry.name.pick`).
+2. Pick the most dissimilar remaining names using Levenshtein distance.
+3. Cap at 5 names total.
+
+After cleaning, most entities are already under the 5-name cap and `pick_names` is a no-op — its diversification cost only kicks in for alias-rich entities (sanctions data with many spellings).
 
 ## Query structure
 

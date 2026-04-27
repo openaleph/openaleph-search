@@ -1,5 +1,5 @@
 import logging
-from typing import Any, TypeAlias
+from typing import Any, Iterable, TypeAlias
 
 from followthemoney import EntityProxy, Schema
 from followthemoney.types import registry
@@ -10,6 +10,7 @@ from openaleph_search.index.mapping import Field, property_field_name
 from openaleph_search.query.util import BoolQuery, bool_query, none_query
 from openaleph_search.settings import Settings
 from openaleph_search.transform.util import (
+    clean_matching_names,
     index_name_keys,
     index_name_parts,
     phonetic_names,
@@ -27,7 +28,7 @@ MATCH_GROUPS = [
 MAX_CLAUSES = 500
 
 
-def pick_names(names: list[str], limit: int = 3) -> list[str]:
+def pick_names(names: Iterable[str], limit: int = 3) -> list[str]:
     """Try to pick a few non-overlapping names to search for when matching
     an entity. The problem here is that if we receive an API query for an
     entity with hundreds of aliases, it becomes prohibitively expensive to
@@ -36,8 +37,11 @@ def pick_names(names: list[str], limit: int = 3) -> list[str]:
     them.
 
     This is a bit over the top and will come back to haunt us."""
+    # Coerce to list once — input may be a set (e.g. cleaner output) and
+    # we need stable indexing / `len()` plus deterministic iteration.
+    names = sorted(names) if not isinstance(names, list) else names
     if len(names) <= limit:
-        return names
+        return list(names)
     picked: list[str] = []
     processed_ = [preprocess_name(n) for n in names]
     names = [n for n in processed_ if n is not None]
@@ -70,7 +74,7 @@ def _min_should_match_script(minimum: int = 2) -> dict[str, str]:
     return {"source": f"Math.min({minimum}, params.num_terms)"}
 
 
-def names_query(schema: Schema, names: list[str]) -> Clauses:
+def names_query(schema: Schema, names: Iterable[str]) -> Clauses:
     """Build name matching clauses for scoring similar entities.
 
     Uses specialized name fields for matching:
@@ -80,6 +84,11 @@ def names_query(schema: Schema, names: list[str]) -> Clauses:
     - name_phonetic: spelling/transliteration variants
     - name_symbols: synonyms, nicknames, company suffixes
     """
+    # Materialize once — `names` is iterated several times below
+    # (pick_names, index_name_keys, index_name_parts, phonetic_names,
+    # get_name_symbols(*names)) and a single-pass iterator would be
+    # exhausted after the first use. Sets and lists are unaffected.
+    names = list(names)
     shoulds: Clauses = []
 
     # 1. names: exact match with order preserved (keyword field with normalizer)
@@ -189,8 +198,10 @@ def match_query(
     elif datasets:
         query["bool"]["filter"].append({"terms": {Field.DATASET: datasets}})
 
-    # match on magic names
-    names = entity.get_type_values(registry.name, matchable=True)
+    # match on magic names — feed through the shared cleaner so short
+    # single tokens and singles-shadowed-by-multi-token variants are
+    # dropped (same knob as percolator / mentions paths).
+    names = clean_matching_names(entity.get_type_values(registry.name, matchable=True))
     names_lookup = names_query(entity.schema, names)
     if names_lookup:
         query["bool"]["must"].append(
@@ -255,7 +266,7 @@ def blocking_query(
     if not entity.schema.matchable:
         return {"match_none": {}}
 
-    names = entity.get_type_values(registry.name, matchable=True)
+    names = clean_matching_names(entity.get_type_values(registry.name, matchable=True))
     if not names:
         return {"match_none": {}}
 

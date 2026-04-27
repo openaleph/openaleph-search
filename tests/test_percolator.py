@@ -13,7 +13,7 @@ Available test entities (from `tests/conftest.py`):
 - `KwaZulu` (Company id `id-company`, `test_public`, single token, 7 chars,
   exactly at the cleaner threshold — kept)
 - `Banana` (Person ids `banana1`, `banana2`, `test_private`, single token,
-  6 chars — DROPPED by `clean_percolator_names`, so they should NOT be
+  6 chars — DROPPED by `clean_matching_names`, so they should NOT be
   matched even if a doc says "Banana")
 """
 
@@ -94,7 +94,7 @@ def test_percolator_query_dehydrate(index_entities):
 
 
 def test_percolator_query_short_single_token_dropped(index_entities, cleanup_after):
-    """clean_percolator_names drops single-token names < 7 chars.
+    """clean_matching_names drops single-token names < 7 chars.
 
     The fixture has Person `banana1`/`banana2` with name "Banana" (6 chars,
     single token). They should NOT have a stored percolator query, so a

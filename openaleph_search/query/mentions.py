@@ -37,6 +37,7 @@ from openaleph_search.index.mapping import Field
 from openaleph_search.parse.parser import SearchQueryParser
 from openaleph_search.query.queries import EntitiesQuery
 from openaleph_search.query.util import bool_query, none_query
+from openaleph_search.transform.util import clean_matching_names
 from openaleph_search.util import SchemaType
 
 MAX_SOURCE_NAMES = 10_000
@@ -100,13 +101,21 @@ def collect_source_entities(
             for hit in resp["hits"]["hits"]:
                 entity_id = hit["_id"]
                 props = (hit.get("_source") or {}).get("properties", {}) or {}
-                per_entity: set[str] = set()
+                raw: list[str] = []
                 for prop in SOURCE_NAME_PROPS:
-                    per_entity.update(props.get(prop) or [])
-                if not per_entity:
+                    raw.extend(props.get(prop) or [])
+                # Run every source entity's names through the shared
+                # matching-names cleaner so percolator, mentions and
+                # entity-vs-entity matching all share one recall/precision
+                # knob (`settings.matching_single_token_min_length`).
+                # Entities whose names are entirely cleaned away (only
+                # short single tokens, or empty) are skipped — they
+                # would contribute nothing useful to the mention clause.
+                cleaned = clean_matching_names(raw)
+                if not cleaned:
                     continue
-                entities.append((entity_id, sorted(per_entity)))
-                total_names += len(per_entity)
+                entities.append((entity_id, sorted(cleaned)))
+                total_names += len(cleaned)
                 # Multi-valued `name` arrays are common (FtM Persons
                 # often carry several variants: "Jane Doe", "Doe,
                 # Jane", "J. Doe", …). The summed name count routinely
@@ -350,15 +359,27 @@ class MentionsQuery(_Mentions):
         if data is None:
             raise ValueError(f"Entity {entity_id!r} not found.")
         proxy = model.get_proxy(data)
-        names = proxy.get_type_values(registry.name, matchable=True)
-        if not names:
+        raw = proxy.get_type_values(registry.name, matchable=True)
+        if not raw:
             raise ValueError(
                 f"Entity {entity_id!r} has no matchable names — "
                 f"MentionsQuery requires a named entity (Person, Company, ...)."
             )
+        # Apply the shared matching-names cleaner so the single-entity
+        # mention path drops short / single-token-redundant names the
+        # same way percolator and matching paths do.
+        cleaned = sorted(clean_matching_names(raw))
+        if not cleaned:
+            raise ValueError(
+                f"Entity {entity_id!r} has no matchable names after "
+                "`clean_matching_names` (only short single tokens, or "
+                "single tokens shadowed by multi-token variants). Adjust "
+                "`OPENALEPH_SEARCH_MATCHING_SINGLE_TOKEN_MIN_LENGTH` or "
+                "enrich the entity with longer / multi-token names."
+            )
         self.entity_id = entity_id
         self.entity = proxy
-        self.names = sorted(set(names))
+        self.names = cleaned
         self.source_entities = [(entity_id, self.names)]
         super().__init__(parser)
 

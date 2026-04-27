@@ -14,7 +14,7 @@ Both return entities from the Document hierarchy (Document, PlainText, HyperText
 
 ## How it works
 
-At query time, `MentionsQuery` loads the target entity via `get_entity` and extracts its matchable names (`registry.name`, `matchable=True` – typically `name`, `alias`, `previousName` …). It then builds the same shape of search query a user would write against the documents bucket, with a `mention_clause` ANDed into the bool body.
+At query time, `MentionsQuery` loads the target entity via `get_entity` and extracts its matchable names (`registry.name`, `matchable=True` – typically `name`, `alias`, `previousName` …). The names go through the shared `clean_matching_names` cleaner – the same one applied to the percolator and to entity-vs-entity matching – so short single tokens (e.g. `"Doe"`) and singles shadowed by a multi-token variant (e.g. `"Vladimir"` when `"Vladimir Putin"` is also present) are dropped before any phrase clause is built. The cleaner threshold is governed by `OPENALEPH_SEARCH_MATCHING_SINGLE_TOKEN_MIN_LENGTH` (default `10`); see [Matching](./matching.md#name-selection) for the full rules. The cleaned set then drives a `mention_clause` ANDed into the bool body of the same shape of search query a user would write against the documents bucket.
 
 The mention clause is a `bool.should` of **per-entity sub-bools** with `minimum_should_match: 1` at the outer level. Each source entity contributes one sub-bool — itself a `bool.should` with `minimum_should_match: 1` — tagged with `_name=<entity_id>` so ES reports on each hit which entities fired (via `hit.matched_queries`; the mentions search post-processing writes this into `_source.mention_sources`, see [Attribution](#attribution) below).
 
@@ -85,6 +85,7 @@ Standard parser knobs flow through automatically:
 - `entity_id` is falsy.
 - The entity is not found in the index.
 - The entity has no matchable names (`registry.name`, `matchable=True`). A Document or a nameless schema cannot be the subject of a mentions search – there is nothing to phrase-match on.
+- The entity's names are all dropped by `clean_matching_names` – e.g. an entity with only short single-token names like `"Doe"`. Lower `OPENALEPH_SEARCH_MATCHING_SINGLE_TOKEN_MIN_LENGTH` or enrich the entity with longer / multi-token variants.
 
 ## Multi-entity variant – `MultiMentionsQuery`
 
@@ -146,7 +147,7 @@ A target document that mentions *more* of the filtered entities' names ranks hig
 
 ### What differs
 
-- **Name source.** Stage 1 scrolls the source parser and pulls `(entity_id, names)` tuples from each hit, reading only the configured name-typed property arrays (`SOURCE_NAME_PROPS` in `query/mentions.py`, currently `("name",)` – primary names only). Aliases / previousNames are intentionally excluded at the source side to keep recall deliberate; they're available on the matchable-names side via `MentionsQuery` on a single entity. Names are NOT deduped across entities, so a name shared by two source entities produces two separate tagged sub-bools (one per entity) and both IDs surface on any hit that fires on that name.
+- **Name source.** Stage 1 scrolls the source parser and pulls `(entity_id, names)` tuples from each hit, reading only the configured name-typed property arrays (`SOURCE_NAME_PROPS` in `query/mentions.py`, currently `("name",)` – primary names only). Aliases / previousNames are intentionally excluded at the source side to keep recall deliberate; they're available on the matchable-names side via `MentionsQuery` on a single entity. Each entity's names go through `clean_matching_names` per-entity (entities whose names are entirely cleaned away are skipped). Names are not deduped *across* entities, so a name shared by two source entities produces two separate tagged sub-bools (one per entity) and both IDs surface on any hit that fires on that name.
 - **Scale budget.** `MAX_SOURCE_NAMES = 10_000`. Two guards:
     1. An `es.count` short-circuit before the scroll fires when the source filter matches more entities than the name budget can ever accommodate (every entity contributes ≥1 name).
     2. During the scroll, a running sum of name occurrences across all entities catches the case where multi-valued `name` arrays push total names past the cap even if entity count is below it.
@@ -163,9 +164,11 @@ A target document that mentions *more* of the filtered entities' names ranks hig
 
 ### Recall is bounded by the entity's stored names
 
-The mention clause is built from the entity's matchable name properties only. Variants the entity doesn't know about won't match a document unless the `Field.CONTENT` analyzer bridges them at search time (ICU + rigour name synonyms handle the common transliteration / accent cases — e.g. `"Müller"` ↔ `"Mueller"`).
+The mention clause is built from the entity's matchable name properties only, after they pass through `clean_matching_names` (see [Matching → Name selection](./matching.md#name-selection)). Variants the entity doesn't know about won't match a document unless the `Field.CONTENT` analyzer bridges them at search time (ICU + rigour name synonyms handle the common transliteration / accent cases — e.g. `"Müller"` ↔ `"Mueller"`).
 
-If recall matters beyond what the analyzer provides, enrich the entity with aliases / `previousName` values on the source side so the mention clause picks them up directly.
+Two specific cleaner effects worth knowing here: (1) any single-token name shorter than `OPENALEPH_SEARCH_MATCHING_SINGLE_TOKEN_MIN_LENGTH` (default 10) is dropped, and (2) single-token variants are dropped entirely whenever the same entity also carries a multi-token variant — so an entity with `["Vladimir Putin", "Vladimir"]` only mention-matches on the multi-token form.
+
+If recall matters beyond what the analyzer + cleaner allow, enrich the entity with longer / multi-token aliases / `previousName` values on the source side, or lower the cleaner threshold globally.
 
 ### Phrase matching tolerates small slop
 

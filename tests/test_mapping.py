@@ -2,7 +2,6 @@ import time
 
 from followthemoney import EntityProxy, model
 
-from openaleph_search.core import get_es
 from openaleph_search.index.entities import index_proxy
 from openaleph_search.index.indexes import (
     entities_read_index,
@@ -205,6 +204,11 @@ def test_mapping_spec():
     assert full_mapping["properties"]["numeric"]["properties"]["dates"] == {
         "type": "double"
     }
+
+    # registry.{text,html,json} must not be indexed at all
+    email_mapping = make_schema_mapping(["Email"])
+    assert email_mapping["bodyText"]["index"] is False
+    assert email_mapping["bodyHtml"]["index"] is False
 
 
 def test_mapping_schema_bucket():
