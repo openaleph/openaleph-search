@@ -114,12 +114,21 @@ class Settings(BaseSettings):
 
     # Minimum length for a single-token name to be kept by
     # `clean_matching_names` — the shared cleaner applied wherever entity
-    # names become query clauses (matching, percolator, mentions). Multi-
-    # token names are always kept; short single tokens (e.g. "John") match
-    # too much arbitrary prose. Single tokens are also dropped entirely
-    # whenever the input list contains any multi-token variant. Lowering
-    # this widens recall everywhere at the cost of more false positives.
+    # names become query clauses (matching, percolator, mentions). Short
+    # single tokens (e.g. "John") match too much arbitrary prose. Single
+    # tokens are also dropped entirely whenever the input list contains
+    # any multi-token variant. Lowering this widens recall everywhere at
+    # the cost of more false positives.
     matching_single_token_min_length: int = 10
+
+    # Minimum length any one token must reach for a *multi-token* name to
+    # be kept by `clean_matching_names` (default mode). Guards against
+    # initials-only strings like "A. A." that pass the multi-token check
+    # but match arbitrary prose far too aggressively. At the default of
+    # 3, "Wei Liu" is kept (both tokens are 3 chars), while "A. A." and
+    # "Bo Li" are dropped. Lower to 2 to keep very short multi-token
+    # names; raise to 4 to require at least one full word.
+    matching_multi_token_min_length: int = 3
 
     # Pre-build global ordinals on frequently-aggregated keyword fields
     # during refresh. Eliminates first-query latency spikes at the cost of

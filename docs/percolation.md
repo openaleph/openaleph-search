@@ -33,7 +33,7 @@ When `highlight=true` is **not** set (the default), ES skips the highlighter ent
 
 The transform runs the name list through `clean_matching_names` (`openaleph_search/transform/util.py`) — the **shared cleaner** also used by `MentionsQuery` / `MultiMentionsQuery` (default mode) and by `match_query` / `blocking_query` in `query/matching.py` (recall mode, see [Matching → Name selection](./matching.md#name-selection)). The percolator runs in default mode — `discard_single_token=True`:
 
-- **Multi-token names** are kept as-is (e.g. `"Jane Doe"`, `"J. Doe"`, `"Acme Corporation"`). Phrase matching is specific enough.
+- **Multi-token names** are kept as long as at least one token has length ≥ `OPENALEPH_SEARCH_MATCHING_MULTI_TOKEN_MIN_LENGTH` (default **3**) — e.g. `"Jane Doe"`, `"J. Doe"`, `"Acme Corporation"`. This guards against initials-only strings like `"A. A."` that pass the multi-token check but would match arbitrary prose far too aggressively.
 - **Single-token names** are only kept when **(a)** they meet the configured minimum length (default **10**, set via `OPENALEPH_SEARCH_MATCHING_SINGLE_TOKEN_MIN_LENGTH`) *and* **(b)** the same input list contains no multi-token variant. So a Person stored as `["Vladimir Putin", "Vladimir"]` percolates only on `"Vladimir Putin"` (the multi-token entry wins outright); a single-token-only entity like `"Microsoft"` is kept; `"Acme"`, `"Doe"`, and `"Banana"` are dropped at the default. Short single tokens produce too many false positives against arbitrary prose, and even the longer ones are skipped whenever a more specific phrase variant is available — the multi-token clause already covers any document that mentions the single-token form too.
 - **Empty / whitespace-only** entries are dropped.
 

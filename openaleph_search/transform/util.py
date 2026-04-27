@@ -114,7 +114,11 @@ def clean_matching_names(
     With `discard_single_token=True` (default — used by the percolator
     and mention paths, which match against arbitrary fulltext prose):
 
-    - Multi-token names are always kept (specific enough for phrase matching).
+    - Multi-token names are kept **only if at least one token has length
+      ≥ `settings.matching_multi_token_min_length`** (default 3, env var
+      `OPENALEPH_SEARCH_MATCHING_MULTI_TOKEN_MIN_LENGTH`). This guards
+      against initials-only strings like `"A. A."` that pass the multi-
+      token check but match arbitrary prose far too aggressively.
     - Single-token names are kept only when their length is at least
       `settings.matching_single_token_min_length` (default 10) **and**
       the input list contains no multi-token variant. Short single-token
@@ -136,6 +140,7 @@ def clean_matching_names(
         return {stripped for stripped in (n.strip() for n in names if n) if stripped}
 
     min_single = settings.matching_single_token_min_length
+    min_multi = settings.matching_multi_token_min_length
     multi: set[str] = set()
     single: set[str] = set()
     for name in names:
@@ -144,7 +149,8 @@ def clean_matching_names(
             continue
         tokens = stripped.split()
         if len(tokens) > 1:
-            multi.add(stripped)
+            if any(len(t) >= min_multi for t in tokens):
+                multi.add(stripped)
         elif len(stripped) >= min_single:
             single.add(stripped)
     return multi if multi else single

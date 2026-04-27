@@ -372,8 +372,10 @@ class MentionsQuery(_Mentions):
         if not cleaned:
             raise ValueError(
                 f"Entity {entity_id!r} has no matchable names after "
-                "`clean_matching_names` (only short single tokens, or "
-                "single tokens shadowed by multi-token variants). Adjust "
+                "`clean_matching_names` (only short single tokens, "
+                "single tokens shadowed by multi-token variants, or "
+                "multi-token strings made up of initials only such as "
+                "'A. A.'). Adjust "
                 "`OPENALEPH_SEARCH_MATCHING_SINGLE_TOKEN_MIN_LENGTH` or "
                 "enrich the entity with longer / multi-token names."
             )

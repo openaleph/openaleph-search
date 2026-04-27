@@ -166,7 +166,7 @@ A target document that mentions *more* of the filtered entities' names ranks hig
 
 The mention clause is built from the entity's matchable name properties only, after they pass through `clean_matching_names` (see [Matching → Name selection](./matching.md#name-selection)). Variants the entity doesn't know about won't match a document unless the `Field.CONTENT` analyzer bridges them at search time (ICU + rigour name synonyms handle the common transliteration / accent cases — e.g. `"Müller"` ↔ `"Mueller"`).
 
-Two specific cleaner effects worth knowing here: (1) any single-token name shorter than `OPENALEPH_SEARCH_MATCHING_SINGLE_TOKEN_MIN_LENGTH` (default 10) is dropped, and (2) single-token variants are dropped entirely whenever the same entity also carries a multi-token variant — so an entity with `["Vladimir Putin", "Vladimir"]` only mention-matches on the multi-token form.
+Three specific cleaner effects worth knowing here: (1) any single-token name shorter than `OPENALEPH_SEARCH_MATCHING_SINGLE_TOKEN_MIN_LENGTH` (default 10) is dropped, (2) single-token variants are dropped entirely whenever the same entity also carries a multi-token variant — so an entity with `["Vladimir Putin", "Vladimir"]` only mention-matches on the multi-token form, and (3) multi-token names are dropped if no token reaches `OPENALEPH_SEARCH_MATCHING_MULTI_TOKEN_MIN_LENGTH` (default 3) — initials-only strings like `"A. A."` are filtered out.
 
 If recall matters beyond what the analyzer + cleaner allow, enrich the entity with longer / multi-token aliases / `previousName` values on the source side, or lower the cleaner threshold globally.
 
