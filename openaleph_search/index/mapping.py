@@ -27,7 +27,10 @@ ICU_NORMALIZER = "icu-default"
 HTML_ANALYZER = "strip-html"
 KW_NORMALIZER = "kw-normalizer"
 NAME_KW_NORMALIZER = "name-kw-normalizer"
-DATE_FORMAT = "yyyy-MM-dd'T'HH||yyyy-MM-dd'T'HH:mm||yyyy-MM-dd'T'HH:mm:ss||yyyy-MM-dd||yyyy-MM||yyyy||strict_date_optional_time"  # noqa: B950
+# `strict_date_optional_time` first so ES uses it for output serialization
+# (ISO 8601, e.g. aggregation `key_as_string`); the partial-date variants
+# follow for tolerant input parsing of `yyyy`, `yyyy-MM`, etc.
+DATE_FORMAT = "strict_date_optional_time||yyyy-MM-dd'T'HH||yyyy-MM-dd'T'HH:mm||yyyy-MM-dd'T'HH:mm:ss||yyyy-MM-dd||yyyy-MM||yyyy"  # noqa: B950
 NUMERIC_TYPES = (registry.number, registry.date)
 
 # INDEX SETTINGS #
@@ -124,9 +127,6 @@ class Field:
 
     # entities group convenience
     ENTITIES = "entities"
-
-    NUMERIC = "numeric"
-    PROPERTIES = "properties"
 
     CREATED_AT = "created_at"
     UPDATED_AT = "updated_at"
@@ -345,13 +345,16 @@ def make_mapping(properties: Mapping) -> dict[str, Any]:
 
 
 def make_schema_mapping(schemata: Iterable[SchemaType]) -> Mapping:
-    """Create an entity mapping for given schemata with dynamic property resolution."""
-    # Multiple schemata can have the same property name, but we flatten them
-    # into a single field in the search index with probably multiple copy_to
-    # targets. keyword type always has precedence over text.  All fields within
-    # a group (text/keyword) are usually the same.  Currently, only "authority"
-    # causes a collision (some are string, some are entity)
-    merged_props: dict[str, dict[str, set[str]]] = ddict(lambda: ddict(set[str]))
+    """ES property mapping for the given schemata, merged across collisions.
+
+    Multiple schemata can share a property name; we flatten them into one
+    field with the union of their copy_to targets. When contributing FtM
+    types disagree (currently only ``authority`` — entity vs string),
+    keyword wins over text and TYPE_MAPPINGS extras (``index``,
+    ``format``, …) are dropped — same conservative posture v4 took.
+    """
+    contrib_types: dict[str, list[Any]] = ddict(list)
+    copy_to: dict[str, set[str]] = ddict(set)
 
     for schema_name in schemata:
         schema = model.get(schema_name)
@@ -359,30 +362,63 @@ def make_schema_mapping(schemata: Iterable[SchemaType]) -> Mapping:
         for name, prop in schema.properties.items():
             if prop.stub:
                 continue
-            merged_props[name]["type"].add(get_index_field_type(prop.type))
-            if name == PROP_TRANSLATED:
-                merged_props[name]["copy_to"].add(Field.TRANSLATION)
-            elif prop.type in (registry.text, registry.html, registry.json):
-                merged_props[name]["copy_to"].add(Field.CONTENT)
-            else:
-                merged_props[name]["copy_to"].add(Field.TEXT)
-            if prop.type.group:
-                merged_props[name]["copy_to"].add(prop.type.group)
-            if name in schema.caption:
-                merged_props[name]["copy_to"].add(Field.NAME)
+            contrib_types[name].append(prop.type)
+            copy_to[name].update(_copy_to_targets(name, prop, schema))
 
-    # clean up properties type
-    properties: dict[str, MappingProperty] = {}
-    for prop, config in merged_props.items():
-        spec: MappingProperty = {"copy_to": list(config.pop("copy_to"))}
-        type_ = config.pop("type")
-        if "keyword" in type_:
-            type_.discard("text")
-        type_ = list(type_)
-        assert len(type_) == 1, type_
-        properties[prop] = {**spec, "type": type_[0]}
+    return {
+        name: _build_property_spec(types, copy_to[name])
+        for name, types in contrib_types.items()
+    }
 
-    return properties
+
+def _copy_to_targets(name: str, prop: Any, schema: Any) -> Iterable[str]:
+    """Top-level fields a property's value should be copied into."""
+    if name == PROP_TRANSLATED:
+        yield Field.TRANSLATION
+    elif prop.type in (registry.text, registry.html, registry.json):
+        yield Field.CONTENT
+    else:
+        yield Field.TEXT
+    if prop.type.group:
+        yield prop.type.group
+    if name in schema.caption:
+        yield Field.NAME
+
+
+def _build_property_spec(
+    contrib_types: list[Any], copy_to_fields: set[str]
+) -> MappingProperty:
+    """Mapping spec for one property name, merged across contributing FtM types.
+
+    Mirrors the v4 ``deepcopy(TYPE_MAPPINGS.get(prop.type, KEYWORD))``
+    pattern: extras (``index``, ``format``, …) flow through whenever every
+    contributor agrees; on disagreement we keep only the resolved
+    ``type``.
+    """
+    es_types = {get_index_field_type(rt) for rt in contrib_types}
+    if "keyword" in es_types and "text" in es_types:
+        es_types.discard("text")
+    assert len(es_types) == 1, es_types
+    spec: MappingProperty = {
+        "type": next(iter(es_types)),
+        "copy_to": list(copy_to_fields),
+    }
+    spec.update(_consensus_extras(contrib_types))
+    return spec
+
+
+def _consensus_extras(contrib_types: list[Any]) -> dict[str, Any]:
+    """Non-``type`` TYPE_MAPPINGS keys shared by every contributing FtM type."""
+    extras = [
+        {k: v for k, v in TYPE_MAPPINGS.get(rt, {}).items() if k != "type"}
+        for rt in contrib_types
+    ]
+    consensus: dict[str, Any] = {}
+    for key in set().union(*(s.keys() for s in extras)):
+        values = {s.get(key) for s in extras}
+        if len(values) == 1 and None not in values:
+            consensus[key] = values.pop()
+    return consensus
 
 
 def get_index_field_type(type_, to_numeric: bool | None = False) -> str:

@@ -1,6 +1,5 @@
 from ftmq.util import make_entity
 
-from openaleph_search.core import get_es
 from openaleph_search.index.admin import clear_index
 from openaleph_search.index.entities import (
     EntityVersion,
@@ -9,7 +8,6 @@ from openaleph_search.index.entities import (
     iter_entities,
     iter_entity_ids,
 )
-from openaleph_search.settings import Settings
 from openaleph_search.transform.entity import format_entity
 
 
