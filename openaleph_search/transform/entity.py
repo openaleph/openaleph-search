@@ -151,8 +151,7 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
     if settings.percolation and schema_bucket(data["schema"]) == "things":
         names = list(entity.get("name", quiet=True))
         other_names = list(entity.get("previousName", quiet=True))
-        # FIXME too much false postivies when including alias
-        # other_names.extend(entity.get("alias", quiet=True))
+        other_names.extend(entity.get("alias", quiet=True))
         percolator_query = make_percolator_query(
             names,
             other_names=other_names,
