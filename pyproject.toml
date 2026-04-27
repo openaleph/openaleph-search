@@ -55,7 +55,7 @@ mkdocstrings-python = "^2.0.3"
 mkdocs-autorefs = "^1.4.1"
 mkdocs-click = "^0.9.0"
 jupyterlab = "^4.4.5"
-mkdocs-typer2 = "^0.2.1"
+mkdocs-typer2 = "^0.3.0"
 griffe = "<2"
 zensical = "^0.0.36"
 
