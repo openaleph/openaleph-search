@@ -59,7 +59,6 @@ class Query:
                 "lenient": True,
                 "fields": self.TEXT_FIELDS,
                 "default_operator": "AND",
-                "minimum_should_match": "66%",
                 "allow_leading_wildcard": settings.allow_leading_wildcard,
             }
             if self.parser.synonyms:

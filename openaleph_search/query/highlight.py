@@ -17,7 +17,6 @@ def make_field_highlight_query(
         "lenient": True,
         "fields": fields,
         "default_operator": "AND",
-        "minimum_should_match": "66%",
         "allow_leading_wildcard": settings.allow_leading_wildcard,
     }
     if analyzer:

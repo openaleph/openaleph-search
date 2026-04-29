@@ -140,7 +140,6 @@ class QueryTestCase(TestCase):
                                 "lenient": True,
                                 "fields": ["text"],
                                 "default_operator": "AND",
-                                "minimum_should_match": "66%",
                                 "allow_leading_wildcard": False,
                             }
                         },
@@ -162,7 +161,6 @@ class QueryTestCase(TestCase):
                                 "lenient": True,
                                 "fields": ["translation"],
                                 "default_operator": "AND",
-                                "minimum_should_match": "66%",
                                 "allow_leading_wildcard": False,
                             }
                         },
