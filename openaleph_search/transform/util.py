@@ -56,7 +56,7 @@ def clean_tokenize_name(schema: Schema, name: str) -> list[str]:
     """Tokenize a name and clean it up."""
     name = preprocess_name(name) or name
     if schema.name in ("LegalEntity", "Organization", "Company", "PublicBody"):
-        name = replace_org_types_compare(name, normalizer=preprocess_name)
+        name = replace_org_types_compare(name)
     elif schema.name in ("LegalEntity", "Person"):
         name = remove_person_prefixes(name)
     return tokenize_name(name)

@@ -7,6 +7,7 @@ from banal import ensure_list
 from elastic_transport import ObjectApiResponse
 from followthemoney import EntityProxy, model
 from ftmq.util import get_name_symbols
+from rigour.names import SymbolCategory
 
 from openaleph_search.index.entities import ENTITY_SOURCE, PROXY_INCLUDES
 from openaleph_search.index.indexes import entities_read_index
@@ -81,7 +82,7 @@ class ExpandNameSynonymsMixin:
             return None
         schema = model["LegalEntity"]
         symbols = get_name_symbols(schema, *names)
-        ids = [str(s) for s in symbols if s.category.name == "NAME"]
+        ids = [str(s) for s in symbols if s.category == SymbolCategory.NAME]
         if not ids:
             return None
         return {

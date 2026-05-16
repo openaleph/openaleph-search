@@ -13,17 +13,12 @@ from anystore.util import Took
 from banal import ensure_list
 from followthemoney import EntityProxy, model, registry
 from followthemoney.namespace import Namespace
-from ftmq.util import select_data
+from ftmq.util import get_name_symbols, get_symbols, select_data, select_symbols
 
 from openaleph_search.index.indexer import Action, Actions
 from openaleph_search.index.indexes import entities_write_index, schema_bucket
 from openaleph_search.index.mapping import NUMERIC_TYPES, Field
 from openaleph_search.settings import Settings, __version__
-from openaleph_search.transform.tagging import (
-    get_name_symbols,
-    get_symbols,
-    select_symbols,
-)
 from openaleph_search.transform.util import (
     get_geopoints,
     index_name_keys,

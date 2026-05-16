@@ -249,7 +249,7 @@ def test_search_query_parser_from_url():
 
 
 def test_search_symbols(index_entities):
-    symbol = "[NAME:47200243]"  # vladimir
+    symbol = "[NAME:Q47200243]"  # vladimir
     query = _create_query(
         f"/search?filter:schemata=LegalEntity&filter:name_symbols={symbol}"
     )
