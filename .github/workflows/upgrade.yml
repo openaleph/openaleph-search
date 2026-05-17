@@ -38,6 +38,11 @@ jobs:
         pip install openaleph-search==5.2.0
         openaleph-search upgrade
 
+    - name: Install 5.2.2 version and upgrade
+      run: |
+        pip install openaleph-search==5.2.2
+        openaleph-search upgrade
+
     - name: Install current version
       run: |
         pip install poetry
