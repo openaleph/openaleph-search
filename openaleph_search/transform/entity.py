@@ -14,6 +14,7 @@ from banal import ensure_list
 from followthemoney import EntityProxy, model, registry
 from followthemoney.namespace import Namespace
 from ftmq.util import get_name_symbols, get_symbols, select_data, select_symbols
+from rigour.names import NameTypeTag, analyze_names
 
 from openaleph_search.index.indexer import Action, Actions
 from openaleph_search.index.indexes import entities_write_index, schema_bucket
@@ -56,6 +57,16 @@ def _get_translations(entity: EntityProxy) -> set[str]:
 @functools.cache
 def _get_namespace(value: str) -> Namespace:
     return Namespace(value)
+
+
+@functools.cache
+def _warm_rigour_taggers() -> None:
+    # Force rigour's Rust-backed AC name taggers to load in this process
+    # so that workers forked by `format_parallel` inherit them via COW.
+    # Without this each worker pays a ~3.5s cold-load on its first
+    # analyze_names call.
+    analyze_names(NameTypeTag.PER, ["x"])
+    analyze_names(NameTypeTag.ORG, ["x"])
 
 
 def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
@@ -242,6 +253,8 @@ def format_parallel(
     if max_workers == 1:
         yield from func(entities=entities)
         return
+
+    _warm_rigour_taggers()
 
     with ProcessPoolExecutor(max_workers=max_workers) as executor, Took() as t:
         transformed = 0
