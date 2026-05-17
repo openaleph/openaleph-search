@@ -27,27 +27,23 @@ ICU_NORMALIZER = "icu-default"
 HTML_ANALYZER = "strip-html"
 KW_NORMALIZER = "kw-normalizer"
 NAME_KW_NORMALIZER = "name-kw-normalizer"
-# Field-level `format` for date properties. The hour-only-after-T variant
-# (`yyyy-MM-dd'T'HH`) is **load-bearing** — FtM's `prefixdate.parse(...).text`
-# canonically emits that shape, and ES `strict_date_optional_time` does
-# *not* parse it (it requires `HH:mm` minimum after the `T`). Order is
-# the historical one so existing indexes don't see a `format` change at
-# upgrade time (ES blocks mutating the `format` parameter on a live
-# date field).
+# Proposed v6 field-level format for date properties (currently NOT
+# emitted — see the FIXME on `FieldType.PARTIAL_DATE`). Kept here as the
+# documented target so the v6 cut-over (which requires a reindex) does
+# not have to rediscover it. Lists every shape FtM's `prefixdate` can
+# emit explicitly, with `strict_date_optional_time` as the catch-all.
 DATE_FORMAT = "yyyy-MM-dd'T'HH||yyyy-MM-dd'T'HH:mm||yyyy-MM-dd'T'HH:mm:ss||yyyy-MM-dd||yyyy-MM||yyyy||strict_date_optional_time"  # noqa: B950
 # Format used by date aggregations (`date_histogram`, etc.) for two
 # things:
 #   1. Output serialization of bucket `key_as_string` — ES uses the first
 #      entry in a `||` list, so leading with `strict_date_optional_time`
 #      gives canonical ISO 8601 (e.g. `1970-08-21T00:00:00.000Z`).
-#   2. Input parsing of `extended_bounds.min` / `max` — ES falls through
-#      the `||` list until one entry parses the bound value. The trailing
-#      partial-date entries cover FtM-emitted shapes (`2021`, `2021-02`,
-#      `2021-02-16T21`, …) that a caller might pass as a filter bound;
-#      `strict_date_optional_time` alone would reject the hour-only form.
-# Decoupled from `DATE_FORMAT` so the field-level format can keep its
-# original order (upgrade-stable on existing indexes) while aggregation
-# output stays canonical for downstream consumers.
+#   2. Input parsing of `extended_bounds.min` / `max` — partial-date
+#      entries cover FtM-emitted shapes a caller might pass as a filter
+#      bound.
+# Request-time only (not stored in the mapping), so it can be tuned
+# freely without the upgrade-immutability concern that pins date-field
+# mappings.
 DATE_AGG_FORMAT = "strict_date_optional_time||yyyy-MM-dd'T'HH||yyyy-MM-dd'T'HH:mm||yyyy-MM-dd'T'HH:mm:ss||yyyy-MM-dd||yyyy-MM||yyyy"  # noqa: B950
 NUMERIC_TYPES = (registry.number, registry.date)
 
@@ -180,8 +176,23 @@ FULLTEXTS = [Field.CONTENT, Field.TEXT]
 
 # FIELD TYPES #
 class FieldType:
+    # Plain `{"type": "date"}` — no `format` key. ES applies its default
+    # (`strict_date_optional_time||epoch_millis`) when the field is first
+    # created and the format is then immutable, so we never emit a `format`
+    # to keep upgrade puts compatible with existing indexes.
+    #
+    # FIXME (v6): since v5.0.0, `make_schema_mapping` has never actually
+    # emitted a `format` key for date properties, even though `PARTIAL_DATE`
+    # carried `format: DATE_FORMAT` in its definition. Production indexes
+    # were therefore created with ES's default format and that format is
+    # now immutable on those fields. Tightening this — e.g. to pin a
+    # specific multi-pattern format so behaviour is explicit instead of
+    # ES-version-dependent — requires a coordinated reindex, which we
+    # defer to the next major (v6); v6 consumers reindex regardless, so
+    # that is the right cut-over point. Until then keep `PARTIAL_DATE`
+    # identical to `DATE` so no `format` is pushed to ES.
     DATE = {"type": "date"}
-    PARTIAL_DATE = {"type": "date", "format": DATE_FORMAT}
+    PARTIAL_DATE = DATE
     # actual text content (bodyText et. al), optimized for highlighting and
     # termvectors
     CONTENT = {

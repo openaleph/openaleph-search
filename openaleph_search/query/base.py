@@ -166,12 +166,13 @@ class Query:
 
             interval = self.parser.get_facet_interval(facet_name)
             if interval is not None:
-                # Caller flagged this facet as a date interval, so the field is
-                # a date. Override the `.values` terms agg `key_as_string` to
-                # canonical ISO 8601 too — without an explicit `format`, ES
-                # would fall back to the field-level `DATE_FORMAT` (which
-                # leads with `yyyy-MM-dd'T'HH` for upgrade-stability reasons)
-                # and render bucket keys in that truncated shape.
+                # Caller flagged this facet as a date interval. Date fields
+                # carry no explicit `format` in the mapping, so ES would use
+                # its default (`strict_date_optional_time||epoch_millis`) for
+                # both `key_as_string` output and `extended_bounds` parsing.
+                # `DATE_AGG_FORMAT` keeps the canonical ISO 8601 output and
+                # additionally accepts FtM-shaped partial dates (`2021`,
+                # `2021-02`, `2021-02-16T21`, …) as filter bounds.
                 values_agg_name = "%s.values" % facet_name
                 if values_agg_name in facet_aggregations:
                     facet_aggregations[values_agg_name]["terms"][
