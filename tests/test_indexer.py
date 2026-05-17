@@ -8,6 +8,7 @@ from openaleph_search.index.entities import (
     iter_entities,
     iter_entity_ids,
 )
+from openaleph_search.index.indexer import rewrite_mapping_safe
 from openaleph_search.transform.entity import format_entity
 
 
@@ -233,6 +234,94 @@ def test_translation_pages():
     }
     # indexText is moved to `content`, and translations are stripped out
     assert "content" in source
+
+
+def test_rewrite_mapping_safe_preserves_default_immutables():
+    """Regression for the e864564 ``index: false`` bugfix.
+
+    Older indexes were created when ``make_schema_mapping`` dropped the
+    ``index: false`` extra from ``TYPE_MAPPINGS``, so ES applied its
+    default ``index: true`` to text/html/json properties. ES then froze
+    that default — pushing ``index: false`` later raises
+    ``illegal_argument_exception``. ``rewrite_mapping_safe`` must
+    therefore drop the pending override when the field exists in the
+    live mapping but the immutable key is absent (= ES default in
+    effect).
+    """
+    # Field exists; the live mapping omits `index` (ES default `true`
+    # was applied at creation). The pending update wants `index: false`
+    # — that must be stripped, not pushed.
+    pending = {
+        "properties": {
+            "properties": {
+                "type": "object",
+                "properties": {
+                    "indexText": {
+                        "type": "text",
+                        "index": False,
+                        "copy_to": ["content"],
+                    },
+                },
+            },
+        },
+    }
+    existing = {
+        "properties": {
+            "properties": {
+                "type": "object",
+                "properties": {
+                    "indexText": {
+                        "type": "text",
+                        "copy_to": ["content"],
+                    },
+                },
+            },
+        },
+    }
+    result = rewrite_mapping_safe(pending, existing)
+    field = result["properties"]["properties"]["properties"]["indexText"]
+    assert "index" not in field, field
+    assert field["type"] == "text"
+
+
+def test_rewrite_mapping_safe_preserves_explicit_immutables():
+    """Explicit immutable values on the live mapping always win."""
+    pending = {
+        "properties": {
+            "name": {
+                "type": "keyword",
+                "normalizer": "name-kw-normalizer",
+            },
+        },
+    }
+    existing = {
+        "properties": {
+            "name": {
+                "type": "keyword",
+                "normalizer": "kw-normalizer",
+            },
+        },
+    }
+    result = rewrite_mapping_safe(pending, existing)
+    assert result["properties"]["name"]["normalizer"] == "kw-normalizer"
+
+
+def test_rewrite_mapping_safe_passes_through_new_fields():
+    """Fields absent from the live mapping keep all their immutables."""
+    pending = {
+        "properties": {
+            "newProp": {
+                "type": "text",
+                "index": False,
+                "copy_to": ["content"],
+            },
+        },
+    }
+    existing = {"properties": {}}
+    result = rewrite_mapping_safe(pending, existing)
+    new = result["properties"]["newProp"]
+    assert new["index"] is False
+    assert new["type"] == "text"
 
 
 def test_indexer_namespace(monkeypatch):

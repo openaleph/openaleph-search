@@ -195,12 +195,38 @@ def delete_safe(index: str, id: str, sync: bool | None = False):
     es.delete(index=index, id=id, ignore=[404], refresh=refresh_sync(sync))
 
 
+IMMUTABLE_MAPPING_PARAMS = ("type", "analyzer", "normalizer", "index", "store")
+
+
 @error_handler(logger=log, max_retries=settings.max_retries)
 def rewrite_mapping_safe(pending, existing):
-    """This re-writes mappings for ElasticSearch in such a way that
-    immutable values are kept to their existing setting, while other
-    fields are updated."""
-    IMMUTABLE = ("type", "analyzer", "normalizer", "index", "store")
+    """Reconcile a pending mapping against the one ES is already serving.
+
+    For every IMMUTABLE_MAPPING_PARAMS key (``type``, ``analyzer``,
+    ``normalizer``, ``index``, ``store``) ES will reject any field-level
+    change after creation. We handle two cases:
+
+    1. The existing field spec carries an explicit value for the key →
+       keep that value, drop whatever the pending mapping wanted to flip
+       it to.
+    2. The existing field spec is present but the key is absent → ES
+       applied its default at creation time and that default is now
+       immutable just like an explicit one. The ``_mapping`` API does not
+       echo defaults back, so ``old_value is None`` here is *not* an
+       invitation to push a new value — it means ES will refuse the
+       change. Drop the pending key so the put_mapping call succeeds and
+       the field keeps its (now-frozen) default behaviour. This is the
+       case that bites text/html/json properties created before the
+       ``index: false`` bugfix (commit e864564) landed; existing indexes
+       have those fields with the default ``index: true``, and any
+       attempt to push ``index: false`` raises
+       ``illegal_argument_exception``. Cut-over to the intended value
+       requires a coordinated reindex; that's deferred to v6.
+
+    Non-immutable keys flow through normally, and any keys that exist on
+    the live mapping but are missing from pending are copied over so the
+    put_mapping body is a strict superset.
+    """
     # This is a pretty bad idea long-term. We need to make it easier
     # to use multiple index generations instead.
     if not isinstance(pending, dict) or not isinstance(existing, dict):
@@ -208,8 +234,14 @@ def rewrite_mapping_safe(pending, existing):
     for key, value in list(pending.items()):
         old_value = existing.get(key)
         value = rewrite_mapping_safe(value, old_value)
-        if key in IMMUTABLE and old_value is not None:
-            value = old_value
+        if key in IMMUTABLE_MAPPING_PARAMS:
+            if old_value is not None:
+                pending[key] = old_value
+            else:
+                # Field exists; key absent → ES default is in effect and
+                # immutable. Drop the pending override so ES doesn't 400.
+                pending.pop(key, None)
+            continue
         pending[key] = value
     for key, value in existing.items():
         if key not in pending:
