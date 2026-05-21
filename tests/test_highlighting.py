@@ -266,6 +266,54 @@ def test_highlighting_annotated_proximity(cleanup_after):
     assert "<em>crime</em>" in highlight_text.lower()
 
 
+def test_highlighting_email_body_text_and_html(cleanup_after):
+    """An Email entity with both `bodyText` and `bodyHtml` set must get
+    `<em>` markers placed at the actual match position in each value's
+    fragment — no cross-value offset shift.
+
+    Both properties `copy_to` into `content`, making it a multi-valued
+    field. When `content` was `store=false` on the documents bucket, ES's
+    unified highlighter applied the offset of the match in one value
+    rendered on top of the other value's text, wrapping nearby characters
+    (e.g. "YYYY Z" or "SS TAR") instead of "TARGET".
+    """
+    entity = make_entity(
+        {
+            "id": "email-hl-body-shift",
+            "schema": "Email",
+            "properties": {
+                "subject": ["regression mail"],
+                "bodyText": ["XXXXX YYYYY ZZZZZ TARGET WORD AAAAA BBBBB."],
+                "bodyHtml": [
+                    "<p>QQQQQ RRRRR SSSSS TARGET <b>WORD</b> CCCCC DDDDD.</p>"
+                ],
+            },
+        }
+    )
+    index_bulk("test_email_hl_body_shift", [entity], sync=True)
+
+    args = [
+        ("q", "TARGET"),
+        ("highlight", "true"),
+        ("filter:dataset", "test_email_hl_body_shift"),
+    ]
+    query = EntitiesQuery(SearchQueryParser(args, None))
+    result = query.search()
+
+    assert result["hits"]["total"]["value"] == 1
+    hit = result["hits"]["hits"][0]
+    assert "highlight" in hit
+    fragments = hit["highlight"].get("content") or []
+    assert fragments, "expected at least one content highlight fragment"
+
+    # Every fragment must wrap the actual matched word, not nearby
+    # characters drifted in from the other value.
+    for fragment in fragments:
+        assert (
+            "<em>TARGET</em>" in fragment
+        ), f"highlight markers misaligned in fragment: {fragment!r}"
+
+
 def test_highlighting_synonym_match(cleanup_after):
     """When synonyms expand 'Vladimir' to match 'Wladimir' in document text,
     the highlight shows the actual indexed text ('Wladimir')."""

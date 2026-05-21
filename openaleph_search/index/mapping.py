@@ -401,10 +401,24 @@ def make_schema_mapping(schemata: Iterable[SchemaType]) -> Mapping:
 
 
 def _copy_to_targets(name: str, prop: Any, schema: Any) -> Iterable[str]:
-    """Top-level fields a property's value should be copied into."""
+    """Top-level fields a property's value should be copied into.
+
+    Only `registry.text` properties go into `Field.CONTENT`. `registry.html`
+    and `registry.json` go into `Field.TEXT` even though they're "fulltext"
+    in spirit — when more than one property `copy_to`s into the same
+    destination, ES 9.x's unified/FVH highlighter misaligns `<em>` markers
+    across values (it slices fragments at offsets computed against the
+    wrong value when content is `store: false` + excluded from `_source`).
+    Routing html/json to a separate destination keeps each field
+    single-source per type and sidesteps the bug — at the cost of html/json
+    fulltext using `text`'s `strip-html` analyzer rather than `content`'s
+    ICU + phrase analyzer. v5.2.1 widened this routing to include html/json
+    in content and broke highlight alignment for Emails carrying both
+    `bodyText` and `bodyHtml`; this restores the v5.2.0 behavior.
+    """
     if name == PROP_TRANSLATED:
         yield Field.TRANSLATION
-    elif prop.type in (registry.text, registry.html, registry.json):
+    elif prop.type == registry.text:
         yield Field.CONTENT
     else:
         yield Field.TEXT
