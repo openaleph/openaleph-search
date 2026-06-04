@@ -1,4 +1,4 @@
-FROM elasticsearch:9.4.1 AS base
+FROM elasticsearch:9.4.2 AS base
 
 RUN bin/elasticsearch-plugin install --batch analysis-icu
 
