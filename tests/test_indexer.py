@@ -92,6 +92,69 @@ def test_indexer_with_context(cleanup_after):
     assert indexed_entity["created_at"] == "2023-04-26"
 
 
+def test_indexer_with_merged_fragment_context(cleanup_after):
+    # Entities aggregated from multiple fragments (e.g. origins ingest +
+    # analyze) arrive with merged context: followthemoney's
+    # ``merge_context`` turns every scalar context value into a list
+    # (role_id: [36], mutable: [False], ...). The formatter must fold
+    # those back to scalars — only ``origin`` stays multi-valued.
+    clear_index()
+
+    entity_data = {
+        "id": "test-doc-merged",
+        "schema": "Folder",
+        "properties": {"fileName": ["stuff"]},
+    }
+    ingest = make_entity(entity_data)
+    ingest.context = {
+        "role_id": 36,
+        "mutable": False,
+        "origin": "ingest",
+        "created_at": "2023-04-26",
+        "updated_at": "2023-04-26",
+        "collection_id": 7,
+    }
+    analyze = make_entity(entity_data)
+    analyze.context = {
+        "role_id": 36,
+        "mutable": False,
+        "origin": "analyze",
+        "created_at": "2023-04-27",
+        "updated_at": "2023-04-27",
+        "collection_id": 7,
+    }
+    # the real aggregation path: fragment merge list-ifies the context
+    ingest.merge(analyze)
+    assert ingest.context["role_id"] == [36]
+    assert ingest.context["mutable"] == [False]
+
+    formatted = format_entity("test_dataset", ingest)
+    assert formatted is not None
+    source = formatted["_source"]
+    assert source["role_id"] == 36
+    assert source["mutable"] is False
+    assert sorted(source["origin"]) == ["analyze", "ingest"]
+    assert source["created_at"] == "2023-04-26"  # min
+    assert source["updated_at"] == "2023-04-27"  # max
+
+    # conflicting mutable flags fold conservatively: immutable wins
+    conflicted = make_entity(entity_data)
+    conflicted.context = {"mutable": [True, False], "collection_id": 7}
+    formatted = format_entity("test_dataset", conflicted, collection_id=17)
+    assert formatted is not None
+    assert formatted["_source"]["mutable"] is False
+    assert formatted["_source"]["collection_id"] == 17
+
+    # round-trip through the index keeps the folded shape (``origin`` is
+    # not part of ENTITY_SOURCE includes, so it is absent on this read)
+    index_bulk("test_dataset", [ingest], collection_id=17)
+    indexed = list(iter_entities())
+    assert len(indexed) == 1
+    assert indexed[0]["role_id"] == 36
+    assert indexed[0]["collection_id"] == 17
+    assert indexed[0]["mutable"] is False
+
+
 def test_get_entity_version(cleanup_after):
     """get_entity_version returns (seq_no, primary_term) and bumps on rewrites."""
     clear_index()

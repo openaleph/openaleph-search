@@ -38,6 +38,14 @@ def _numeric_values(type_, values) -> list[float]:
     return [v for v in values if v is not None]
 
 
+def _first(value):
+    """First non-None item of a possibly merged (list-shaped) context value."""
+    for item in ensure_list(value):
+        if item is not None:
+            return item
+    return None
+
+
 def _get_symbols(entity: EntityProxy) -> set[str]:
     symbols = select_symbols(entity)  # pre-computed in earlier stage
     if symbols:
@@ -178,25 +186,35 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
     if "latitude" in entity.schema.properties:
         data[Field.GEO_POINT] = get_geopoints(entity)
 
-    # Context data - from aleph system, not followthemoney. Probably deprecated soon
-    if hasattr(entity, "context"):
-        role_id = entity.context.get("role_id")
-        if role_id:
-            data[Field.ROLE] = role_id
-        profile_id = entity.context.get("profile_id")
-        if profile_id:
-            data[Field.PROFILE] = profile_id
-        origin = ensure_list(entity.context.get("origin"))
-        if origin:
-            data[Field.ORIGIN] = origin
-        data[Field.MUTABLE] = entity.context.get("mutable", False) or False
-        # Logical simplifications of dates:
-        created_at = ensure_list(entity.context.get("created_at"))
-        if len(created_at) > 0:
-            data[Field.CREATED_AT] = min(created_at)
-        updated_at = ensure_list(entity.context.get("updated_at")) or created_at
-        if len(updated_at) > 0:
-            data[Field.UPDATED_AT] = max(updated_at)
+    # CONTEXT DATA
+    # from aleph system, not followthemoney. Probably deprecated soon
+    # Entities aggregated from multiple fragments carry *merged*
+    # context: followthemoney's ``merge_context`` turns every scalar
+    # context value into a deduped list (e.g. origins ingest +
+    # analyze → ``role_id: [36]``, ``mutable: [False]``). The
+    # ``entity.to_dict()`` above spread that raw shape into ``data``,
+    # so fold every context key back to the scalar shape the index
+    # contract expects — only ``origin`` is legitimately multi-valued.
+    role_id = _first(data.pop(Field.ROLE, None))
+    if role_id is not None:
+        data[Field.ROLE] = role_id
+    profile_id = _first(data.pop(Field.PROFILE, None))
+    if profile_id is not None:
+        data[Field.PROFILE] = profile_id
+    origin = ensure_list(data.pop(Field.ORIGIN, None))
+    if origin:
+        data[Field.ORIGIN] = origin
+    # Fold merged booleans conservatively: if any fragment marked the
+    # entity immutable, it stays immutable.
+    mutable = [bool(v) for v in ensure_list(data.pop(Field.MUTABLE, None))]
+    data[Field.MUTABLE] = all(mutable) if mutable else False
+    # Logical simplifications of dates:
+    created_at = ensure_list(data.pop(Field.CREATED_AT, None))
+    if len(created_at) > 0:
+        data[Field.CREATED_AT] = min(created_at)
+    updated_at = ensure_list(data.pop(Field.UPDATED_AT, None)) or created_at
+    if len(updated_at) > 0:
+        data[Field.UPDATED_AT] = max(updated_at)
 
     data[Field.INDEX_BUCKET] = schema_bucket(data["schema"])
     data[Field.INDEX_VERSION] = __version__
