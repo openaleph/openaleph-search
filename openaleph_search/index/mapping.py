@@ -72,6 +72,12 @@ ANALYZE_SETTINGS = {
                 "type": "synonym_graph",
                 "synonyms_path": "person_name_synonyms.txt",
                 "updateable": True,
+                # Skip malformed rules instead of failing the whole build. The
+                # generated file contains terms the `standard` tokenizer emits
+                # as zero tokens (e.g. rare CJK Ext G/H ideographs like U+30D67),
+                # which SolrSynonymParser otherwise rejects outright. Such rules
+                # could never match at index/query time anyway.
+                "lenient": True,
             },
         },
         "normalizer": {

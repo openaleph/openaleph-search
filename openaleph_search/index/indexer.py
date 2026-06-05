@@ -263,7 +263,14 @@ def configure_index(index, mapping, settings_):
             "timeout": MAX_TIMEOUT,
             "master_timeout": MAX_TIMEOUT,
         }
-        config = es.indices.get(index=index).get(index, {})
+        # `index` may be an alias (the bucket suffix is usually an alias onto a
+        # versioned concrete index). es.indices.get keys its response by the
+        # concrete backing index name, so `.get(index)` would miss it and hand
+        # rewrite_mapping_safe an empty existing mapping — silently turning it
+        # into a no-op pass-through that drops every immutability guard (e.g.
+        # pushing `index: false` / `format` onto frozen fields → 400). Take the
+        # sole resolved index's config instead.
+        config = next(iter(es.indices.get(index=index).values()), {})
         settings_.get("index").pop("number_of_shards", settings.index_shards)
         if check_settings_changed(settings_, config.get("settings")):
             res = es.indices.close(ignore_unavailable=True, **options)
