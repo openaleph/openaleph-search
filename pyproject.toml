@@ -40,7 +40,7 @@ Repository = "https://github.com/openaleph/openaleph-search"
 Issues = "https://github.com/openaleph/openaleph-search/issues"
 
 [tool.poetry.group.dev.dependencies]
-pytest = ">=9.0.3,<10.0.0"
+pytest = ">=9.1.0,<10.0.0"
 pytest-cov = ">=7.1.0,<8.0"
 pytest-env = "^1.1.1"
 isort = "^8.0.1"
