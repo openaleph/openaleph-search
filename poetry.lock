@@ -1282,14 +1282,14 @@ all = ["adbc-driver-manager", "fsspec", "ipython", "numpy", "pandas", "pyarrow"]
 
 [[package]]
 name = "elastic-transport"
-version = "9.4.0"
+version = "9.4.2"
 description = "Transport classes and utilities shared among Python Elastic client libraries"
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "elastic_transport-9.4.0-py3-none-any.whl", hash = "sha256:2dbb907ededa14e6ff5be058f8737bbba3926bd1b1a40dbc98a471285fa2cb3c"},
-    {file = "elastic_transport-9.4.0.tar.gz", hash = "sha256:4eff263c8011dd950451b72be567a2484b814a89c70081053d6ae6addeab52e2"},
+    {file = "elastic_transport-9.4.2-py3-none-any.whl", hash = "sha256:33dc89bb1855faa8b98ae8b036405a39c562778dbcdbe4a00a2eaf753148556c"},
+    {file = "elastic_transport-9.4.2.tar.gz", hash = "sha256:366f4614f4544c5fb5d780c82f57af8f30492b44a68ed20750390aa81e20c2ea"},
 ]
 
 [package.dependencies]
@@ -1302,19 +1302,19 @@ develop = ["aiohttp", "anyio", "furo", "httpx", "opentelemetry-api", "openteleme
 
 [[package]]
 name = "elasticsearch"
-version = "9.4.0"
+version = "9.4.1"
 description = "Python client for Elasticsearch"
 optional = false
 python-versions = ">=3.10"
 groups = ["main"]
 files = [
-    {file = "elasticsearch-9.4.0-py3-none-any.whl", hash = "sha256:e20095ba40229f4562f7cc951883c7c62a017435f94dbe0c21526f58ba411885"},
-    {file = "elasticsearch-9.4.0.tar.gz", hash = "sha256:95e38e130b1d01438b19343dfa0458e1857a7df8e2e30cbf23a72182b03f05ff"},
+    {file = "elasticsearch-9.4.1-py3-none-any.whl", hash = "sha256:71ab71c3d1b20fd88c2922fb82c3277cce7ea03c160686e7b9368b265c2b4cac"},
+    {file = "elasticsearch-9.4.1.tar.gz", hash = "sha256:1d78fdfba97a903ec35a5eb5808a74e33392b7c620bd5f742d465a3a26c27d75"},
 ]
 
 [package.dependencies]
 anyio = "*"
-elastic-transport = ">=9.2.0,<10"
+elastic-transport = ">=9.4.1,<10"
 python-dateutil = "*"
 sniffio = "*"
 typing-extensions = "*"
@@ -6431,4 +6431,4 @@ tomli = ">=2.4.0"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "b47aef8f11fa0b17ade18d4447fc013f00c3fb0ed71cc399ad8849bc4ae8cd99"
+content-hash = "79ed0f423cbe3660d7c7aa351fb6aa18d0106adc3cc1b8046a6a1f12b135851f"
