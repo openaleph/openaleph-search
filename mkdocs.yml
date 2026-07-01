@@ -1,5 +1,5 @@
 site_name: openaleph-search
-site_url: https://docs.investigraph.dev/lib/openaleph-search
+site_url: https://openaleph.org/docs/lib/openaleph-search
 repo_url: https://github.com/openaleph/openaleph-search
 nav:
   - Introduction: index.md
@@ -34,7 +34,6 @@ theme:
       toggle:
         icon: lucide/moon
         name: Switch to dark mode
-
   custom_dir: docs/overrides
   features:
     - navigation.instant
