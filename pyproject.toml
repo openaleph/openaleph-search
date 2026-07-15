@@ -16,10 +16,11 @@ classifiers = [
     "Programming Language :: Python",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
-requires-python = ">=3.12,<3.14"
+requires-python = ">=3.12,<3.15"
 dependencies = [
-    "ftmq (>=4.9.2,<5.0.0)",
+    "ftmq @ git+https://github.com/dataresearchcenter/ftmq.git",
     "followthemoney (>=4.9.2,<5.0.0)",
     "rigour (>=2.1.2,<3.0.0)",
     "elasticsearch (>=9.4.1,<10.0.0)",
