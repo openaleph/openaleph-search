@@ -1,9 +1,11 @@
 """Transform followthemoney.EntityProxy into index actions"""
 
+import atexit
 import functools
 import itertools
-import time
-from concurrent.futures import ProcessPoolExecutor
+import os
+import threading
+from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from datetime import datetime
 from multiprocessing import cpu_count
 from typing import Generator, Iterable
@@ -69,12 +71,45 @@ def _get_namespace(value: str) -> Namespace:
 
 @functools.cache
 def _warm_rigour_taggers() -> None:
-    # Force rigour's Rust-backed AC name taggers to load in this process
-    # so that workers forked by `format_parallel` inherit them via COW.
-    # Without this each worker pays a ~3.5s cold-load on its first
-    # analyze_names call.
+    # Force rigour's Rust-backed AC name taggers to load in this process.
+    # Runs as the worker initializer of the shared executor so each worker
+    # pays the ~3.5s cold-load once per process lifetime instead of on its
+    # first analyze_names call.
     analyze_names(NameTypeTag.PER, ["x"])
     analyze_names(NameTypeTag.ORG, ["x"])
+
+
+_executor: ProcessPoolExecutor | None = None
+_executor_pid: int | None = None
+_executor_lock = threading.Lock()
+
+
+def _get_executor() -> ProcessPoolExecutor:
+    """Long-lived process pool shared across `format_parallel` calls.
+
+    Python 3.14 changed the default multiprocessing start method on Linux
+    from `fork` to `forkserver`, under which every pool creation costs
+    seconds (workers start pristine, re-import the module tree and reload
+    the rigour taggers) instead of being a near-free COW fork. Reusing one
+    executor per process pays that cost once per process lifetime. The pid
+    guard recreates the pool in processes forked after creation (e.g.
+    gunicorn prefork children), which would otherwise inherit a dead one.
+    """
+    global _executor, _executor_pid
+    with _executor_lock:
+        if _executor is None or _executor_pid != os.getpid():
+            _executor = ProcessPoolExecutor(
+                max_workers=min(cpu_count(), settings.indexer_concurrency),
+                initializer=_warm_rigour_taggers,
+            )
+            _executor_pid = os.getpid()
+        return _executor
+
+
+@atexit.register
+def _shutdown_executor() -> None:
+    if _executor is not None and _executor_pid == os.getpid():
+        _executor.shutdown(wait=False, cancel_futures=True)
 
 
 def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
@@ -261,6 +296,11 @@ def format_parallel(
 ) -> Actions:
     """
     Transform entities into index actions in parallel
+
+    The process pool is a shared, process-wide singleton (see `_get_executor`);
+    `concurrency` controls the serial shortcut and the number of in-flight
+    batches, while the pool size itself is fixed by
+    `settings.indexer_concurrency`.
     """
     batches = itertools.batched(entities, n=chunk_size or settings.indexer_chunk_size)
     max_workers = min((cpu_count(), concurrency or settings.indexer_concurrency))
@@ -272,40 +312,29 @@ def format_parallel(
         yield from func(entities=entities)
         return
 
-    _warm_rigour_taggers()
-
-    with ProcessPoolExecutor(max_workers=max_workers) as executor, Took() as t:
+    executor = _get_executor()
+    with Took() as t:
         transformed = 0
-        active_futures = {}
+        active: set[Future[list[Action]]] = set()
         # Submit initial batches
         for _ in range(max_queued):
             try:
-                batch = next(batches)
-                future = executor.submit(func, entities=batch)
-                active_futures[hash(future)] = future
+                active.add(executor.submit(func, entities=next(batches)))
             except StopIteration:
                 break
 
         # Process results as they complete
-        while active_futures:
-            # Wait for at least one to complete
-            completed = [f for f in active_futures.values() if f.done()]
-            for future in completed:
+        while active:
+            done, active = wait(active, return_when=FIRST_COMPLETED)
+            for future in done:
                 for action in future.result():
                     transformed += 1
                     yield action
-                del active_futures[hash(future)]
 
                 # Submit next batch
                 try:
-                    batch = next(batches)
-                    new_future = executor.submit(func, entities=batch)
-                    active_futures[hash(new_future)] = new_future
+                    active.add(executor.submit(func, entities=next(batches)))
                 except StopIteration:
                     pass
-
-            if not completed:
-                # If none completed, wait a bit
-                time.sleep(0.1)
 
     log.info(f"Transformed {transformed} actions.", took=t.took)

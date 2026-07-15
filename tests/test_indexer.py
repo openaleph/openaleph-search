@@ -1,3 +1,5 @@
+import time
+
 from ftmq.util import make_entity
 
 from openaleph_search.index.admin import clear_index
@@ -9,7 +11,7 @@ from openaleph_search.index.entities import (
     iter_entity_ids,
 )
 from openaleph_search.index.indexer import rewrite_mapping_safe
-from openaleph_search.transform.entity import format_entity
+from openaleph_search.transform.entity import format_entity, format_parallel
 
 
 def test_indexer(entities, cleanup_after):
@@ -418,3 +420,27 @@ def test_indexer_namespace(monkeypatch):
     monkeypatch.setenv("OPENALEPH_SEARCH_INDEX_NAMESPACE_IDS", "false")
     importlib.reload(settings_module)
     importlib.reload(entity_module)
+
+
+def test_format_parallel_reuses_executor():
+    # Regression guard for the py3.14 forkserver slowdown: `format_parallel`
+    # must reuse one process pool per process instead of constructing a new
+    # one per call. The first call may pay the worker spawn + rigour tagger
+    # warm-up; every later call must be near-instant, independent of Python
+    # version and multiprocessing start method.
+    entity = make_entity(
+        {
+            "id": "pool-reuse",
+            "schema": "Person",
+            "properties": {"name": ["John Smith"], "nationality": ["de"]},
+        }
+    )
+    # chunk_size=1 -> one batch per entity, exercising the submit/wait loop
+    actions = list(format_parallel("test_dataset", iter([entity] * 16), chunk_size=1))
+    assert len(actions) == 16
+
+    start = time.perf_counter()
+    actions = list(format_parallel("test_dataset", iter([entity] * 16), chunk_size=1))
+    took = time.perf_counter() - start
+    assert len(actions) == 16
+    assert took < 1, f"format_parallel re-paid pool construction: {took:.2f}s"

@@ -1,6 +1,8 @@
 import asyncio
+import atexit
 import time
 from functools import cache
+from weakref import WeakKeyDictionary
 
 from anystore.logging import get_logger
 from anystore.util import mask_uri
@@ -99,13 +101,45 @@ async def _connect_async(urls: list[str], name: str) -> AsyncElasticsearch:
     )
 
 
+# Async clients cached per event loop: an AsyncElasticsearch is bound to the
+# loop it was created on, so `@cache` can't be used, but repeated calls on the
+# same loop should not pay a fresh client + `es.info()` handshake each time.
+_async_clients: WeakKeyDictionary = WeakKeyDictionary()
+
+
+async def _connect_async_cached(urls: list[str], name: str) -> AsyncElasticsearch:
+    loop = asyncio.get_running_loop()
+    cache_ = _async_clients.setdefault(loop, {"lock": asyncio.Lock(), "clients": {}})
+    if name not in cache_["clients"]:
+        async with cache_["lock"]:
+            if name not in cache_["clients"]:
+                cache_["clients"][name] = await _connect_async(urls, name)
+    return cache_["clients"][name]
+
+
+@atexit.register
+def _close_async_clients() -> None:
+    # Best effort: close cached clients on their (idle) loops to avoid
+    # "Unclosed client session" noise at interpreter shutdown.
+    for loop, cache_ in list(_async_clients.items()):
+        if loop.is_closed() or loop.is_running():
+            continue
+        for es in cache_["clients"].values():
+            try:
+                loop.run_until_complete(es.close())
+            except Exception:
+                pass
+
+
 @cache
 def get_es() -> Elasticsearch:
     return _connect_sync(_nodes(), "")
 
 
 async def get_async_es() -> AsyncElasticsearch:
-    return await _connect_async(_nodes(), "")
+    """Get the async client for the running event loop. Cached per loop —
+    callers must not close it."""
+    return await _connect_async_cached(_nodes(), "")
 
 
 @cache
@@ -114,4 +148,6 @@ def get_ingest_es() -> Elasticsearch:
 
 
 async def get_async_ingest_es() -> AsyncElasticsearch:
-    return await _connect_async(_ingest_nodes(), "ingest")
+    """Get the async ingest client for the running event loop. Cached per
+    loop — callers must not close it."""
+    return await _connect_async_cached(_ingest_nodes(), "ingest")
