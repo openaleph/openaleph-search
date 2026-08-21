@@ -8,6 +8,9 @@ from openaleph_search.settings import Settings
 log = get_logger(__name__)
 settings = Settings()
 
+MAX_TIMEOUT = "700m"
+MAX_REQUEST_TIMEOUT = 84600
+
 
 def index_name(name: str, version: str) -> str:
     return "-".join((settings.index_prefix, name, version))

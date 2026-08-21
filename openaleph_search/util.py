@@ -1,10 +1,22 @@
 from functools import cache
-from typing import TypeAlias
+from typing import Any, Generator, Iterable, TypeAlias, TypedDict
 
 from followthemoney import Schema, model
 from followthemoney.dataset.util import dataset_name_check
 
 SchemaType: TypeAlias = Schema | str
+
+
+class Action(TypedDict):
+    """A single Elasticsearch bulk action, as produced by
+    `transform.entity.format_entity`."""
+
+    _id: str
+    _index: str
+    _source: dict[str, Any]
+
+
+Actions: TypeAlias = Generator[Action, None, None] | Iterable[Action]
 
 
 @cache

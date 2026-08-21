@@ -1,17 +1,19 @@
-import time
-
+import pytest
 from ftmq.util import make_entity
 
 from openaleph_search.index.admin import clear_index
+from openaleph_search.index.configure import rewrite_mapping_safe
 from openaleph_search.index.entities import (
     EntityVersion,
     get_entity_version,
     index_bulk,
+    index_proxy,
     iter_entities,
     iter_entity_ids,
 )
-from openaleph_search.index.indexer import rewrite_mapping_safe
-from openaleph_search.transform.entity import format_entity, format_parallel
+from openaleph_search.index.indexer import Indexer, iter_action_batches
+from openaleph_search.settings import Settings
+from openaleph_search.transform.entity import format_entity, iter_batches
 
 
 def test_indexer(entities, cleanup_after):
@@ -422,25 +424,81 @@ def test_indexer_namespace(monkeypatch):
     importlib.reload(entity_module)
 
 
-def test_format_parallel_reuses_executor():
-    # Regression guard for the py3.14 forkserver slowdown: `format_parallel`
-    # must reuse one process pool per process instead of constructing a new
-    # one per call. The first call may pay the worker spawn + rigour tagger
-    # warm-up; every later call must be near-instant, independent of Python
-    # version and multiprocessing start method.
-    entity = make_entity(
+def test_indexer_returns_stats(entities, cleanup_after):
+    clear_index()
+    stats = index_bulk("test_dataset", entities)
+    assert stats.indexed == 21
+    assert stats.failed == 0
+    assert stats.took.total_seconds() >= 0
+
+
+def test_index_proxy_returns_stats(cleanup_after):
+    proxy = make_entity(
         {
-            "id": "pool-reuse",
+            "id": "single-proxy",
             "schema": "Person",
-            "properties": {"name": ["John Smith"], "nationality": ["de"]},
+            "properties": {"name": ["John Smith"]},
         }
     )
-    # chunk_size=1 -> one batch per entity, exercising the submit/wait loop
-    actions = list(format_parallel("test_dataset", iter([entity] * 16), chunk_size=1))
-    assert len(actions) == 16
+    stats = index_proxy("test_dataset", proxy, sync=True)
+    assert stats.indexed == 1
+    assert stats.failed == 0
 
-    start = time.perf_counter()
-    actions = list(format_parallel("test_dataset", iter([entity] * 16), chunk_size=1))
-    took = time.perf_counter() - start
-    assert len(actions) == 16
-    assert took < 1, f"format_parallel re-paid pool construction: {took:.2f}s"
+
+def _person(ix, value="x"):
+    return make_entity(
+        {
+            "id": f"batch-{ix}",
+            "schema": "Person",
+            "properties": {"name": [f"Person {ix}"], "notes": [value]},
+        }
+    )
+
+
+def test_iter_batches_count_bound():
+    # tiny entities: the byte bound is never reached, the count bound cuts
+    entities = [_person(i) for i in range(25)]
+    batches = list(iter_batches(entities, chunk_size=10, batch_bytes=10_000_000))
+    assert [len(b) for b in batches] == [10, 10, 5]
+
+
+def test_iter_batches_byte_bound():
+    # large entities: the byte bound cuts well before the count bound. This is
+    # the case a count-only bound gets wrong -- 1000 document entities are
+    # ~30MB, far past a sensible bulk request.
+    entities = [_person(i, value="x" * 5_000) for i in range(20)]
+    batches = list(iter_batches(entities, chunk_size=1000, batch_bytes=10_000))
+    assert len(batches) > 1
+    assert all(b for b in batches)
+    assert sum(len(b) for b in batches) == 20
+    for batch in batches:
+        assert sum(e._size for e in batch) <= 10_100  # 2 entities or less
+
+
+def test_iter_batches_empty():
+    assert list(iter_batches([], chunk_size=10, batch_bytes=100)) == []
+
+
+def test_iter_action_batches():
+    actions = [{"_id": str(i), "_index": "x", "_source": {}} for i in range(25)]
+    batches = list(iter_action_batches(actions, chunk_size=10))
+    assert [len(b) for b in batches] == [10, 10, 5]
+
+
+def test_indexer_concurrency_backpressure(entities, cleanup_after):
+    # the indexer must never hold more than `concurrency` bulk requests open,
+    # which is what bounds resident memory during a large ingest
+    clear_index()
+    settings = Settings()
+    indexer = Indexer("test_dataset", chunk_size=2, concurrency=2)
+    assert indexer.concurrency == 2
+    assert indexer.batch_bytes == settings.indexer_batch_bytes
+    stats = indexer.index(entities)
+    assert stats.indexed == 21
+    assert stats.failed == 0
+
+
+def test_indexer_requires_dataset_for_entities():
+    indexer = Indexer()
+    with pytest.raises(ValueError):
+        indexer.index([])

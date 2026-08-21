@@ -2,35 +2,31 @@ import asyncio
 import itertools
 import os
 import threading
-from datetime import datetime
-from typing import Any, Generator, Iterable, TypeAlias, TypedDict
+from datetime import datetime, timedelta
+from typing import Any, Iterable, NamedTuple
 
 from anystore.decorators import error_handler
 from anystore.io import logged_items
 from anystore.logging import get_logger
 from elasticsearch import AsyncElasticsearch
-from elasticsearch.helpers import BulkIndexError, async_bulk, bulk
+from elasticsearch.helpers import async_bulk
+from followthemoney import EntityProxy
 
 from openaleph_search.core import get_async_ingest_es, get_es, get_ingest_es
-from openaleph_search.index.util import (
-    check_response,
-    check_settings_changed,
-    refresh_sync,
-)
+from openaleph_search.index.util import MAX_REQUEST_TIMEOUT, refresh_sync
 from openaleph_search.settings import Settings
+from openaleph_search.transform.entity import format_batch, iter_batches
+from openaleph_search.util import Action, Actions
 
 log = get_logger(__name__)
 settings = Settings()
-
-MAX_TIMEOUT = "700m"
-MAX_REQUEST_TIMEOUT = 84600
 
 
 _local = threading.local()
 
 
 def _get_loop() -> asyncio.AbstractEventLoop:
-    """Persistent per-thread event loop for `bulk_actions`.
+    """Persistent per-thread event loop for the indexer.
 
     Reusing one loop across calls keeps the per-loop cached async ES client
     (see `core.get_async_ingest_es`) alive, instead of paying a fresh client
@@ -41,15 +37,6 @@ def _get_loop() -> asyncio.AbstractEventLoop:
         _local.loop = asyncio.new_event_loop()
         _local.pid = os.getpid()
     return _local.loop
-
-
-class Action(TypedDict):
-    _id: str
-    _index: str
-    _source: dict[str, Any]
-
-
-Actions: TypeAlias = Generator[Action, None, None] | Iterable[Action]
 
 
 @error_handler(logger=log, max_retries=settings.max_retries)
@@ -70,129 +57,193 @@ def query_delete(index, query, sync=False, **kwargs):
     )
 
 
+class IndexStats(NamedTuple):
+    """Outcome of an indexing run."""
+
+    indexed: int = 0
+    failed: int = 0
+    took: timedelta = timedelta(0)
+
+
+async def _bulk(
+    es: AsyncElasticsearch, actions: list[Action], sync: bool | None
+) -> tuple[int, int]:
+    """Issue one bulk request for an already-bounded list of actions.
+
+    Returns `(indexed, failed)`. Per-document failures are logged and counted
+    rather than aborting the run (`raise_on_error=False`) -- one bad document
+    should not discard the rest of a large ingest; the count surfaces via
+    `IndexStats.failed`. Transport-level errors still propagate.
+
+    `chunk_size=len(actions)` stops the helper re-chunking behind our back:
+    batching is the caller's job, and concurrency comes from several of these
+    running at once. `max_chunk_bytes` remains as a safety net for the
+    formatted-actions path, which cannot cheaply measure its own size.
+
+    Deliberately undecorated: `anystore.decorators.error_handler` installs a
+    *sync* wrapper, so on a coroutine function it returns the coroutine before
+    anything can raise and its retry/backoff never runs. Retries come from
+    `async_bulk(max_retries=...)` and the transport's own `max_retries` /
+    `retry_on_status`, which do apply.
+    """
+    indexed, failures = await async_bulk(
+        es,
+        actions,
+        max_retries=settings.max_retries,
+        refresh=refresh_sync(sync),
+        timeout=f"{MAX_REQUEST_TIMEOUT}s",
+        request_timeout=MAX_REQUEST_TIMEOUT,  # Client-side timeout
+        chunk_size=max(1, len(actions)),
+        max_chunk_bytes=settings.indexer_max_chunk_bytes,
+        raise_on_error=False,
+    )
+    failed = 0
+    for failure in failures:
+        # deleting something that is already gone is not a failure
+        if failure.get("delete", {}).get("status") == 404:
+            continue
+        failed += 1
+        if failed <= 10:  # log the first few only, avoid spam
+            log.error("Bulk index error: %r" % failure)
+    if failed > 10:
+        log.error("... and %d more bulk errors (truncated)" % (failed - 10))
+    return indexed, failed
+
+
+class Indexer:
+    """Transform entities and bulk-index them from a single process.
+
+    The transform runs inline and each finished batch is handed to the event
+    loop as an outstanding bulk request, so CPU and network overlap without
+    any multiprocessing.
+    """
+
+    def __init__(
+        self,
+        dataset: str | None = None,
+        chunk_size: int | None = None,
+        batch_bytes: int | None = None,
+        concurrency: int | None = None,
+        sync: bool | None = False,
+        **context: Any,
+    ) -> None:
+        self.dataset = dataset
+        self.chunk_size = chunk_size or settings.indexer_chunk_size
+        self.batch_bytes = batch_bytes or settings.indexer_batch_bytes
+        self.concurrency = concurrency or settings.indexer_concurrency
+        self.sync = sync
+        self.context = context
+
+    def index(self, entities: Iterable[EntityProxy]) -> IndexStats:
+        """Transform and index a stream of entities."""
+        if self.dataset is None:
+            raise ValueError("Indexer needs a `dataset` to transform entities")
+        entities = logged_items(
+            entities, "Indexing", 10_000, item_name="entity", logger=log
+        )
+        batches = (
+            format_batch(self.dataset, batch, **self.context)
+            for batch in iter_batches(entities, self.chunk_size, self.batch_bytes)
+        )
+        return self._run(batches)
+
+    def index_actions(self, actions: Actions) -> IndexStats:
+        """Index a stream of already formatted actions."""
+        actions = logged_items(actions, "Loading", 10_000, item_name="doc", logger=log)
+        batches = iter_action_batches(actions, self.chunk_size)
+        return self._run(batches)
+
+    def _run(self, batches: Iterable[list[Action]]) -> IndexStats:
+        return _get_loop().run_until_complete(self._run_async(batches))
+
+    async def _run_async(self, batches: Iterable[list[Action]]) -> IndexStats:
+        start = datetime.now()
+        es = await get_async_ingest_es()
+        indexed = 0
+        failed = 0
+        pending: set[asyncio.Task] = set()
+
+        async def drain(done: set[asyncio.Task]) -> None:
+            nonlocal indexed, failed
+            for task in done:
+                ok, errors = await task
+                indexed += ok
+                failed += errors
+
+        try:
+            for actions in batches:
+                if not actions:
+                    continue
+                # Backpressure: never hold more than `concurrency` requests
+                # open, which also bounds resident memory to
+                # concurrency * batch_bytes.
+                while len(pending) >= self.concurrency:
+                    done, pending = await asyncio.wait(
+                        pending, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    await drain(done)
+                pending.add(asyncio.create_task(_bulk(es, actions, self.sync)))
+                # Yield to the loop so the requests we just queued actually get
+                # written to their sockets before we block the loop on the next
+                # transform. Without this the loop only runs when `pending` is
+                # full, and the process idles through every round trip, which is
+                # slower.
+                await asyncio.sleep(0)
+
+            while pending:
+                done, pending = await asyncio.wait(
+                    pending, return_when=asyncio.FIRST_COMPLETED
+                )
+                await drain(done)
+        except BaseException:
+            # Fail loud, but do not abandon in-flight requests on a loop that
+            # is reused across calls: cancel them and collect their results so
+            # nothing surfaces later as "Task exception was never retrieved".
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+            log.error(
+                "Bulk indexing failed after %d indexed, %d failed" % (indexed, failed)
+            )
+            raise
+
+        took = datetime.now() - start
+        log.info(
+            "Bulk indexing completed: %d successful, %d failed" % (indexed, failed),
+            took=took,
+        )
+        return IndexStats(indexed, failed, took)
+
+
+def iter_action_batches(
+    actions: Actions, chunk_size: int | None = None
+) -> Iterable[list[Action]]:
+    """Batch already formatted actions by count.
+
+    Unlike the entity path there is no free size proxy here (an `Action` would
+    have to be serialized to measure it), so the byte bound is left to
+    `async_bulk`'s `max_chunk_bytes`, which splits an oversized batch into
+    several requests.
+    """
+    for batch in itertools.batched(
+        actions, n=chunk_size or settings.indexer_chunk_size
+    ):
+        yield list(batch)
+
+
 def bulk_actions(
     actions: Actions,
-    chunk_size: int | None = settings.indexer_chunk_size,
-    max_concurrency: int | None = settings.indexer_concurrency,
+    chunk_size: int | None = None,
+    max_concurrency: int | None = None,
     sync: bool | None = False,
-):
-    """Bulk indexing with parallel async processing - entry point for sync
-    applications
-
-    Args:
-        actions: Iterator/iterable of actions to index
-        chunk_size: Number of actions per chunk
-        max_concurrency: Maximum number of concurrent chunks
-        sync: Whether to refresh index after operations
-    """
-    # shortcut for 1 worker
-    if max_concurrency == 1:
-        es = get_ingest_es()
-        return bulk(
-            es,
-            actions,
-            max_retries=settings.max_retries,
-            chunk_size=settings.indexer_chunk_size,
-            max_chunk_bytes=settings.indexer_max_chunk_bytes,
-        )
-
-    return _get_loop().run_until_complete(
-        bulk_actions_async(actions, chunk_size, max_concurrency, sync)
-    )
-
-
-@error_handler(logger=log, max_retries=settings.max_retries)
-async def process_chunk(es: AsyncElasticsearch, chunk_actions, sync: bool):
-    try:
-        result = await async_bulk(
-            es,
-            chunk_actions,
-            max_retries=settings.max_retries,
-            refresh=refresh_sync(sync),
-            timeout=f"{MAX_REQUEST_TIMEOUT}s",
-            request_timeout=MAX_REQUEST_TIMEOUT,  # Client-side timeout
-            chunk_size=settings.indexer_chunk_size,
-            max_chunk_bytes=settings.indexer_max_chunk_bytes,
-        )
-        success, failed = result
-        for failure in failed:
-            if failure.get("delete", {}).get("status") == 404:
-                continue
-            log.warning("Bulk index error: %r" % failure)
-        return success, failed
-    except BulkIndexError as e:
-        log.error(f"BulkIndexError: {len(e.errors)} document(s) failed to index")
-        log.error(f"Error details: {e}")
-
-        # Log detailed information about each failed document
-        for i, error in enumerate(e.errors[:10]):  # Log first 10 errors to avoid spam
-            log.error(f"Document {i + 1} error: {error}")
-
-        if len(e.errors) > 10:
-            log.error(f"... and {len(e.errors) - 10} more errors (truncated)")
-
-        # Re-raise the exception to maintain existing error handling
-        raise
-
-
-async def bulk_actions_async(
-    actions: Actions,
-    chunk_size: int | None = settings.indexer_chunk_size,
-    max_concurrency: int | None = settings.indexer_concurrency,
-    sync: bool | None = False,
-):
-    """Process chunks as they complete to limit memory usage."""
-    start = datetime.now()
-    es = await get_async_ingest_es()
-    actions = logged_items(actions, "Loading", 10_000, item_name="doc", logger=log)
-    chunks = itertools.batched(actions, n=chunk_size or settings.indexer_chunk_size)
-    max_concurrency = max_concurrency or settings.indexer_concurrency
-    semaphore = asyncio.Semaphore(max_concurrency)
-
-    async def process_chunk_with_semaphore(chunk):
-        async with semaphore:
-            return await process_chunk(es, chunk, sync)
-
-    success = 0
-    errors = 0
-    pending_tasks = set()
-
-    for chunk in chunks:
-        # Create task
-        task = asyncio.create_task(process_chunk_with_semaphore(list(chunk)))
-        pending_tasks.add(task)
-
-        # Process completed tasks when we hit concurrency limit
-        if len(pending_tasks) >= max_concurrency:
-            done, pending_tasks = await asyncio.wait(
-                pending_tasks, return_when=asyncio.FIRST_COMPLETED
-            )
-
-            for task in done:
-                try:
-                    result = await task
-                    success += result[0]
-                    errors += len(result[1])
-                except Exception as e:
-                    log.error(f"Chunk processing failed: {e}")
-                    errors += 1
-
-    # Process remaining tasks
-    if pending_tasks:
-        results = await asyncio.gather(*pending_tasks, return_exceptions=True)
-        for result in results:
-            if isinstance(result, Exception):
-                log.error(f"Chunk processing failed: {result}")
-                errors += 1
-            else:
-                success += result[0]
-                errors += len(result[1])
-
-    end = datetime.now()
-    log.info(
-        "Bulk indexing completed: %d successful, %d failed" % (success, errors),
-        took=end - start,
-    )
+) -> IndexStats:
+    """Bulk index a stream of already formatted actions."""
+    return Indexer(
+        chunk_size=chunk_size,
+        concurrency=max_concurrency,
+        sync=sync,
+    ).index_actions(actions)
 
 
 @error_handler(logger=log, max_retries=settings.max_retries)
@@ -210,103 +261,3 @@ def index_safe(index, id, body, sync=False, **kwargs):
 def delete_safe(index: str, id: str, sync: bool | None = False):
     es = get_es()
     es.delete(index=index, id=id, ignore=[404], refresh=refresh_sync(sync))
-
-
-IMMUTABLE_MAPPING_PARAMS = ("type", "analyzer", "normalizer", "index", "store")
-
-
-@error_handler(logger=log, max_retries=settings.max_retries)
-def rewrite_mapping_safe(pending, existing):
-    """Reconcile a pending mapping against the one ES is already serving.
-
-    For every IMMUTABLE_MAPPING_PARAMS key (``type``, ``analyzer``,
-    ``normalizer``, ``index``, ``store``) ES will reject any field-level
-    change after creation. We handle two cases:
-
-    1. The existing field spec carries an explicit value for the key →
-       keep that value, drop whatever the pending mapping wanted to flip
-       it to.
-    2. The existing field spec is present but the key is absent → ES
-       applied its default at creation time and that default is now
-       immutable just like an explicit one. The ``_mapping`` API does not
-       echo defaults back, so ``old_value is None`` here is *not* an
-       invitation to push a new value — it means ES will refuse the
-       change. Drop the pending key so the put_mapping call succeeds and
-       the field keeps its (now-frozen) default behaviour. This is the
-       case that bites text/html/json properties created before the
-       ``index: false`` bugfix (commit e864564) landed; existing indexes
-       have those fields with the default ``index: true``, and any
-       attempt to push ``index: false`` raises
-       ``illegal_argument_exception``. Cut-over to the intended value
-       requires a coordinated reindex; that's deferred to v6.
-
-    Non-immutable keys flow through normally, and any keys that exist on
-    the live mapping but are missing from pending are copied over so the
-    put_mapping body is a strict superset.
-    """
-    # This is a pretty bad idea long-term. We need to make it easier
-    # to use multiple index generations instead.
-    if not isinstance(pending, dict) or not isinstance(existing, dict):
-        return pending
-    for key, value in list(pending.items()):
-        old_value = existing.get(key)
-        value = rewrite_mapping_safe(value, old_value)
-        if key in IMMUTABLE_MAPPING_PARAMS:
-            if old_value is not None:
-                pending[key] = old_value
-            else:
-                # Field exists; key absent → ES default is in effect and
-                # immutable. Drop the pending override so ES doesn't 400.
-                pending.pop(key, None)
-            continue
-        pending[key] = value
-    for key, value in existing.items():
-        if key not in pending:
-            pending[key] = value
-    return pending
-
-
-@error_handler(logger=log, max_retries=settings.max_retries)
-def configure_index(index, mapping, settings_):
-    """Create or update a search index with the given mapping and
-    SETTINGS. This will try to make a new index, or update an
-    existing mapping with new properties.
-    """
-    es = get_es()
-    if es.indices.exists(index=index):
-        log.info("Configuring index: %s..." % index)
-        options = {
-            "index": index,
-            "timeout": MAX_TIMEOUT,
-            "master_timeout": MAX_TIMEOUT,
-        }
-        # `index` may be an alias (the bucket suffix is usually an alias onto a
-        # versioned concrete index). es.indices.get keys its response by the
-        # concrete backing index name, so `.get(index)` would miss it and hand
-        # rewrite_mapping_safe an empty existing mapping — silently turning it
-        # into a no-op pass-through that drops every immutability guard (e.g.
-        # pushing `index: false` / `format` onto frozen fields → 400). Take the
-        # sole resolved index's config instead.
-        config = next(iter(es.indices.get(index=index).values()), {})
-        settings_.get("index").pop("number_of_shards", settings.index_shards)
-        if check_settings_changed(settings_, config.get("settings")):
-            res = es.indices.close(ignore_unavailable=True, **options)
-            res = es.indices.put_settings(body=settings_, **options)
-            if not check_response(index, res):
-                return False
-        mapping = rewrite_mapping_safe(mapping, config.get("mappings"))
-        # _source config (e.g. excludes) is immutable after index creation,
-        # so we strip it when updating existing indexes
-        mapping.pop("_source", None)
-        res = es.indices.put_mapping(body=mapping, **options)
-        if not check_response(index, res):
-            return False
-        res = es.indices.open(**options)
-        return True
-    else:
-        log.info("Creating index: %s..." % index)
-        body = {"settings": settings_, "mappings": mapping}
-        res = es.indices.create(index=index, body=body)
-        if not check_response(index, res):
-            return False
-        return True

@@ -42,7 +42,15 @@ class Settings(BaseSettings):
     connection_pool_limit_per_host: int = 25
 
     indexer_concurrency: int = 8
+    """Number of bulk requests the indexer keeps outstanding at once."""
+
     indexer_chunk_size: int = 1000
+    """Upper bound on entities per batch (one batch = one bulk request)."""
+
+    indexer_batch_bytes: int = 5 * 1024 * 1024  # 5mb
+    """Upper bound on payload bytes per batch. Tracks
+    `indexer_max_chunk_bytes` so that one batch is one bulk request."""
+
     indexer_max_chunk_bytes: int = 5 * 1024 * 1024  # 5mb
 
     index_shards: int = 10

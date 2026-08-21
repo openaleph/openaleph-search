@@ -1,24 +1,16 @@
 """Transform followthemoney.EntityProxy into index actions"""
 
-import atexit
 import functools
-import itertools
-import os
-import threading
-from concurrent.futures import FIRST_COMPLETED, Future, ProcessPoolExecutor, wait
 from datetime import datetime
-from multiprocessing import cpu_count
-from typing import Generator, Iterable
+from typing import Iterable, Iterator
 
 from anystore.logging import get_logger
-from anystore.util import Took
 from banal import ensure_list
 from followthemoney import EntityProxy, model, registry
 from followthemoney.namespace import Namespace
 from ftmq.util import get_name_symbols, get_symbols, select_data, select_symbols
 from rigour.names import NameTypeTag, analyze_names
 
-from openaleph_search.index.indexer import Action, Actions
 from openaleph_search.index.indexes import entities_write_index, schema_bucket
 from openaleph_search.index.mapping import NUMERIC_TYPES, Field
 from openaleph_search.settings import Settings, __version__
@@ -29,7 +21,7 @@ from openaleph_search.transform.util import (
     make_percolator_query,
     phonetic_names,
 )
-from openaleph_search.util import valid_dataset
+from openaleph_search.util import Action, Actions, valid_dataset
 
 log = get_logger(__name__)
 settings = Settings()
@@ -71,45 +63,11 @@ def _get_namespace(value: str) -> Namespace:
 
 @functools.cache
 def _warm_rigour_taggers() -> None:
-    # Force rigour's Rust-backed AC name taggers to load in this process.
-    # Runs as the worker initializer of the shared executor so each worker
-    # pays the ~3.5s cold-load once per process lifetime instead of on its
-    # first analyze_names call.
+    # Force rigour's Rust-backed AC name taggers to load in this process, so
+    # the ~3.5s cold-load is paid once per process instead of on the first
+    # `analyze_names` call in the middle of a batch.
     analyze_names(NameTypeTag.PER, ["x"])
     analyze_names(NameTypeTag.ORG, ["x"])
-
-
-_executor: ProcessPoolExecutor | None = None
-_executor_pid: int | None = None
-_executor_lock = threading.Lock()
-
-
-def _get_executor() -> ProcessPoolExecutor:
-    """Long-lived process pool shared across `format_parallel` calls.
-
-    Python 3.14 changed the default multiprocessing start method on Linux
-    from `fork` to `forkserver`, under which every pool creation costs
-    seconds (workers start pristine, re-import the module tree and reload
-    the rigour taggers) instead of being a near-free COW fork. Reusing one
-    executor per process pays that cost once per process lifetime. The pid
-    guard recreates the pool in processes forked after creation (e.g.
-    gunicorn prefork children), which would otherwise inherit a dead one.
-    """
-    global _executor, _executor_pid
-    with _executor_lock:
-        if _executor is None or _executor_pid != os.getpid():
-            _executor = ProcessPoolExecutor(
-                max_workers=min(cpu_count(), settings.indexer_concurrency),
-                initializer=_warm_rigour_taggers,
-            )
-            _executor_pid = os.getpid()
-        return _executor
-
-
-@atexit.register
-def _shutdown_executor() -> None:
-    if _executor is not None and _executor_pid == os.getpid():
-        _executor.shutdown(wait=False, cancel_futures=True)
 
 
 def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
@@ -270,6 +228,8 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
 
 
 def format_entities(dataset: str, entities: Iterable[EntityProxy], **kwargs) -> Actions:
+    """Lazily transform a stream of entities into index actions."""
+    _warm_rigour_taggers()
     for entity in entities:
         formatted = format_entity(dataset, entity, **kwargs)
         if formatted is not None:
@@ -279,6 +239,7 @@ def format_entities(dataset: str, entities: Iterable[EntityProxy], **kwargs) -> 
 def format_batch(
     dataset: str, entities: Iterable[EntityProxy], **kwargs
 ) -> list[Action]:
+    _warm_rigour_taggers()
     actions = []
     for entity in entities:
         formatted = format_entity(dataset, entity, **kwargs)
@@ -287,54 +248,28 @@ def format_batch(
     return actions
 
 
-def format_parallel(
-    dataset: str,
-    entities: Generator[EntityProxy, None, None],
-    concurrency: int | None = settings.indexer_concurrency,
-    chunk_size: int | None = settings.indexer_chunk_size,
-    **kwargs,
-) -> Actions:
+def iter_batches(
+    entities: Iterable[EntityProxy],
+    chunk_size: int | None = None,
+    batch_bytes: int | None = None,
+) -> Iterator[list[EntityProxy]]:
+    """Batch a stream of entities by entity count and payload bytes, cutting on
+    whichever limit is reached first.
+
+    A count-only bound is wrong in both directions: 1000 document entities can
+    be 100MB (far past a sensible bulk request), while 1000 `Person`s can only
+    be ~100KB (far below one). `EntityProxy._size` is the summed length of all
+    property values and measures roughly the entity's JSON size
     """
-    Transform entities into index actions in parallel
-
-    The process pool is a shared, process-wide singleton (see `_get_executor`);
-    `concurrency` controls the serial shortcut and the number of in-flight
-    batches, while the pool size itself is fixed by
-    `settings.indexer_concurrency`.
-    """
-    batches = itertools.batched(entities, n=chunk_size or settings.indexer_chunk_size)
-    max_workers = min((cpu_count(), concurrency or settings.indexer_concurrency))
-    max_queued = max_workers * 2
-    func = functools.partial(format_batch, dataset=dataset, **kwargs)
-
-    # shortcut for 1 worker
-    if max_workers == 1:
-        yield from func(entities=entities)
-        return
-
-    executor = _get_executor()
-    with Took() as t:
-        transformed = 0
-        active: set[Future[list[Action]]] = set()
-        # Submit initial batches
-        for _ in range(max_queued):
-            try:
-                active.add(executor.submit(func, entities=next(batches)))
-            except StopIteration:
-                break
-
-        # Process results as they complete
-        while active:
-            done, active = wait(active, return_when=FIRST_COMPLETED)
-            for future in done:
-                for action in future.result():
-                    transformed += 1
-                    yield action
-
-                # Submit next batch
-                try:
-                    active.add(executor.submit(func, entities=next(batches)))
-                except StopIteration:
-                    pass
-
-    log.info(f"Transformed {transformed} actions.", took=t.took)
+    chunk_size = chunk_size or settings.indexer_chunk_size
+    batch_bytes = batch_bytes or settings.indexer_batch_bytes
+    batch: list[EntityProxy] = []
+    nbytes = 0
+    for entity in entities:
+        batch.append(entity)
+        nbytes += entity._size
+        if len(batch) >= chunk_size or nbytes >= batch_bytes:
+            yield batch
+            batch, nbytes = [], 0
+    if batch:
+        yield batch

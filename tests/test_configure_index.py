@@ -6,7 +6,7 @@ Uses real Elasticsearch instance for integration testing.
 import pytest
 
 from openaleph_search.core import get_es
-from openaleph_search.index.indexer import configure_index
+from openaleph_search.index.configure import configure_index
 
 
 class TestConfigureIndex:

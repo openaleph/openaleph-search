@@ -24,7 +24,7 @@ from openaleph_search.search.logic import (
     search_query_string,
 )
 from openaleph_search.settings import Settings, __version__
-from openaleph_search.transform.entity import format_parallel
+from openaleph_search.transform.entity import format_entities
 
 settings = Settings()
 
@@ -91,7 +91,7 @@ def cli_format_entities(
     with ErrorHandler(log):
         entities = smart_read_proxies(input_uri)
         formatted = logged_items(
-            format_parallel(dataset, entities, collection_id=collection_id),
+            format_entities(dataset, entities, collection_id=collection_id),
             "Format",
             10_000,
             "Entity",
@@ -108,8 +108,15 @@ def cli_index_entities(
 ):
     """Index entities into given dataset"""
     with ErrorHandler(log):
-        entities.index_bulk(
+        stats = entities.index_bulk(
             dataset, smart_read_proxies(input_uri), collection_id=collection_id
+        )
+        log.info(
+            "Index entities complete.",
+            dataset=dataset,
+            indexed=stats.indexed,
+            failed=stats.failed,
+            took=stats.took,
         )
 
 
@@ -118,8 +125,14 @@ def cli_index_actions(input_uri: str = OPT_INPUT_URI):
     """Index a stream of actions"""
     with ErrorHandler(log), Took() as t:
         actions = smart_stream_json(input_uri)
-        bulk_actions(actions)
-        log.info("Index actions complete.", input_uri=input_uri, took=t.took)
+        stats = bulk_actions(actions)
+        log.info(
+            "Index actions complete.",
+            input_uri=input_uri,
+            indexed=stats.indexed,
+            failed=stats.failed,
+            took=t.took,
+        )
 
 
 @cli.command("dump-actions")

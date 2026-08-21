@@ -60,19 +60,32 @@ Connection pool limit for AsyncElasticsearch.
 
 ### `indexer_concurrency`
 
-Number of concurrent indexing workers. For pre-processing entity data, python's `ProcessPoolExecuter` is used, as this is a cpu-bound computation. For indexing, `ThreadPoolExecutor` is used to make concurrent async network calls to the Elasticsearch cluster. Keep this in mind when allocating resources to multiple index workers.
+Number of bulk requests the indexer keeps outstanding at once.
+
+Indexing runs in a **single process**: entities are transformed inline and each finished batch is handed to the event loop as a concurrent bulk request. This setting is the only concurrency knob — there is no process or thread pool. It also bounds resident memory, to roughly `indexer_concurrency * indexer_batch_bytes`.
+
+Raise it if the Elasticsearch cluster is fast enough that the indexer spends its time waiting on round trips; lower it if the cluster starts rejecting writes (check `_cat/thread_pool/write` for a climbing `rejected` count).
 
 - Type: `int`
 - Default: `8`
 
 ### `indexer_chunk_size`
 
-Documents per indexing batch.
+Upper bound on entities per batch, where one batch is one bulk request.
 
-For document-heavy data (much full text payload) or when experiencing Elasticsearch time-outs, reduce this number.
+Batches are cut on this **or** on `indexer_batch_bytes`, whichever is reached first, so this bound mostly matters for small entities (a `Person` is a few hundred bytes; document entities hit the byte bound long before the count bound).
 
 - Type: `int`
 - Default: `1000`
+
+### `indexer_batch_bytes`
+
+Upper bound on payload bytes per batch, measured with `EntityProxy._size`.
+
+Tracks `indexer_max_chunk_bytes` so that one batch becomes exactly one bulk request. For document-heavy data or when experiencing Elasticsearch time-outs, reduce this number.
+
+- Type: `int`
+- Default: `5242880` (5mb)
 
 ### `indexer_max_chunk_bytes`
 

@@ -9,6 +9,7 @@ from anystore.util import mask_uri
 from banal import ensure_list
 from elasticsearch import AsyncElasticsearch, Elasticsearch
 from elasticsearch.exceptions import ConnectionError as ESConnectionError
+from elasticsearch.serializer import DEFAULT_SERIALIZERS, OrjsonSerializer, Serializer
 
 from openaleph_search.settings import Settings
 
@@ -16,6 +17,13 @@ log = get_logger(__name__)
 
 RETRY_DELAY = 5  # seconds between connection retries
 MAX_RETRIES = 60  # maximum number of retries (~5 minutes with 5s delay)
+
+
+def _serializers() -> dict[str, Serializer]:
+    """Serialize with orjson, it's ~3 times faster than stdlib `json`"""
+    serializers = dict(DEFAULT_SERIALIZERS)
+    serializers["application/json"] = OrjsonSerializer()
+    return serializers
 
 
 @cache
@@ -43,6 +51,7 @@ def _connect_sync(urls: list[str], name: str) -> Elasticsearch:
                 max_retries=settings.max_retries,
                 retry_on_timeout=settings.retry_on_timeout,
                 retry_on_status=[502, 503, 504],
+                serializers=_serializers(),
             )
             es.info()
             log.info(f"Connected to Elasticsearch {name}", nodes=masked_urls)
@@ -76,6 +85,7 @@ async def _connect_async(urls: list[str], name: str) -> AsyncElasticsearch:
                 retry_on_timeout=settings.retry_on_timeout,
                 retry_on_status=[502, 503, 504],
                 connections_per_node=settings.connection_pool_limit_per_host,
+                serializers=_serializers(),
             )
             await es.info()
             log.info(

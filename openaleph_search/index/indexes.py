@@ -7,7 +7,7 @@ from followthemoney import model
 from followthemoney.exc import InvalidData
 from followthemoney.schema import Schema
 
-from openaleph_search.index.indexer import configure_index
+from openaleph_search.index.configure import configure_index
 from openaleph_search.index.mapping import (
     Field,
     FieldType,
