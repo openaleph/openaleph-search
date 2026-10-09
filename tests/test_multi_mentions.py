@@ -106,9 +106,6 @@ def _ids(result) -> list[str]:
     return [h["_id"] for h in result["hits"]["hits"]]
 
 
-# --- collect_source_entities --------------------------------------------
-
-
 def test_collect_source_entities_country_filter(index_multi_mentions_fixtures):
     parser = _parser(
         [
@@ -159,9 +156,6 @@ def test_collect_source_entities_cap(index_multi_mentions_fixtures):
     # multi-valued names push past the cap. Either trip is valid at cap=1.
     with pytest.raises(ValueError, match=r"Source filter (matched|yielded)"):
         collect_source_entities(parser, max_names=1)
-
-
-# --- MultiMentionsQuery --------------------------------------------
 
 
 def _target(pairs=None, auth=None):
@@ -311,9 +305,6 @@ def test_multi_mentions_auth_on_target(index_multi_mentions_fixtures):
     )
     result = MultiMentionsQuery(target, source).search()
     assert result["hits"]["total"]["value"] == 0
-
-
-# --- shared-name attribution --------------------------------------------
 
 
 SHARED_DATASET = "test_watchlist_shared"

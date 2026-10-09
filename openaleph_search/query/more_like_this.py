@@ -1,12 +1,11 @@
-import logging
-
+from anystore.logging import get_logger
 from followthemoney import EntityProxy
 
 from openaleph_search.index.mapping import Field
 from openaleph_search.query.util import BoolQuery, bool_query, none_query
 from openaleph_search.settings import Settings
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 settings = Settings()
 
 

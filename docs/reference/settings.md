@@ -37,7 +37,7 @@ Request timeout in seconds.
 
 ### `max_retries`
 
-Maximum retry attempts for failed requests.
+Maximum retry attempts for failed requests, including `index_proxy`. Bulk indexing uses `indexer_max_retries`.
 
 - Type: `int`
 - Default: `3`
@@ -93,6 +93,27 @@ Maximum batch size in bytes.
 
 - Type: `int`
 - Default: `5242880` (5 MB)
+
+### `indexer_max_retries`
+
+Retries for a bulk batch rejected with HTTP 429, 502–504 or a connection error, before the run fails. Only the rejected documents are re-sent, and new batches wait while one backs off. About 2–4.5 hours at the default backoff. Other document errors (e.g. mapping errors) are not retried and count as failed.
+
+- Type: `int`
+- Default: `60`
+
+### `indexer_retry_backoff`
+
+Seconds before the first retry; doubles (jittered) on each further one, up to `indexer_retry_max_backoff`.
+
+- Type: `float`
+- Default: `2`
+
+### `indexer_retry_max_backoff`
+
+Upper bound in seconds for a single retry wait.
+
+- Type: `float`
+- Default: `300`
 
 ## Index structure
 

@@ -1,6 +1,6 @@
-import logging
 from typing import Any, Iterable, TypeAlias
 
+from anystore.logging import get_logger
 from followthemoney import EntityProxy, Schema
 from followthemoney.types import registry
 from ftmq.util import get_name_symbols
@@ -17,7 +17,7 @@ from openaleph_search.transform.util import (
     preprocess_name,
 )
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 Clauses: TypeAlias = list[dict[str, Any]]
 MATCH_GROUPS = [
     registry.ip.group,

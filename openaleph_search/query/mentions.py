@@ -168,9 +168,6 @@ def name_phrase_shoulds(names: list[str]) -> list[dict[str, Any]]:
     ]
 
 
-# --- shared base ----------------------------------------------------------
-
-
 class _Mentions(EntitiesQuery):
     """Internal base: builds the mention-clause + default sort/highlight
     from `self.source_entities`. Subclasses populate
