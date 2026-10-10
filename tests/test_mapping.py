@@ -10,6 +10,7 @@ from openaleph_search.index.indexes import (
 from openaleph_search.index.mapping import (
     BASE_MAPPING,
     GROUP_MAPPING,
+    KEYWORD_IGNORE_ABOVE,
     make_mapping,
     make_schema_mapping,
 )
@@ -139,6 +140,28 @@ def test_mappings_copy_to(es, cleanup_after):
     assert len(search_result["hits"]["hits"]) == 2, "Failed to match names on text"
 
 
+def test_mapping_immense_keyword_value(es, cleanup_after):
+    # a single keyword term over 32766 bytes used to reject the whole document
+    to = ", ".join(f"Steven Feller <steven.feller{i}@example.org>" for i in range(2000))
+    assert len(to.encode()) > 32766
+    entity = EntityProxy.from_dict(
+        {
+            "id": "big-email",
+            "schema": "Email",
+            "properties": {"subject": ["Hello"], "to": [to]},
+        }
+    )
+    res = index_proxy("test_mapping", entity, sync=True)
+    assert res.indexed == 1
+    assert res.failed == 0
+
+    index = entities_read_index()
+    hits = es.search(index=index, query={"match": {"text": "feller"}})["hits"]
+    assert hits["total"]["value"] == 1
+    assert "properties.to" in hits["hits"][0]["_ignored"]
+    assert hits["hits"][0]["_source"]["properties"]["to"] == [to]
+
+
 def test_mapping_colliding_prop_names():
     """Test that we can handle multiple properties with the same property name."""
     mapping = make_schema_mapping(["CallForTenders", "Identification"])
@@ -209,6 +232,17 @@ def test_mapping_spec():
     email_mapping = make_schema_mapping(["Email"])
     assert email_mapping["bodyText"]["index"] is False
     assert email_mapping["bodyHtml"]["index"] is False
+
+    # every keyword field skips terms over Lucene's 32766 byte limit
+    def keyword_fields(properties):
+        for spec in properties.values():
+            if spec.get("type") == "keyword":
+                yield spec
+            yield from keyword_fields(spec.get("properties", {}))
+
+    specs = list(keyword_fields(full_mapping["properties"]))
+    assert specs
+    assert all(s["ignore_above"] == KEYWORD_IGNORE_ABOVE for s in specs)
 
 
 def test_mapping_schema_bucket():

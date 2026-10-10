@@ -27,6 +27,10 @@ ICU_NORMALIZER = "icu-default"
 HTML_ANALYZER = "strip-html"
 KW_NORMALIZER = "kw-normalizer"
 NAME_KW_NORMALIZER = "name-kw-normalizer"
+# Lucene rejects the whole document on a keyword term over 32766 bytes;
+# `ignore_above` counts characters, so 32766 / 4 (max UTF-8 width). Longer
+# values stay in `_source` and in their `copy_to` fulltext targets.
+KEYWORD_IGNORE_ABOVE = 8191
 # Proposed v6 field-level format for date properties (currently NOT
 # emitted — see the FIXME on `FieldType.PARTIAL_DATE`). Kept here as the
 # documented target so the v6 cut-over (which requires a reindex) does
@@ -213,8 +217,16 @@ class FieldType:
     # additional text copied over from other properties for arbitrary lookups
     TEXT = {"type": "text", "analyzer": HTML_ANALYZER, "search_analyzer": HTML_ANALYZER}
 
-    KEYWORD = {"type": "keyword", "normalizer": KW_NORMALIZER}
-    KEYWORD_COPY = {"type": "keyword", "copy_to": Field.TEXT}
+    KEYWORD = {
+        "type": "keyword",
+        "normalizer": KW_NORMALIZER,
+        "ignore_above": KEYWORD_IGNORE_ABOVE,
+    }
+    KEYWORD_COPY = {
+        "type": "keyword",
+        "copy_to": Field.TEXT,
+        "ignore_above": KEYWORD_IGNORE_ABOVE,
+    }
     NUMERIC = {"type": "double"}
     INTEGER = {"type": "integer"}
     GEOPOINT = {"type": "geo_point"}
@@ -232,6 +244,7 @@ class FieldType:
         "type": "keyword",
         "normalizer": NAME_KW_NORMALIZER,
         "store": True,
+        "ignore_above": KEYWORD_IGNORE_ABOVE,
     }
 
 
@@ -453,6 +466,8 @@ def _build_property_spec(
         "copy_to": list(copy_to_fields),
     }
     spec.update(_consensus_extras(contrib_types))
+    if spec["type"] == "keyword":
+        spec["ignore_above"] = KEYWORD_IGNORE_ABOVE
     return spec
 
 
