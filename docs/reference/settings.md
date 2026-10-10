@@ -37,7 +37,7 @@ Request timeout in seconds.
 
 ### `max_retries`
 
-Maximum retry attempts for failed requests.
+Maximum retry attempts for failed requests, including `index_proxy`. Bulk indexing uses `indexer_max_retries`.
 
 - Type: `int`
 - Default: `3`
@@ -93,6 +93,34 @@ Maximum batch size in bytes.
 
 - Type: `int`
 - Default: `5242880` (5 MB)
+
+### `indexer_max_retries`
+
+Retries for a bulk batch rejected with HTTP 429, 502–504 or a connection error, before the run fails. Only the rejected documents are re-sent, and new batches wait while one backs off. About 2–4.5 hours at the default backoff. Other document errors (e.g. mapping errors) are not retried and count as failed. A request over the cluster's `http.max_content_length` (HTTP 413) is split and re-sent; a single document that is still too large is skipped and counts as failed.
+
+- Type: `int`
+- Default: `60`
+
+### `indexer_retry_backoff`
+
+Seconds before the first retry; doubles (jittered) on each further one, up to `indexer_retry_max_backoff`.
+
+- Type: `float`
+- Default: `2`
+
+### `indexer_retry_max_backoff`
+
+Upper bound in seconds for a single retry wait.
+
+- Type: `float`
+- Default: `300`
+
+### `indexer_max_text_bytes`
+
+Upper bound in UTF-8 bytes for an entity's `indexText` (the `content` field); longer text is truncated and a warning is logged. Defaults to Elasticsearch's default `http.max_content_length`. A document whose whole request still exceeds the cluster's limit is skipped and counts as failed (see `indexer_max_retries`), so keep this below `http.max_content_length` with some room for the other fields.
+
+- Type: `int`
+- Default: `104857600` (100 MB)
 
 ## Index structure
 

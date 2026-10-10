@@ -1,6 +1,6 @@
-import logging
 from typing import Any, Iterable, NamedTuple
 
+from anystore.logging import get_logger
 from banal import ensure_list
 from elasticsearch.helpers import scan
 from followthemoney import model
@@ -13,9 +13,10 @@ from openaleph_search.index.indexes import entities_read_index, entities_write_i
 from openaleph_search.index.mapping import Field
 from openaleph_search.index.util import MAX_REQUEST_TIMEOUT, MAX_TIMEOUT, unpack_result
 from openaleph_search.model import SearchAuth
-from openaleph_search.settings import MAX_PAGE
+from openaleph_search.settings import MAX_PAGE, Settings
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
+settings = Settings()
 PROXY_INCLUDES = [
     "caption",
     "schema",
@@ -343,6 +344,8 @@ def get_entity_content(entity_id: str) -> str | None:
 
 def index_proxy(dataset: str, proxy: EntityProxy, sync=False, **kwargs) -> IndexStats:
     delete_entity(proxy.id, exclude=proxy.schema, sync=False)
+    # usually runs inside an API request: keep the short request retry budget
+    kwargs.setdefault("max_retries", settings.max_retries)
     return index_bulk(dataset, [proxy], sync=sync, **kwargs)
 
 

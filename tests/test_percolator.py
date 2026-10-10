@@ -296,17 +296,6 @@ def test_percolator_scoring_tier_ordering(cleanup_after):
     assert matched["scoring-alias"] == {"other_name"}
 
 
-# ---------------------------------------------------------------------------
-# entity_id input mode — percolate against fulltext that is already indexed.
-#
-# Document descendants carry their text in `properties.bodyText` (in `_source`),
-# while `Pages` entities have an empty `bodyText` and the aggregated text in
-# `Field.CONTENT` (stored via `store: true` in the pages bucket only). The
-# helper resolves both transparently. `Page` entities (which do NOT inherit
-# from `Document` in FtM) and any non-document entities are rejected.
-# ---------------------------------------------------------------------------
-
-
 def test_percolator_query_by_document_entity_id(cleanup_after):
     """Percolating by id resolves bodyText from _source for Document entities."""
     target = make_entity(

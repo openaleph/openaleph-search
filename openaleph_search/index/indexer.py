@@ -1,15 +1,19 @@
 import asyncio
 import itertools
 import os
+import random
 import threading
+import time
 from datetime import datetime, timedelta
 from typing import Any, Iterable, NamedTuple
 
 from anystore.decorators import error_handler
 from anystore.io import logged_items
 from anystore.logging import get_logger
-from elasticsearch import AsyncElasticsearch
-from elasticsearch.helpers import async_bulk
+from elasticsearch import ApiError, AsyncElasticsearch
+from elasticsearch import ConnectionError as ESConnectionError
+from elasticsearch import ConnectionTimeout
+from elasticsearch.helpers import BulkIndexError, async_streaming_bulk
 from followthemoney import EntityProxy
 
 from openaleph_search.core import get_async_ingest_es, get_es, get_ingest_es
@@ -65,46 +69,142 @@ class IndexStats(NamedTuple):
     took: timedelta = timedelta(0)
 
 
-async def _bulk(
-    es: AsyncElasticsearch, actions: list[Action], sync: bool | None
-) -> tuple[int, int]:
-    """Issue one bulk request for an already-bounded list of actions.
+RETRY_STATUS = frozenset({429, 502, 503, 504})
+"""Statuses, per request or per document, of a busy or briefly unavailable
+cluster rather than a bad document."""
 
-    Returns `(indexed, failed)`. Per-document failures are logged and counted
-    rather than aborting the run (`raise_on_error=False`) -- one bad document
-    should not discard the rest of a large ingest; the count surfaces via
-    `IndexStats.failed`. Transport-level errors still propagate.
 
-    `chunk_size=len(actions)` stops the helper re-chunking behind our back:
-    batching is the caller's job, and concurrency comes from several of these
-    running at once. `max_chunk_bytes` remains as a safety net for the
-    formatted-actions path, which cannot cheaply measure its own size.
-
-    Deliberately undecorated: `anystore.decorators.error_handler` installs a
-    *sync* wrapper, so on a coroutine function it returns the coroutine before
-    anything can raise and its retry/backoff never runs. Retries come from
-    `async_bulk(max_retries=...)` and the transport's own `max_retries` /
-    `retry_on_status`, which do apply.
-    """
-    indexed, failures = await async_bulk(
-        es,
-        actions,
-        max_retries=settings.max_retries,
-        refresh=refresh_sync(sync),
-        timeout=f"{MAX_REQUEST_TIMEOUT}s",
-        request_timeout=MAX_REQUEST_TIMEOUT,  # Client-side timeout
-        chunk_size=max(1, len(actions)),
-        max_chunk_bytes=settings.indexer_max_chunk_bytes,
-        raise_on_error=False,
+def _backoff(attempt: int) -> float:
+    """Jittered exponential backoff for the `attempt`-th retry (1-based)."""
+    delay = min(
+        settings.indexer_retry_max_backoff,
+        settings.indexer_retry_backoff * 2 ** (attempt - 1),
     )
+    return random.uniform(delay / 2, delay)
+
+
+class _Gate:
+    """Holds back new bulk requests while a batch backs off, so the whole
+    indexer eases off an overloaded node."""
+
+    def __init__(self) -> None:
+        self.until = 0.0
+
+    def close(self, delay: float) -> None:
+        self.until = max(self.until, time.monotonic() + delay)
+
+    async def wait(self) -> None:
+        while (delay := self.until - time.monotonic()) > 0:
+            await asyncio.sleep(delay)
+
+
+async def _bulk(
+    es: AsyncElasticsearch,
+    actions: list[Action],
+    sync: bool | None,
+    gate: _Gate,
+    max_retries: int,
+) -> tuple[int, int]:
+    """Bulk index `actions`, re-sending what Elasticsearch rejects.
+
+    Returns `(indexed, failed)`. Actions rejected with a `RETRY_STATUS` or lost
+    to a connection error are retried with backoff, up to `max_retries` times,
+    then `BulkIndexError` is raised. A request too large for the cluster (413)
+    is split in halves and re-sent, down to the single document that does not
+    fit, which counts as failed. Other per-document errors are logged and
+    counted as failed; other whole-request errors raise.
+    """
+    indexed = 0
     failed = 0
-    for failure in failures:
-        # deleting something that is already gone is not a failure
-        if failure.get("delete", {}).get("status") == 404:
-            continue
-        failed += 1
-        if failed <= 10:  # log the first few only, avoid spam
-            log.error("Bulk index error: %r" % failure)
+    attempt = 0
+    while actions:
+        retry: list[Action] = []
+        rejected: list[dict[str, Any]] = []
+        too_large: list[Action] = []
+        reason = ""
+        done = 0
+        try:
+            # The helper's own retries stay off: without them it yields one
+            # result per action, in order, which maps results to `actions`.
+            async for ok, item in async_streaming_bulk(
+                es,
+                actions,
+                refresh=refresh_sync(sync),
+                timeout=f"{MAX_REQUEST_TIMEOUT}s",
+                request_timeout=MAX_REQUEST_TIMEOUT,  # Client-side timeout
+                # one batch is one request; the byte bound is a safety net
+                chunk_size=max(1, len(actions)),
+                max_chunk_bytes=settings.indexer_max_chunk_bytes,
+                raise_on_error=False,
+            ):
+                action = actions[done]
+                done += 1
+                if ok:
+                    indexed += 1
+                    continue
+                op_type, info = next(iter(item.items()))
+                status = info.get("status")
+                if status in RETRY_STATUS:
+                    retry.append(action)
+                    rejected.append(item)
+                    error = info.get("error")
+                    if isinstance(error, dict):
+                        error = error.get("type")
+                    reason = "%s %s" % (status, error)
+                elif op_type == "delete" and status == 404:
+                    # deleting something that is already gone is not a failure
+                    continue
+                else:
+                    failed += 1
+                    if failed <= 10:  # log the first few only, avoid spam
+                        log.error("Bulk index error: %r" % item)
+        except ApiError as e:
+            # refused as a whole: this chunk and all after it are unsent
+            if e.status_code == 413:
+                too_large = actions[done:]
+            elif e.status_code in RETRY_STATUS:
+                retry.extend(actions[done:])
+                reason = "%s %s" % (e.status_code, e.error)
+            else:
+                raise
+        except (ESConnectionError, ConnectionTimeout) as e:
+            retry.extend(actions[done:])
+            reason = type(e).__name__
+        if len(too_large) == 1:
+            failed += 1
+            log.error(
+                "Document too large for Elasticsearch (413), skipped: %s/%s"
+                % (too_large[0].get("_index"), too_large[0].get("_id"))
+            )
+        elif too_large:
+            # The helper sends a document over `indexer_max_chunk_bytes` alone,
+            # so halving narrows down to it; it also copes with a cluster limit
+            # below `indexer_max_chunk_bytes` without dropping what fits.
+            log.debug("Request too large (413), splitting %d actions" % len(too_large))
+            mid = len(too_large) // 2
+            for part in (too_large[:mid], too_large[mid:]):
+                part_indexed, part_failed = await _bulk(
+                    es, part, sync, gate, max_retries
+                )
+                indexed += part_indexed
+                failed += part_failed
+        if not retry:
+            break
+        if attempt >= max_retries:
+            raise BulkIndexError(
+                "%d document(s) still rejected after %d retries (%s)"
+                % (len(retry), attempt, reason),
+                rejected,
+            )
+        attempt += 1
+        delay = _backoff(attempt)
+        gate.close(delay)
+        log.warning(
+            "Elasticsearch rejected %d of %d actions (%s), retry %d/%d in %.1fs"
+            % (len(retry), len(actions), reason, attempt, max_retries, delay)
+        )
+        await asyncio.sleep(delay)
+        actions = retry
     if failed > 10:
         log.error("... and %d more bulk errors (truncated)" % (failed - 10))
     return indexed, failed
@@ -125,6 +225,7 @@ class Indexer:
         batch_bytes: int | None = None,
         concurrency: int | None = None,
         sync: bool | None = False,
+        max_retries: int | None = None,
         **context: Any,
     ) -> None:
         self.dataset = dataset
@@ -132,6 +233,9 @@ class Indexer:
         self.batch_bytes = batch_bytes or settings.indexer_batch_bytes
         self.concurrency = concurrency or settings.indexer_concurrency
         self.sync = sync
+        self.max_retries = (
+            settings.indexer_max_retries if max_retries is None else max_retries
+        )
         self.context = context
 
     def index(self, entities: Iterable[EntityProxy]) -> IndexStats:
@@ -159,6 +263,7 @@ class Indexer:
     async def _run_async(self, batches: Iterable[list[Action]]) -> IndexStats:
         start = datetime.now()
         es = await get_async_ingest_es()
+        gate = _Gate()
         indexed = 0
         failed = 0
         pending: set[asyncio.Task] = set()
@@ -182,7 +287,12 @@ class Indexer:
                         pending, return_when=asyncio.FIRST_COMPLETED
                     )
                     await drain(done)
-                pending.add(asyncio.create_task(_bulk(es, actions, self.sync)))
+                await gate.wait()
+                pending.add(
+                    asyncio.create_task(
+                        _bulk(es, actions, self.sync, gate, self.max_retries)
+                    )
+                )
                 # Yield to the loop so the requests we just queued actually get
                 # written to their sockets before we block the loop on the next
                 # transform. Without this the loop only runs when `pending` is

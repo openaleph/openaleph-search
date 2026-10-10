@@ -1,8 +1,8 @@
-import logging
 import re
 from functools import cached_property
 from typing import Any
 
+from anystore.logging import get_logger
 from banal import ensure_list
 from elastic_transport import ObjectApiResponse
 from followthemoney import EntityProxy, model
@@ -21,7 +21,7 @@ from openaleph_search.settings import Settings
 from openaleph_search.transform.util import index_name_keys
 from openaleph_search.util import SchemaType
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 settings = Settings()
 
 # Group fields (emails, names, etc.) are not stored in _source (see SOURCE_EXCLUDES

@@ -1,6 +1,19 @@
+import asyncio
+
+import orjson
 import pytest
+from elastic_transport import (
+    ApiResponseMeta,
+    HttpHeaders,
+    NodeConfig,
+    ObjectApiResponse,
+)
+from elasticsearch import ApiError, AsyncElasticsearch
+from elasticsearch import ConnectionError as ESConnectionError
+from elasticsearch.helpers import BulkIndexError
 from ftmq.util import make_entity
 
+from openaleph_search.index import indexer as indexer_module
 from openaleph_search.index.admin import clear_index
 from openaleph_search.index.configure import rewrite_mapping_safe
 from openaleph_search.index.entities import (
@@ -11,9 +24,15 @@ from openaleph_search.index.entities import (
     iter_entities,
     iter_entity_ids,
 )
-from openaleph_search.index.indexer import Indexer, iter_action_batches
+from openaleph_search.index.indexer import (
+    Indexer,
+    _bulk,
+    _Gate,
+    iter_action_batches,
+)
 from openaleph_search.settings import Settings
-from openaleph_search.transform.entity import format_entity, iter_batches
+from openaleph_search.transform import entity as transform_module
+from openaleph_search.transform.entity import _cap_text, format_entity, iter_batches
 
 
 def test_indexer(entities, cleanup_after):
@@ -303,6 +322,35 @@ def test_translation_pages():
     assert "content" in source
 
 
+def test_cap_text():
+    texts = ["abc", "def"]
+    assert _cap_text(texts, 100) is texts
+    assert _cap_text(texts, 6) is texts
+    assert _cap_text(texts, 4) == ["abc", "d"]
+    assert _cap_text(texts, 3) == ["abc"]
+    # never splits a multi-byte character
+    assert _cap_text(["äöü"], 5) == ["äö"]
+
+
+def test_format_entity_caps_index_text(monkeypatch):
+    monkeypatch.setattr(transform_module.settings, "indexer_max_text_bytes", 46)
+    entity = make_entity(
+        {
+            "id": "pages-huge",
+            "schema": "Pages",
+            "properties": {
+                "fileName": ["document.pdf"],
+                "indexText": ["x" * 20, "__translation__ hallo", "y" * 20],
+            },
+        }
+    )
+    action = format_entity("test_dataset", entity)
+    assert action is not None
+    source = action["_source"]
+    assert source["content"] == ["x" * 20, "y" * 5]
+    assert source["translation"] == ["hallo"]
+
+
 def test_rewrite_mapping_safe_preserves_default_immutables():
     """Regression for the e864564 ``index: false`` bugfix.
 
@@ -502,3 +550,235 @@ def test_indexer_requires_dataset_for_entities():
     indexer = Indexer()
     with pytest.raises(ValueError):
         indexer.index([])
+
+
+META = ApiResponseMeta(
+    status=200,
+    http_version="1.1",
+    headers=HttpHeaders(),
+    duration=0.0,
+    node=NodeConfig("http", "localhost", 9200),
+)
+
+
+def _api_error(status, error_type):
+    meta = ApiResponseMeta(
+        status=status,
+        http_version=META.http_version,
+        headers=META.headers,
+        duration=META.duration,
+        node=META.node,
+    )
+    body = {"error": {"type": error_type}, "status": status}
+    return ApiError(error_type, meta=meta, body=body)
+
+
+def _actions(n, op_type="index"):
+    return [
+        {"_op_type": op_type, "_index": "x", "_id": str(i), "_source": {"n": i}}
+        for i in range(n)
+    ]
+
+
+def _fake_bulk(monkeypatch, respond):
+    """Replace `AsyncElasticsearch.bulk`, answering each request with
+    `respond(call, ids)`: an exception or one status per document. The real
+    bulk helper still runs. Returns the ids sent per request."""
+    requests: list[list[str]] = []
+
+    async def bulk(self, *args, operations, **kwargs):
+        ids, ops = [], []
+        lines = iter(operations)
+        for line in lines:
+            ((op_type, header),) = orjson.loads(line).items()
+            ids.append(header["_id"])
+            ops.append(op_type)
+            if op_type != "delete":
+                next(lines)  # the document source
+        requests.append(ids)
+        response = respond(len(requests), ids)
+        if isinstance(response, Exception):
+            raise response
+        items = []
+        for op_type, _id, status in zip(ops, ids, response):
+            item = {"_index": "x", "_id": _id, "status": status}
+            if status >= 300:
+                item["error"] = {"type": "es_rejected_execution_exception"}
+            items.append({op_type: item})
+        body = {"errors": any(s >= 300 for s in response), "items": items}
+        return ObjectApiResponse(body=body, meta=META)
+
+    monkeypatch.setattr(AsyncElasticsearch, "bulk", bulk)
+    return requests
+
+
+def _run_bulk(actions, max_retries=3, gate=None):
+    async def run():
+        es = AsyncElasticsearch("http://localhost:9200")
+        try:
+            return await _bulk(es, actions, False, gate or _Gate(), max_retries)
+        finally:
+            await es.close()
+
+    return asyncio.run(run())
+
+
+@pytest.fixture
+def no_backoff(monkeypatch):
+    monkeypatch.setattr(indexer_module.settings, "indexer_retry_backoff", 0)
+
+
+def test_bulk_retries_rejected_documents(monkeypatch, no_backoff):
+    def respond(call, ids):
+        if call == 1:
+            return [200, 429, 200, 503]
+        return [200] * len(ids)
+
+    requests = _fake_bulk(monkeypatch, respond)
+    assert _run_bulk(_actions(4)) == (4, 0)
+    assert requests == [["0", "1", "2", "3"], ["1", "3"]]
+
+
+def test_bulk_retries_rejected_request(monkeypatch, no_backoff):
+    def respond(call, ids):
+        if call <= 2:
+            return _api_error(429, "circuit_breaking_exception")
+        return [200] * len(ids)
+
+    requests = _fake_bulk(monkeypatch, respond)
+    assert _run_bulk(_actions(3)) == (3, 0)
+    assert len(requests) == 3
+    assert all(ids == ["0", "1", "2"] for ids in requests)
+
+
+def test_bulk_retries_unreachable_cluster(monkeypatch, no_backoff):
+    def respond(call, ids):
+        if call == 1:
+            return ESConnectionError("connection refused")
+        return [200] * len(ids)
+
+    requests = _fake_bulk(monkeypatch, respond)
+    assert _run_bulk(_actions(2)) == (2, 0)
+    assert len(requests) == 2
+
+
+def test_bulk_resends_only_unsent_chunks(monkeypatch, no_backoff):
+    # a 100 byte bound splits the batch into one request per action
+    monkeypatch.setattr(indexer_module.settings, "indexer_max_chunk_bytes", 100)
+
+    def respond(call, ids):
+        if call == 2:
+            return _api_error(429, "es_rejected_execution_exception")
+        return [200] * len(ids)
+
+    requests = _fake_bulk(monkeypatch, respond)
+    assert _run_bulk(_actions(6)) == (6, 0)
+    assert len(requests) > 2
+    sent = [_id for ids in requests for _id in ids]
+    first, refused = requests[0], requests[1]
+    assert sorted(sent) == sorted([str(i) for i in range(6)] + refused)
+    assert not set(first) & set(refused)
+
+
+def test_bulk_does_not_retry_document_errors(monkeypatch, no_backoff):
+    # 400: a mapping error, never retried; 404 on delete: already gone
+    actions = _actions(2) + _actions(1, op_type="delete")
+    actions[-1]["_id"] = "gone"
+    requests = _fake_bulk(monkeypatch, lambda call, ids: [200, 400, 404])
+    assert _run_bulk(actions) == (1, 1)
+    assert len(requests) == 1
+
+
+def test_bulk_raises_on_other_request_errors(monkeypatch, no_backoff):
+    def respond(call, ids):
+        return _api_error(401, "security_exception")
+
+    requests = _fake_bulk(monkeypatch, respond)
+    with pytest.raises(ApiError):
+        _run_bulk(_actions(2))
+    assert len(requests) == 1
+
+
+def test_bulk_skips_document_too_large(monkeypatch, no_backoff):
+    def respond(call, ids):
+        if "5" in ids:
+            return _api_error(413, "request_entity_too_large")
+        return [200] * len(ids)
+
+    requests = _fake_bulk(monkeypatch, respond)
+    assert _run_bulk(_actions(8)) == (7, 1)
+    indexed = [_id for ids in requests if "5" not in ids for _id in ids]
+    assert sorted(indexed) == ["0", "1", "2", "3", "4", "6", "7"]
+    assert ["5"] in requests
+
+
+def test_bulk_splits_request_too_large(monkeypatch, no_backoff):
+    # the cluster's limit is below `indexer_max_chunk_bytes`
+    def respond(call, ids):
+        if len(ids) > 2:
+            return _api_error(413, "request_entity_too_large")
+        return [200] * len(ids)
+
+    requests = _fake_bulk(monkeypatch, respond)
+    assert _run_bulk(_actions(8)) == (8, 0)
+    indexed = [_id for ids in requests if len(ids) <= 2 for _id in ids]
+    assert sorted(indexed) == [str(i) for i in range(8)]
+
+
+def test_bulk_gives_up_after_max_retries(monkeypatch, no_backoff):
+    def respond(call, ids):
+        return [429 if _id == "1" else 200 for _id in ids]
+
+    requests = _fake_bulk(monkeypatch, respond)
+    with pytest.raises(BulkIndexError) as exc:
+        _run_bulk(_actions(2), max_retries=2)
+    assert len(requests) == 3
+    assert requests[1:] == [["1"], ["1"]]
+    assert [e["index"]["_id"] for e in exc.value.errors] == ["1"]
+
+
+def test_bulk_shuts_gate_on_retry(monkeypatch):
+    monkeypatch.setattr(indexer_module.settings, "indexer_retry_backoff", 0.01)
+
+    def respond(call, ids):
+        if call == 1:
+            return _api_error(429, "circuit_breaking_exception")
+        return [200] * len(ids)
+
+    _fake_bulk(monkeypatch, respond)
+    gate = _Gate()
+    assert _run_bulk(_actions(1), gate=gate) == (1, 0)
+    assert gate.until > 0
+
+
+def test_indexer_survives_rejection(entities, cleanup_after, monkeypatch, no_backoff):
+    clear_index()
+    original = AsyncElasticsearch.bulk
+    calls = 0
+
+    async def bulk(self, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls <= 2:
+            raise _api_error(429, "circuit_breaking_exception")
+        return await original(self, *args, **kwargs)
+
+    monkeypatch.setattr(AsyncElasticsearch, "bulk", bulk)
+    stats = index_bulk("test_dataset", entities, sync=True)
+    assert stats.indexed == 21
+    assert stats.failed == 0
+    assert calls == 3
+    assert len(list(iter_entities())) == 21
+
+
+def test_index_proxy_keeps_request_retries(cleanup_after, monkeypatch, no_backoff):
+    def respond(call, ids):
+        return _api_error(429, "circuit_breaking_exception")
+
+    requests = _fake_bulk(monkeypatch, respond)
+    proxy = make_entity(
+        {"id": "rejected", "schema": "Person", "properties": {"name": ["Jane"]}}
+    )
+    with pytest.raises(BulkIndexError):
+        index_proxy("test_dataset", proxy)
+    assert len(requests) == Settings().max_retries + 1

@@ -1,7 +1,7 @@
-import logging
 from functools import cache
 from typing import Any, Literal, TypeAlias
 
+from anystore.logging import get_logger
 from banal import ensure_list
 from followthemoney import model
 from followthemoney.exc import InvalidData
@@ -18,7 +18,7 @@ from openaleph_search.index.util import index_name, index_settings
 from openaleph_search.settings import Settings
 from openaleph_search.util import SchemaType, ensure_schema
 
-log = logging.getLogger(__name__)
+log = get_logger(__name__)
 settings = Settings()
 
 Bucket: TypeAlias = Literal["page", "pages", "documents", "intervals", "things"]
