@@ -14,6 +14,7 @@ from openaleph_search.index.mapping import Field
 from openaleph_search.index.util import MAX_REQUEST_TIMEOUT, MAX_TIMEOUT, unpack_result
 from openaleph_search.model import SearchAuth
 from openaleph_search.settings import MAX_PAGE, Settings
+from openaleph_search.util import EntityLike
 
 log = get_logger(__name__)
 settings = Settings()
@@ -350,9 +351,9 @@ def index_proxy(dataset: str, proxy: EntityProxy, sync=False, **kwargs) -> Index
 
 
 def index_bulk(
-    dataset: str, entities: Iterable[EntityProxy], sync=False, **kwargs
+    dataset: str, entities: Iterable[EntityLike], sync=False, **kwargs
 ) -> IndexStats:
-    """Transform and index a set of entities."""
+    """Transform and index a set of entities, proxies or trusted entity data."""
     return Indexer(dataset, sync=sync, **kwargs).index(entities)
 
 

@@ -1840,12 +1840,10 @@ name = "ftmq"
 version = "5.3.0"
 description = "followthemoney query dsl and io helpers"
 optional = false
-python-versions = "<3.15,>=3.11"
+python-versions = ">=3.11,<3.15"
 groups = ["main"]
-files = [
-    {file = "ftmq-5.3.0-py3-none-any.whl", hash = "sha256:c09011b2f7ee4cd061b79673b64e84064075e85fec961d47ab0525d8a5ba7e7d"},
-    {file = "ftmq-5.3.0.tar.gz", hash = "sha256:5cc2b6b9a2ee141bca5d7b3e9f4d3a7d9457493bae4c8039f8e2b3dc73492828"},
-]
+files = []
+develop = false
 
 [package.dependencies]
 anystore = ">=1.5.3,<2.0.0"
@@ -1865,6 +1863,12 @@ level = ["plyvel (>=1.5.1,<2.0.0)"]
 postgres = ["psycopg[pool] (>=3.3.6,<4.0.0)", "sqlalchemy (>=2.1.3,<3.0.0)"]
 search = ["tantivy (>=0.26.2,<0.27.0)"]
 sql = ["sqlalchemy (>=2.1.3,<3.0.0)"]
+
+[package.source]
+type = "git"
+url = "https://github.com/dataresearchcenter/ftmq.git"
+reference = "feat/aggregate-unsafe"
+resolved_reference = "99279d298f29016513acbcc1032265625da740c9"
 
 [[package]]
 name = "ghp-import"
@@ -6826,4 +6830,4 @@ tomli = ">=2.4.0"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.15"
-content-hash = "a1b99f25506e60711389a8321d303ecf454213d3b7b3818b743d3b588c65608d"
+content-hash = "36bac0336b3411398d69fd50e55eb7fbf4c3a56d56abb641673dd7087397925b"

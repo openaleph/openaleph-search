@@ -114,6 +114,7 @@ Parameters:
 - `-d, --dataset` - Dataset identifier (required)
 - `-i, --input-uri` - Input URI with entity data (default: stdin)
 - `-o, --output-uri` - Output URI for formatted actions (default: stdout)
+- `--unsafe` - Trust the input: transform the entity dicts as they are, without building and validating a followthemoney proxy for each (see [Trusted input](#trusted-input))
 
 Example:
 
@@ -137,6 +138,7 @@ Parameters:
 
 - `-d, --dataset` - Dataset identifier (required)
 - `-i, --input-uri` - Input source with entities (default: stdin)
+- `--unsafe` - Trust the input, as for `format-entities`
 
 Examples:
 
@@ -150,7 +152,14 @@ cat entities.ijson | openaleph-search index-entities -d mydata
 # With debug output
 OPENALEPH_SEARCH_INDEXER_DEBUG=1 openaleph-search index-entities \
   -d test -i tests/fixtures/samples.ijson
+
+# Trusted input, e.g. an export of a statement store
+openaleph-search index-entities -d mydata -i entities.ftm.json --unsafe
 ```
+
+#### Trusted input
+
+With `--unsafe`, each line is indexed as it is: values are neither cleaned nor validated, and only properties outside the entity's schema are dropped. A `caption` in the line is used as is. Use it for data written by followthemoney itself, such as an `entities.ftm.json` export, where it skips the proxy round trip. In Python, `index_bulk` and `Indexer.index` take such entity dicts directly, as well as the output of `ftmq.aggregate.aggregate_fragments_unsafe` / `aggregate_statements_unsafe` and `EntityPayload`s.
 
 ### index-actions
 

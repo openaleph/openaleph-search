@@ -1,4 +1,4 @@
-from typing import Annotated, Optional
+from typing import Annotated, Iterable, Optional
 
 import typer
 from anystore.cli import ErrorHandler
@@ -25,6 +25,7 @@ from openaleph_search.search.logic import (
 )
 from openaleph_search.settings import Settings, __version__
 from openaleph_search.transform.entity import format_entities
+from openaleph_search.util import EntityLike
 
 settings = Settings()
 
@@ -36,6 +37,9 @@ log = get_logger(__name__)
 OPT_INPUT_URI = typer.Option("-", "-i", help="Input uri, default stdin")
 OPT_OUTPUT_URI = typer.Option("-", "-o", help="Output uri, default stdout")
 OPT_DATASET = typer.Option(..., "-d", help="Dataset")
+OPT_UNSAFE = typer.Option(
+    False, help="Trust the input: index entity dicts without validating them"
+)
 
 OPT_SEARCH_ARGS = Annotated[
     Optional[str],
@@ -46,6 +50,12 @@ OPT_SEARCH_ARGS = Annotated[
 OPT_SEARCH_FORMAT = Annotated[
     Optional[str], typer.Option(help="Output format (raw, parsed)")
 ]
+
+
+def read_entities(uri: str, unsafe: bool) -> Iterable[EntityLike]:
+    if unsafe:
+        return smart_stream_json(uri)
+    return smart_read_proxies(uri)
 
 
 @cli.callback(invoke_without_command=True)
@@ -86,10 +96,11 @@ def cli_format_entities(
     output_uri: str = OPT_OUTPUT_URI,
     dataset: str = OPT_DATASET,
     collection_id: int | None = None,
+    unsafe: bool = OPT_UNSAFE,
 ):
     """Transform entities into index actions"""
     with ErrorHandler(log):
-        entities = smart_read_proxies(input_uri)
+        entities = read_entities(input_uri, unsafe)
         formatted = logged_items(
             format_entities(dataset, entities, collection_id=collection_id),
             "Format",
@@ -105,11 +116,12 @@ def cli_index_entities(
     input_uri: str = OPT_INPUT_URI,
     dataset: str = OPT_DATASET,
     collection_id: int | None = None,
+    unsafe: bool = OPT_UNSAFE,
 ):
     """Index entities into given dataset"""
     with ErrorHandler(log):
         stats = entities.index_bulk(
-            dataset, smart_read_proxies(input_uri), collection_id=collection_id
+            dataset, read_entities(input_uri, unsafe), collection_id=collection_id
         )
         log.info(
             "Index entities complete.",
