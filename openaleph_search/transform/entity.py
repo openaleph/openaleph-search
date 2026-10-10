@@ -8,7 +8,7 @@ from anystore.logging import get_logger
 from banal import ensure_list
 from followthemoney import EntityProxy, model, registry
 from followthemoney.namespace import Namespace
-from ftmq.util import get_name_symbols, get_symbols, select_data, select_symbols
+from ftmq.util import get_name_symbols, get_symbols, select_symbols
 from rigour.names import NameTypeTag, analyze_names
 
 from openaleph_search.index.indexes import entities_write_index, schema_bucket
@@ -52,8 +52,27 @@ def _get_symbols(entity: EntityProxy) -> set[str]:
     return symbols
 
 
-def _get_translations(entity: EntityProxy) -> set[str]:
-    return set(select_data(entity, "__translation__"))
+def _get_translations(texts: list[str]) -> set[str]:
+    prefix = "__translation__"
+    return {t.replace(prefix, "").strip() for t in texts if t.startswith(prefix)}
+
+
+def _cap_text(texts: list[str], limit: int) -> list[str]:
+    """Truncate `texts` to `limit` UTF-8 bytes in total, keeping order."""
+    # 4 bytes is the widest UTF-8 character: skips encoding for all but huge text
+    if sum(len(t) for t in texts) * 4 <= limit:
+        return texts
+    capped: list[str] = []
+    for text in texts:
+        data = text.encode()
+        if len(data) > limit:
+            tail = data[:limit].decode(errors="ignore")
+            if tail:
+                capped.append(tail)
+            return capped
+        capped.append(text)
+        limit -= len(data)
+    return texts
 
 
 @functools.cache
@@ -123,11 +142,18 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
     # Slight hack: a magic property in followthemoney that gets taken out
     # of the properties and added straight to the index text.
     text = data["properties"].pop("indexText", [])
+    capped = _cap_text(text, settings.indexer_max_text_bytes)
+    if capped is not text:
+        log.warning(
+            "Truncated `indexText` to %d bytes" % settings.indexer_max_text_bytes,
+            entity_id=entity.id,
+        )
+        text = capped
 
     # Another hack: Translations are prefixed with "__translation__" in
     # `Pages.indexText`
     if entity.schema.name == "Pages":
-        translations = _get_translations(entity)
+        translations = _get_translations(text)
         if translations:
             data[Field.TRANSLATION] = list(translations)
             text = [t for t in text if not t.startswith("__translation__")]

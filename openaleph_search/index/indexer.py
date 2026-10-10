@@ -109,7 +109,9 @@ async def _bulk(
 
     Returns `(indexed, failed)`. Actions rejected with a `RETRY_STATUS` or lost
     to a connection error are retried with backoff, up to `max_retries` times,
-    then `BulkIndexError` is raised. Other per-document errors are logged and
+    then `BulkIndexError` is raised. A request too large for the cluster (413)
+    is split in halves and re-sent, down to the single document that does not
+    fit, which counts as failed. Other per-document errors are logged and
     counted as failed; other whole-request errors raise.
     """
     indexed = 0
@@ -118,6 +120,7 @@ async def _bulk(
     while actions:
         retry: list[Action] = []
         rejected: list[dict[str, Any]] = []
+        too_large: list[Action] = []
         reason = ""
         done = 0
         try:
@@ -156,14 +159,35 @@ async def _bulk(
                     if failed <= 10:  # log the first few only, avoid spam
                         log.error("Bulk index error: %r" % item)
         except ApiError as e:
-            if e.status_code not in RETRY_STATUS:
-                raise
             # refused as a whole: this chunk and all after it are unsent
-            retry.extend(actions[done:])
-            reason = "%s %s" % (e.status_code, e.error)
+            if e.status_code == 413:
+                too_large = actions[done:]
+            elif e.status_code in RETRY_STATUS:
+                retry.extend(actions[done:])
+                reason = "%s %s" % (e.status_code, e.error)
+            else:
+                raise
         except (ESConnectionError, ConnectionTimeout) as e:
             retry.extend(actions[done:])
             reason = type(e).__name__
+        if len(too_large) == 1:
+            failed += 1
+            log.error(
+                "Document too large for Elasticsearch (413), skipped: %s/%s"
+                % (too_large[0].get("_index"), too_large[0].get("_id"))
+            )
+        elif too_large:
+            # The helper sends a document over `indexer_max_chunk_bytes` alone,
+            # so halving narrows down to it; it also copes with a cluster limit
+            # below `indexer_max_chunk_bytes` without dropping what fits.
+            log.debug("Request too large (413), splitting %d actions" % len(too_large))
+            mid = len(too_large) // 2
+            for part in (too_large[:mid], too_large[mid:]):
+                part_indexed, part_failed = await _bulk(
+                    es, part, sync, gate, max_retries
+                )
+                indexed += part_indexed
+                failed += part_failed
         if not retry:
             break
         if attempt >= max_retries:

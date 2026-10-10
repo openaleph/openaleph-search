@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     indexer_retry_max_backoff: float = 300
     """Upper bound in seconds for a single retry wait."""
 
+    indexer_max_text_bytes: int = 100 * 1024 * 1024  # 100mb
+    """Upper bound in UTF-8 bytes for an entity's `indexText`, truncated
+    beyond. Defaults to Elasticsearch's default `http.max_content_length`."""
+
     index_shards: int = 10
     index_replicas: int = 0
     index_prefix: str = "openaleph"

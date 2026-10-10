@@ -31,7 +31,8 @@ from openaleph_search.index.indexer import (
     iter_action_batches,
 )
 from openaleph_search.settings import Settings
-from openaleph_search.transform.entity import format_entity, iter_batches
+from openaleph_search.transform import entity as transform_module
+from openaleph_search.transform.entity import _cap_text, format_entity, iter_batches
 
 
 def test_indexer(entities, cleanup_after):
@@ -319,6 +320,35 @@ def test_translation_pages():
     }
     # indexText is moved to `content`, and translations are stripped out
     assert "content" in source
+
+
+def test_cap_text():
+    texts = ["abc", "def"]
+    assert _cap_text(texts, 100) is texts
+    assert _cap_text(texts, 6) is texts
+    assert _cap_text(texts, 4) == ["abc", "d"]
+    assert _cap_text(texts, 3) == ["abc"]
+    # never splits a multi-byte character
+    assert _cap_text(["äöü"], 5) == ["äö"]
+
+
+def test_format_entity_caps_index_text(monkeypatch):
+    monkeypatch.setattr(transform_module.settings, "indexer_max_text_bytes", 46)
+    entity = make_entity(
+        {
+            "id": "pages-huge",
+            "schema": "Pages",
+            "properties": {
+                "fileName": ["document.pdf"],
+                "indexText": ["x" * 20, "__translation__ hallo", "y" * 20],
+            },
+        }
+    )
+    action = format_entity("test_dataset", entity)
+    assert action is not None
+    source = action["_source"]
+    assert source["content"] == ["x" * 20, "y" * 5]
+    assert source["translation"] == ["hallo"]
 
 
 def test_rewrite_mapping_safe_preserves_default_immutables():
@@ -667,6 +697,32 @@ def test_bulk_raises_on_other_request_errors(monkeypatch, no_backoff):
     with pytest.raises(ApiError):
         _run_bulk(_actions(2))
     assert len(requests) == 1
+
+
+def test_bulk_skips_document_too_large(monkeypatch, no_backoff):
+    def respond(call, ids):
+        if "5" in ids:
+            return _api_error(413, "request_entity_too_large")
+        return [200] * len(ids)
+
+    requests = _fake_bulk(monkeypatch, respond)
+    assert _run_bulk(_actions(8)) == (7, 1)
+    indexed = [_id for ids in requests if "5" not in ids for _id in ids]
+    assert sorted(indexed) == ["0", "1", "2", "3", "4", "6", "7"]
+    assert ["5"] in requests
+
+
+def test_bulk_splits_request_too_large(monkeypatch, no_backoff):
+    # the cluster's limit is below `indexer_max_chunk_bytes`
+    def respond(call, ids):
+        if len(ids) > 2:
+            return _api_error(413, "request_entity_too_large")
+        return [200] * len(ids)
+
+    requests = _fake_bulk(monkeypatch, respond)
+    assert _run_bulk(_actions(8)) == (8, 0)
+    indexed = [_id for ids in requests if len(ids) <= 2 for _id in ids]
+    assert sorted(indexed) == [str(i) for i in range(8)]
 
 
 def test_bulk_gives_up_after_max_retries(monkeypatch, no_backoff):
