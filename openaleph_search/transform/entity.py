@@ -1,15 +1,19 @@
-"""Transform followthemoney.EntityProxy into index actions"""
+"""Transform followthemoney entities into index actions"""
 
 import functools
+import itertools
 from datetime import datetime
-from typing import Iterable, Iterator
+from typing import Any, Iterable, Iterator
 
 from anystore.logging import get_logger
 from banal import ensure_list
 from followthemoney import EntityProxy, model, registry
 from followthemoney.namespace import Namespace
-from ftmq.util import get_name_symbols, get_symbols, select_symbols
-from rigour.names import NameTypeTag, analyze_names
+from followthemoney.schema import Schema
+from followthemoney.types.common import PropertyType
+from ftmq.aggregate import EntityPayload
+from ftmq.util import SELECT_SYMBOLS, get_name_symbols
+from rigour.names import NameTypeTag, analyze_names, pick_name
 
 from openaleph_search.index.indexes import entities_write_index, schema_bucket
 from openaleph_search.index.mapping import NUMERIC_TYPES, Field
@@ -21,7 +25,13 @@ from openaleph_search.transform.util import (
     make_percolator_query,
     phonetic_names,
 )
-from openaleph_search.util import Action, Actions, valid_dataset
+from openaleph_search.util import (
+    Action,
+    Actions,
+    EntityLike,
+    ensure_schema,
+    valid_dataset,
+)
 
 log = get_logger(__name__)
 settings = Settings()
@@ -40,15 +50,53 @@ def _first(value):
     return None
 
 
-def _get_symbols(entity: EntityProxy) -> set[str]:
-    symbols = select_symbols(entity)  # pre-computed in earlier stage
+def _type_values(
+    schema: Schema,
+    properties: dict[str, list[str]],
+    type_: PropertyType,
+    matchable: bool = False,
+) -> set[str]:
+    """`EntityProxy.get_type_values` over a properties dict."""
+    values: set[str] = set()
+    for name, prop_values in properties.items():
+        prop = schema.properties[name]
+        if prop.type is type_ and (prop.matchable or not matchable):
+            values.update(prop_values)
+    return values
+
+
+def _caption(schema: Schema, properties: dict[str, list[str]]) -> str:
+    """`EntityProxy.caption` over a properties dict."""
+    for name in schema.caption:
+        values = properties.get(name)
+        if not values:
+            continue
+        if schema.properties[name].type == registry.name and len(values) > 1:
+            caption = pick_name(sorted(values))
+            if caption is not None:
+                return caption
+        else:
+            return values[0]
+    return schema.label
+
+
+def _get_symbols(
+    schema: Schema, properties: dict[str, list[str]], names: set[str], texts: list[str]
+) -> set[str]:
+    # pre-computed in earlier stage, as `ftmq.util.select_symbols`
+    symbols: set[str] = set()
+    for text in texts:
+        if text.startswith(SELECT_SYMBOLS):
+            symbols.update(text.replace(SELECT_SYMBOLS, "").strip().split(","))
     if symbols:
         return symbols
-    if entity.schema.is_a("LegalEntity"):
-        return {str(s) for s in get_symbols(entity)}
-    symbols: set[str] = set()
-    symbols.update(map(str, get_name_symbols(model["Person"], *entity.names)))
-    symbols.update(map(str, get_name_symbols(model["Organization"], *entity.names)))
+    # sorted: the symbols `analyze_names` finds depend on the order of the names
+    if schema.is_a("LegalEntity"):
+        matchable = _type_values(schema, properties, registry.name, matchable=True)
+        return {str(s) for s in get_name_symbols(schema, *sorted(matchable))}
+    ordered = sorted(names)
+    symbols.update(map(str, get_name_symbols(model["Person"], *ordered)))
+    symbols.update(map(str, get_name_symbols(model["Organization"], *ordered)))
     return symbols
 
 
@@ -80,6 +128,50 @@ def _get_namespace(value: str) -> Namespace:
     return Namespace(value)
 
 
+def _sign_ids(
+    ns: Namespace,
+    schema: Schema,
+    data: dict[str, Any],
+    properties: dict[str, list[str]],
+) -> None:
+    """`Namespace.apply` on entity data, in place and without its clone."""
+    data["id"] = ns.sign(data["id"])
+    for name, values in properties.items():
+        if schema.properties[name].type is registry.entity:
+            properties[name] = [signed for signed in map(ns.sign, values) if signed]
+
+
+def _entity_data(entity: EntityLike) -> tuple[Schema, dict[str, Any], str | None]:
+    """The schema, a copy of the data to modify, and the caption if known.
+    Data that is not a proxy is trusted: only its properties are limited to the
+    schema, as the `EntityProxy` constructor does."""
+    if isinstance(entity, EntityProxy):
+        # `StatementEntity.caption` prefers the system language
+        return entity.schema, entity.to_dict(), entity.caption
+    if isinstance(entity, EntityPayload):
+        entity = entity.to_dict()
+    if not entity.get("id"):
+        raise ValueError("Entity has no ID.")
+    data = dict(entity)
+    schema = ensure_schema(data["schema"])
+    data["properties"] = {
+        name: values
+        for name, values in (data.get("properties") or {}).items()
+        if name in schema.properties
+    }
+    return schema, data, data.get(Field.CAPTION)
+
+
+def entity_size(entity: EntityLike) -> int:
+    """Summed length of all property values, as `EntityProxy._size`."""
+    if isinstance(entity, EntityProxy):
+        return entity._size
+    if isinstance(entity, EntityPayload):
+        entity = entity.to_dict()
+    values = (entity.get("properties") or {}).values()
+    return sum(map(len, itertools.chain.from_iterable(values)))
+
+
 @functools.cache
 def _warm_rigour_taggers() -> None:
     # Force rigour's Rust-backed AC name taggers to load in this process, so
@@ -89,70 +181,77 @@ def _warm_rigour_taggers() -> None:
     analyze_names(NameTypeTag.ORG, ["x"])
 
 
-def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
-    """Apply final denormalisations to the index."""
+def format_entity(dataset: str, entity: EntityLike, **kwargs) -> Action | None:
+    """Apply final denormalisations to the index. Trusted entity data (an
+    `EntityPayload` or a dict) is transformed without building a proxy; the
+    input is not modified."""
+    schema, data, caption = _entity_data(entity)
+    properties: dict[str, list[str]] = data["properties"]
+
     # Abstract entities can appear when profile fragments for a missing entity
     # are present.
-    if entity.schema.abstract:
+    if schema.abstract:
         log.warning(
             "Tried to index an abstract-typed entity!",
-            schema=entity.schema.name,
-            entity_id=entity.id,
+            schema=schema.name,
+            entity_id=data["id"],
         )
         return None
 
     if settings.index_namespace_ids:
         # Enforce namespaced IDs
-        ns = _get_namespace(dataset)
-        entity = ns.apply(entity)
+        _sign_ids(_get_namespace(dataset), schema, data, properties)
 
     dataset = valid_dataset(dataset)
 
-    data = entity.to_dict()
-    data["properties"] = data.get("properties", {})
     # deprecated
     collection_id = kwargs.get("collection_id")
+    if collection_id is None:
+        # merged context is list-shaped, see CONTEXT DATA below
+        collection_id = _first(data.pop(Field.COLLECTION_ID, None))
     if collection_id is not None:
         data[Field.COLLECTION_ID] = collection_id
 
     data[Field.DATASET] = dataset
-    data[Field.SCHEMATA] = list(entity.schema.names)
-    data[Field.CAPTION] = entity.caption
-
-    # all names, including mentioned ones, for lookups
-    names = list(entity.names)
-    symbols = list(_get_symbols(entity))
-    if symbols:
-        data[Field.NAME_SYMBOLS] = symbols
-    name_keys = list(index_name_keys(entity.schema, names))
-    if name_keys:
-        data[Field.NAME_KEYS] = name_keys
-    name_parts = list(index_name_parts(entity.schema, names))
-    if name_parts:
-        data[Field.NAME_PARTS] = name_parts
-    name_phonetics = list(phonetic_names(entity.schema, names))
-    if name_phonetics:
-        data[Field.NAME_PHONETIC] = name_phonetics
-
-    # Add tags from EntityProxy.context (they are added from aleph db before indexing)
-    tags = ensure_list(entity.context.get("tags"))
-    if tags:
-        data[Field.TAGS] = tags
+    data[Field.SCHEMATA] = list(schema.names)
+    data[Field.CAPTION] = caption or _caption(schema, properties)
 
     # Slight hack: a magic property in followthemoney that gets taken out
     # of the properties and added straight to the index text.
-    text = data["properties"].pop("indexText", [])
+    text = properties.pop("indexText", [])
+
+    # all names, including mentioned ones, for lookups
+    names = _type_values(schema, properties, registry.name)
+    symbols = list(_get_symbols(schema, properties, names, text))
+    if symbols:
+        data[Field.NAME_SYMBOLS] = symbols
+    name_keys = list(index_name_keys(schema, names))
+    if name_keys:
+        data[Field.NAME_KEYS] = name_keys
+    name_parts = list(index_name_parts(schema, names))
+    if name_parts:
+        data[Field.NAME_PARTS] = name_parts
+    name_phonetics = list(phonetic_names(schema, names))
+    if name_phonetics:
+        data[Field.NAME_PHONETIC] = name_phonetics
+
+    # Add tags from the entity context (they are added from aleph db before
+    # indexing)
+    tags = ensure_list(data.get("tags"))
+    if tags:
+        data[Field.TAGS] = tags
+
     capped = _cap_text(text, settings.indexer_max_text_bytes)
     if capped is not text:
         log.warning(
             "Truncated `indexText` to %d bytes" % settings.indexer_max_text_bytes,
-            entity_id=entity.id,
+            entity_id=data["id"],
         )
         text = capped
 
     # Another hack: Translations are prefixed with "__translation__" in
     # `Pages.indexText`
-    if entity.schema.name == "Pages":
+    if schema.name == "Pages":
         translations = _get_translations(text)
         if translations:
             data[Field.TRANSLATION] = list(translations)
@@ -162,7 +261,7 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
         data[Field.CONTENT] = text
 
     # length normalization
-    data[Field.NUM_VALUES] = sum([len(v) for v in data["properties"].values()])
+    data[Field.NUM_VALUES] = sum([len(v) for v in properties.values()])
 
     # Stored percolator query — only for entities in the things bucket
     # (Person, Company, Organization, …). Documents/Pages/Intervals never
@@ -177,12 +276,11 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
     # Main `name`s are passed separately so `make_percolator_query` can boost it
     # above `previousName`/`alias` (which go into one `other_name` group,
     # demoted in ranking)
-    if settings.percolation and entity.schema.is_a("Thing"):
-        names = list(entity.get("name", quiet=True))
-        other_names = list(entity.get("previousName", quiet=True))
-        other_names.extend(entity.get("alias", quiet=True))
+    if settings.percolation and schema.is_a("Thing"):
+        other_names = list(properties.get("previousName", []))
+        other_names.extend(properties.get("alias", []))
         percolator_query = make_percolator_query(
-            names,
+            list(properties.get("name", [])),
             other_names=other_names,
         )
         if percolator_query is not None:
@@ -190,30 +288,39 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
 
     # integer casting
     numeric = {}
-    for prop in entity.iterprops():
-        if prop.type in NUMERIC_TYPES:
-            values = entity.get(prop)
-            numeric[prop.name] = _numeric_values(prop.type, values)
+    # parse each date once, for its property and for the `dates` group
+    dates: dict[str, float | None] = {}
+    for name, values in properties.items():
+        type_ = schema.properties[name].type
+        if type_ is registry.date:
+            for value in values:
+                if value not in dates:
+                    dates[value] = type_.to_number(value)
+            numeric[name] = [n for n in map(dates.get, values) if n is not None]
+        elif type_ in NUMERIC_TYPES:
+            numeric[name] = _numeric_values(type_, values)
     # also cast group field for dates
-    dates = _numeric_values(registry.date, entity.get_type_values(registry.date))
-    if dates:
-        numeric["dates"] = dates
+    date_values = [n for n in dates.values() if n is not None]
+    if date_values:
+        numeric["dates"] = date_values
     if numeric:
         data[Field.NUMERIC] = numeric
 
     # geo data if entity is an Address
-    if "latitude" in entity.schema.properties:
-        data[Field.GEO_POINT] = get_geopoints(entity)
+    if "latitude" in schema.properties:
+        data[Field.GEO_POINT] = get_geopoints(properties)
 
     # CONTEXT DATA
     # from aleph system, not followthemoney. Probably deprecated soon
     # Entities aggregated from multiple fragments carry *merged*
     # context: followthemoney's ``merge_context`` turns every scalar
     # context value into a deduped list (e.g. origins ingest +
-    # analyze → ``role_id: [36]``, ``mutable: [False]``). The
-    # ``entity.to_dict()`` above spread that raw shape into ``data``,
+    # analyze → ``role_id: [36]``, ``mutable: [False]``), as does
+    # ``ftmq.aggregate.aggregate_fragments_unsafe`` even for a single
+    # fragment. The
+    # ``_entity_data`` above spread that raw shape into ``data``,
     # so fold every context key back to the scalar shape the index
-    # contract expects — only ``origin`` is legitimately multi-valued.
+    # contract expects. Only ``origin`` is legitimately multi-valued.
     role_id = _first(data.pop(Field.ROLE, None))
     if role_id is not None:
         data[Field.ROLE] = role_id
@@ -248,12 +355,12 @@ def format_entity(dataset: str, entity: EntityProxy, **kwargs) -> Action | None:
     entity_id = data.pop("id")
     return {
         "_id": entity_id,
-        "_index": entities_write_index(entity.schema),
+        "_index": entities_write_index(schema),
         "_source": data,
     }
 
 
-def format_entities(dataset: str, entities: Iterable[EntityProxy], **kwargs) -> Actions:
+def format_entities(dataset: str, entities: Iterable[EntityLike], **kwargs) -> Actions:
     """Lazily transform a stream of entities into index actions."""
     _warm_rigour_taggers()
     for entity in entities:
@@ -263,7 +370,7 @@ def format_entities(dataset: str, entities: Iterable[EntityProxy], **kwargs) -> 
 
 
 def format_batch(
-    dataset: str, entities: Iterable[EntityProxy], **kwargs
+    dataset: str, entities: Iterable[EntityLike], **kwargs
 ) -> list[Action]:
     _warm_rigour_taggers()
     actions = []
@@ -275,25 +382,25 @@ def format_batch(
 
 
 def iter_batches(
-    entities: Iterable[EntityProxy],
+    entities: Iterable[EntityLike],
     chunk_size: int | None = None,
     batch_bytes: int | None = None,
-) -> Iterator[list[EntityProxy]]:
+) -> Iterator[list[EntityLike]]:
     """Batch a stream of entities by entity count and payload bytes, cutting on
     whichever limit is reached first.
 
     A count-only bound is wrong in both directions: 1000 document entities can
     be 100MB (far past a sensible bulk request), while 1000 `Person`s can only
-    be ~100KB (far below one). `EntityProxy._size` is the summed length of all
-    property values and measures roughly the entity's JSON size
+    be ~100KB (far below one). `entity_size` measures roughly the entity's JSON
+    size
     """
     chunk_size = chunk_size or settings.indexer_chunk_size
     batch_bytes = batch_bytes or settings.indexer_batch_bytes
-    batch: list[EntityProxy] = []
+    batch: list[EntityLike] = []
     nbytes = 0
     for entity in entities:
         batch.append(entity)
-        nbytes += entity._size
+        nbytes += entity_size(entity)
         if len(batch) >= chunk_size or nbytes >= batch_bytes:
             yield batch
             batch, nbytes = [], 0

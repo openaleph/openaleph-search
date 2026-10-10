@@ -1,10 +1,9 @@
 import itertools
 import unicodedata
 from functools import lru_cache
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from anystore.logging import get_logger
-from followthemoney import EntityProxy
 from followthemoney.schema import Schema
 from normality import ascii_text, collapse_spaces
 from rigour.names import (
@@ -29,11 +28,11 @@ def _clean_number(val: str) -> str:
         return str(float(val.replace(",", ".")))
 
 
-def get_geopoints(entity: EntityProxy) -> list[dict[str, str]]:
+def get_geopoints(properties: Mapping[str, list[str]]) -> list[dict[str, str]]:
     """Get lon/lat pairs for indexing to `geo_point` field"""
     points = []
-    lons = entity.get("longitude", quiet=True)
-    lats = entity.get("latitude", quiet=True)
+    lons = properties.get("longitude", [])
+    lats = properties.get("latitude", [])
     for lon, lat in itertools.product(lons, lats):
         try:
             points.append({"lon": _clean_number(lon), "lat": _clean_number(lat)})

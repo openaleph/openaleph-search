@@ -14,13 +14,12 @@ from elasticsearch import ApiError, AsyncElasticsearch
 from elasticsearch import ConnectionError as ESConnectionError
 from elasticsearch import ConnectionTimeout
 from elasticsearch.helpers import BulkIndexError, async_streaming_bulk
-from followthemoney import EntityProxy
 
 from openaleph_search.core import get_async_ingest_es, get_es, get_ingest_es
 from openaleph_search.index.util import MAX_REQUEST_TIMEOUT, refresh_sync
 from openaleph_search.settings import Settings
 from openaleph_search.transform.entity import format_batch, iter_batches
-from openaleph_search.util import Action, Actions
+from openaleph_search.util import Action, Actions, EntityLike
 
 log = get_logger(__name__)
 settings = Settings()
@@ -238,8 +237,9 @@ class Indexer:
         )
         self.context = context
 
-    def index(self, entities: Iterable[EntityProxy]) -> IndexStats:
-        """Transform and index a stream of entities."""
+    def index(self, entities: Iterable[EntityLike]) -> IndexStats:
+        """Transform and index a stream of entities: proxies, or trusted entity
+        data that skips building one (see `format_entity`)."""
         if self.dataset is None:
             raise ValueError("Indexer needs a `dataset` to transform entities")
         entities = logged_items(
