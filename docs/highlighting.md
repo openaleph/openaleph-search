@@ -56,6 +56,8 @@ Used for: `content` (document text), `text` (secondary text), `translation` (tra
 
 The default highlighter for all fields. Balanced performance with good support for mixed content.
 
+On `content` a phrase is highlighted as one span (`<em>Paul Manafort</em>`). Where `content` has `index_phrases` shingles (the things bucket, and indexes created before 5.4), exact phrases run against them, so its highlighter lists them in `matched_fields`, which Elasticsearch only accepts with `require_field_match: true` on that field.
+
 ### Plain Highlighter
 
 Used for: `names` (keywords)

@@ -397,17 +397,33 @@ class Query:
         text = self.parser.text
         # Pass synonym analyzer to highlight queries when synonyms are enabled
         hl_analyzer = ICU_SEARCH_ANALYZER if self.parser.synonyms else None
+        query_string = self.get_query_string()
+        operator = "AND"
+        if query_string:
+            operator = query_string["query_string"]["default_operator"]
         fields = {
             self.HIGHLIGHT_FIELD: get_highlighter(
-                self.HIGHLIGHT_FIELD, text, self.parser.highlight_count, hl_analyzer
+                self.HIGHLIGHT_FIELD,
+                text,
+                self.parser.highlight_count,
+                analyzer=hl_analyzer,
+                operator=operator,
             ),
             Field.NAMES: get_highlighter(Field.NAMES),
         }
         if settings.highlighter_text_field and Field.TEXT not in fields:
-            fields[Field.TEXT] = get_highlighter(Field.TEXT, text, analyzer=hl_analyzer)
+            fields[Field.TEXT] = get_highlighter(
+                Field.TEXT,
+                text,
+                analyzer=hl_analyzer,
+                operator=operator,
+            )
         if settings.highlighter_translation_field:
             fields[Field.TRANSLATION] = get_highlighter(
-                Field.TRANSLATION, text, analyzer=hl_analyzer
+                Field.TRANSLATION,
+                text,
+                analyzer=hl_analyzer,
+                operator=operator,
             )
         # Add filter value highlights to the main highlight field only.
         # Only highlight filter values that are human-readable text.

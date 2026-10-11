@@ -145,6 +145,9 @@ class Field:
     NUMERIC = "numeric"
     GEO_POINT = "geo_point"
     CONTENT = "content"
+    # `index_phrases` shingle subfield (things bucket, and every bucket of
+    # indexes created before 5.4)
+    CONTENT_PHRASES = "content._index_phrase"
     TEXT = "text"
     TAGS = "tags"
     TRANSLATION = "translation"

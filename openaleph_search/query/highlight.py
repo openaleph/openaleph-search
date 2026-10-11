@@ -7,7 +7,10 @@ settings = Settings()
 
 
 def make_field_highlight_query(
-    text: str, fields: str | list[str], analyzer: str | None = None
+    text: str,
+    fields: str | list[str],
+    analyzer: str | None = None,
+    operator: str = "AND",
 ) -> dict[str, Any]:
     """Build a query_string scoped to specific field(s) for highlighting."""
     if isinstance(fields, str):
@@ -16,7 +19,7 @@ def make_field_highlight_query(
         "query": text,
         "lenient": True,
         "fields": fields,
-        "default_operator": "AND",
+        "default_operator": operator,
         "allow_leading_wildcard": settings.allow_leading_wildcard,
     }
     if analyzer:
@@ -29,7 +32,11 @@ def get_highlighter(
     text: str | None = None,
     count: int | None = None,
     analyzer: str | None = None,
+    operator: str = "AND",
 ) -> dict[str, Any]:
+    """Highlighter for `field`; `operator` is the search query's
+    `default_operator`, which the highlight query has to share: a clause
+    the hit doesn't match leaves the whole `content` highlight empty."""
     # Content field - configurable highlighting
     if field == Field.CONTENT:
         # Unified highlighter with sentence boundary scanner
@@ -43,15 +50,17 @@ def get_highlighter(
             # "pre_tags": ["<em class='highlight-content'>"],
             # "post_tags": ["</em>"],
             "max_analyzed_offset": settings.highlighter_max_analyzed_offset,
+            # Where `content` has `index_phrases` shingles (things, and indexes
+            # created before 5.4) an exact phrase runs against their subfield,
+            # which only counts for `content` through `matched_fields`. ES
+            # refuses `matched_fields` unless the field requires field
+            # matches, whatever the request-level setting.
+            "require_field_match": True,
+            "matched_fields": [Field.CONTENT, Field.CONTENT_PHRASES],
         }
         if text:
-            # Use [content, text] because content is excluded from _source
-            # and not stored.  ES's unified highlighter fails on phrase
-            # queries with a single-field query_string in this
-            # configuration; adding a second field triggers an internal
-            # multi-field code path that works.
             highlighter["highlight_query"] = make_field_highlight_query(
-                text, [Field.CONTENT, Field.TEXT], analyzer=analyzer
+                text, Field.CONTENT, analyzer=analyzer, operator=operator
             )
         else:
             # Prevent ES from falling back to the main search query for
@@ -91,7 +100,7 @@ def get_highlighter(
     }
     if text:
         default["highlight_query"] = make_field_highlight_query(
-            text, field, analyzer=analyzer
+            text, field, analyzer=analyzer, operator=operator
         )
     else:
         default["highlight_query"] = {"match_all": {}}
