@@ -122,6 +122,13 @@ Upper bound in UTF-8 bytes for an entity's `indexText` (the `content` field); lo
 - Type: `int`
 - Default: `104857600` (100 MB)
 
+### `indexer_max_names`
+
+Upper bound on the names of an entity that `name_keys`, `name_parts`, `name_phonetic` and `name_symbols` are computed for. The entity's own names come first, then the names it mentions (`namesMentioned`, `peopleMentioned`, `companiesMentioned`) in a stable order; a warning is logged. The properties themselves are indexed in full.
+
+- Type: `int`
+- Default: `1000`
+
 ## Index structure
 
 ### `index_prefix`

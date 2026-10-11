@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     """Upper bound in UTF-8 bytes for an entity's `indexText`, truncated
     beyond. Defaults to Elasticsearch's default `http.max_content_length`."""
 
+    indexer_max_names: int = 1000
+    """Upper bound on the names of an entity that name keys, parts, phonetics
+    and symbols are computed for, its own names before the mentioned ones.
+    Documents can mention hundreds of thousands of names."""
+
     index_shards: int = 10
     index_replicas: int = 0
     index_prefix: str = "openaleph"
