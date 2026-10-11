@@ -108,8 +108,10 @@ def make_schema_bucket_properties(bucket: Bucket) -> dict[str, Any]:
 
 def configure_entities():
     """Configure all the entity indexes"""
+    versions = set(ensure_list(settings.index_read))
+    versions.add(settings.index_write)
     for bucket in BUCKETS:
-        for version in ensure_list(settings.index_read):
+        for version in versions:
             configure_schema_bucket(bucket, version)
 
 
