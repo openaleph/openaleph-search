@@ -203,12 +203,13 @@ class FieldType:
     # identical to `DATE` so no `format` is pushed to ES.
     DATE = {"type": "date"}
     PARTIAL_DATE = DATE
-    # actual text content (bodyText et. al)
+    # actual text content (bodyText et. al). `index_phrases` shingles only for
+    # the things bucket: elsewhere they only speed up phrases of common words,
+    # at 2-4x the indexing time
     CONTENT = {
         "type": "text",
         "analyzer": ICU_ANALYZER,
         "search_analyzer": ICU_ANALYZER,
-        "index_phrases": True,  # shingles
     }
     # additional text copied over from other properties for arbitrary lookups
     TEXT = {"type": "text", "analyzer": HTML_ANALYZER, "search_analyzer": HTML_ANALYZER}

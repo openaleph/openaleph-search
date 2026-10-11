@@ -188,7 +188,7 @@ openaleph-search search query-string "corruption" \
 
 ### Text analysis
 
-`content` is indexed without term vectors, so the unified highlighter re-analyzes the text of each returned hit, up to `highlighter_max_analyzed_offset` characters. The cost grows with the number of hits and their size, not with the size of the index.
+`content` is indexed without term vectors, so the unified highlighter re-analyzes the text of each returned hit, up to `highlighter_max_analyzed_offset` characters. The cost grows with the number of hits and their size, not with the size of the index. In the pages bucket `content` keeps offsets in the index (`index_options: offsets`), which spares the re-analysis of large documents.
 
 ### Query performance
 

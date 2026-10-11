@@ -7,6 +7,8 @@ import pytest
 
 from openaleph_search.core import get_es
 from openaleph_search.index.configure import configure_index
+from openaleph_search.index.indexes import make_schema_bucket_mapping
+from openaleph_search.index.util import index_settings
 
 
 class TestConfigureIndex:
@@ -266,3 +268,30 @@ class TestConfigureIndex:
             print(f"Analysis test failed but settings should be applied: {e}")
             index_info = es.indices.get(index=test_index_name)
             assert "analysis" in index_info[test_index_name]["settings"]["index"]
+
+
+@pytest.mark.parametrize("bucket", ["page", "pages", "documents", "things"])
+def test_upgrade_bucket_created_with_term_vectors(bucket):
+    """Indexes created by 5.3 (term vectors and shingles on `content`) take
+    the current mapping on upgrade and keep both, as ES refuses to change
+    either; the `offsets` new `pages` indexes get is dropped."""
+    es = get_es()
+    index = f"test-configure-legacy-{bucket}"
+    legacy = make_schema_bucket_mapping(bucket)
+    content = legacy["properties"]["content"]
+    content.pop("index_options", None)
+    content["index_phrases"] = True
+    content["term_vector"] = "with_positions_offsets"
+    es.options(ignore_status=404).indices.delete(index=index)
+    es.indices.create(index=index, settings=index_settings(), mappings=legacy)
+    try:
+        assert configure_index(
+            index, make_schema_bucket_mapping(bucket), index_settings()
+        )
+        live = es.indices.get_mapping(index=index)[index]["mappings"]
+        content = live["properties"]["content"]
+        assert content["term_vector"] == "with_positions_offsets"
+        assert content["index_phrases"] is True
+        assert "index_options" not in content
+    finally:
+        es.indices.delete(index=index)

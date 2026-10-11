@@ -443,9 +443,9 @@ def test_rewrite_mapping_safe_preserves_explicit_immutables():
 
 
 def test_rewrite_mapping_safe_keeps_content_features():
-    """Indexes created with term vectors keep them (and their shingles), as ES
-    refuses to change either."""
-    pending = {"properties": {"content": {"type": "text"}}}
+    """Indexes created with term vectors and shingles keep them and don't take
+    `offsets`, as ES refuses to change any of them."""
+    pending = {"properties": {"content": {"type": "text", "index_options": "offsets"}}}
     existing = {
         "properties": {
             "content": {

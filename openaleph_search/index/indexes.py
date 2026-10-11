@@ -122,10 +122,18 @@ def make_schema_bucket_mapping(bucket: Bucket) -> dict[str, Any]:
         # `openaleph_search.transform.entity.format_entity` and
         # `openaleph_search.query.queries.PercolatorQuery`.
         mapping["properties"][Field.QUERY] = {**FieldType.PERCOLATOR}
+        # Shingles turn a stored query's exact name phrases into bigram terms,
+        # so it is a candidate only if a document holds them: percolation
+        # measured 7-40x faster. Things carry little text of their own.
+        mapping["properties"][Field.CONTENT]["index_phrases"] = True
     if bucket == "pages":
         # store full text for highlighting
         mapping["properties"][Field.CONTENT]["store"] = True
         mapping["properties"][Field.TRANSLATION]["store"] = True
+        # Offsets in the postings let the highlighter skip re-analyzing large
+        # documents; safe here, as the stored values are exactly the indexed
+        # ones
+        mapping["properties"][Field.CONTENT]["index_options"] = "offsets"
     else:
         mapping["properties"][Field.CONTENT]["store"] = False
         mapping["properties"][Field.TRANSLATION]["store"] = False

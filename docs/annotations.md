@@ -130,9 +130,9 @@ Both surface words carry identical annotations.
 
 ## Why not the `annotated_text` plugin?
 
-The Elasticsearch [`annotated_text`](https://www.elastic.co/docs/reference/elasticsearch/plugins/mapper-annotated-text) plugin disables `index_phrases`, which **openaleph-search** relies on for fast phrase queries. The plugin injects annotation tokens via a custom `TokenFilter` that emits terms at position increment 0 – this conflicts with the shingle generation that `index_phrases` depends on.
+The Elasticsearch [`annotated_text`](https://www.elastic.co/docs/reference/elasticsearch/plugins/mapper-annotated-text) plugin disables `index_phrases`, which the things bucket uses for fast percolation (and every bucket of indexes created before 5.4 for fast phrase queries). The plugin injects annotation tokens via a custom `TokenFilter` that emits terms at position increment 0 – this conflicts with the shingle generation that `index_phrases` depends on.
 
-Our approach uses `pattern_capture` to split a pre-joined token, which the shingle generator handles correctly because it only sees the first term at each position for phrase-pair construction.
+Our approach uses `pattern_capture` to split a pre-joined token, which the shingle generator handles correctly because it only sees the first term at each position for phrase-pair construction. It also keeps `content` a plain `text` field with our own analyzer, without a plugin.
 
 ## Index cost
 
