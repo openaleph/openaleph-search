@@ -437,3 +437,21 @@ def test_percolator_query_text_and_entity_id_mutually_exclusive():
         PercolatorQuery(parser, text="hello", entity_id="some-id")
     with pytest.raises(ValueError, match="exactly one"):
         PercolatorQuery(parser)
+
+
+def test_percolator_query_exact_phrases(cleanup_after):
+    """Stored name clauses are exact phrases: a name list that has both
+    tokens apart doesn't match."""
+    person = make_entity(
+        {
+            "id": "jane-exact",
+            "schema": "Person",
+            "properties": {"name": ["Jane Doelittle"]},
+        }
+    )
+    index_bulk("test_exact_phrases", [person], sync=True)
+
+    hits = _percolate("Yesterday we met Jane Doelittle in Berlin.")["hits"]["hits"]
+    assert "jane-exact" in {h["_id"] for h in hits}
+    hits = _percolate("Attendees: Jane Smith, John Doelittle.")["hits"]["hits"]
+    assert "jane-exact" not in {h["_id"] for h in hits}

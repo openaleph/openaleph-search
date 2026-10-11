@@ -230,9 +230,9 @@ def test_multi_mentions_empty_source(index_multi_mentions_fixtures):
     assert result["hits"]["total"]["value"] == 0
 
 
-def test_multi_mentions_reversed_order_via_slop(index_multi_mentions_fixtures):
-    """slop=2 phrase matching catches reversed token order — "Merkel Angela"
-    is matched by the "Angela Merkel" phrase clause without needing synonyms."""
+def test_multi_mentions_exact_phrases(index_multi_mentions_fixtures):
+    """Name phrases are exact — "Merkel Angela" is not matched by the
+    "Angela Merkel" clause; such variants have to be among the names."""
     source = _parser(
         [
             ("filter:dataset", SOURCE_DATASET),
@@ -242,7 +242,7 @@ def test_multi_mentions_reversed_order_via_slop(index_multi_mentions_fixtures):
     )
     ids = set(_ids(MultiMentionsQuery(_target(), source).search()))
     assert "d-merkel" in ids
-    assert "d-merkel-reversed" in ids
+    assert "d-merkel-reversed" not in ids
 
 
 def test_multi_mentions_synonyms_noop(index_multi_mentions_fixtures):
