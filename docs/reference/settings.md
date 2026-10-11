@@ -356,7 +356,7 @@ Include the `translation` field in highlight response.
 
 ### `highlighter_max_analyzed_offset`
 
-Maximum characters to analyze for highlighting.
+Maximum characters to analyze for highlighting, unless a request sets `max_highlight_analyzed_offset`. Values above `999999` are lowered to it, as Elasticsearch fails the whole request when a hit is longer than its `index.highlight.max_analyzed_offset` (1000000) and more is asked for.
 
 - Type: `int`
 - Default: `100000`

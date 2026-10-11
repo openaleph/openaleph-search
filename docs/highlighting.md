@@ -35,12 +35,12 @@ Number of snippets per document.
 
 ### `max_highlight_analyzed_offset`
 
-Maximum characters to analyze per document.
+Maximum characters to analyze per document. Values above `999999` are lowered to it, as Elasticsearch fails the whole request when a hit is longer than its `index.highlight.max_analyzed_offset` (1000000) and more is asked for.
 
 - Type: `int`
-- Default: `999999`
+- Default: the `highlighter_max_analyzed_offset` setting (`100000`)
 
-Reduce this value for better performance on large documents:
+Raise it to highlight further into large documents, at the cost of slower highlighting:
 
 ```bash
 --args "highlight=true&max_highlight_analyzed_offset=500000"
@@ -106,7 +106,7 @@ Maximum characters to analyze.
 export OPENALEPH_SEARCH_HIGHLIGHTER_MAX_ANALYZED_OFFSET=100000
 ```
 
-Default: `100000`
+Default: `100000`, the default of `max_highlight_analyzed_offset`. Values above `999999` are lowered to it.
 
 ## Response format
 
@@ -190,7 +190,7 @@ openaleph-search search query-string "corruption" \
 
 ### Text analysis
 
-`content` is indexed without term vectors, so the unified highlighter re-analyzes the text of each returned hit, up to `highlighter_max_analyzed_offset` characters. The cost grows with the number of hits and their size, not with the size of the index. In the pages bucket `content` keeps offsets in the index (`index_options: offsets`), which spares the re-analysis of large documents.
+`content` is indexed without term vectors, so the unified highlighter re-analyzes the text of each returned hit, up to `max_highlight_analyzed_offset` characters. The cost grows with the number of hits and their size, not with the size of the index. In the pages bucket `content` keeps offsets in the index (`index_options: offsets`), which spares the re-analysis of large documents.
 
 ### Query performance
 

@@ -455,3 +455,22 @@ def test_percolator_query_exact_phrases(cleanup_after):
     assert "jane-exact" in {h["_id"] for h in hits}
     hits = _percolate("Attendees: Jane Smith, John Doelittle.")["hits"]["hits"]
     assert "jane-exact" not in {h["_id"] for h in hits}
+
+
+def test_percolator_query_highlight_long_text(cleanup_after):
+    """Text longer than the index's `index.highlight.max_analyzed_offset`
+    (1M chars) is highlighted up to the limit instead of failing."""
+    vessel = make_entity(
+        {
+            "id": "vessel-long",
+            "schema": "Vessel",
+            "properties": {"name": ["MV Long Tester"]},
+        }
+    )
+    index_bulk("test_long_text", [vessel], sync=True)
+
+    text = "The MV Long Tester left port. " + "Nothing happened then. " * 50_000
+    assert len(text) > 1_000_000
+    result = _percolate(text, args=[("highlight", "true")])
+    by_id = {h["_id"]: h for h in result["hits"]["hits"]}
+    assert by_id["vessel-long"]["_source"]["surface_forms"] == ["MV Long Tester"]

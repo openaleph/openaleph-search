@@ -5,6 +5,19 @@ from openaleph_search.settings import Settings
 
 settings = Settings()
 
+# Elasticsearch rejects the whole request when a hit is longer than the index
+# setting `index.highlight.max_analyzed_offset` (default 1000000) and the
+# request asks for more; a value below it truncates the analyzed text instead.
+MAX_ANALYZED_OFFSET = 999_999
+
+
+def get_max_analyzed_offset(value: int | None = None) -> int:
+    """Request `max_analyzed_offset`, defaulting to the setting, kept below the
+    index limit."""
+    if value is None:
+        value = settings.highlighter_max_analyzed_offset
+    return max(1, min(value, MAX_ANALYZED_OFFSET))
+
 
 def make_field_highlight_query(
     text: str,
@@ -32,11 +45,13 @@ def get_highlighter(
     text: str | None = None,
     count: int | None = None,
     analyzer: str | None = None,
+    max_analyzed_offset: int | None = None,
     operator: str = "AND",
 ) -> dict[str, Any]:
     """Highlighter for `field`; `operator` is the search query's
     `default_operator`, which the highlight query has to share: a clause
     the hit doesn't match leaves the whole `content` highlight empty."""
+    max_analyzed_offset = get_max_analyzed_offset(max_analyzed_offset)
     # Content field - configurable highlighting
     if field == Field.CONTENT:
         # Unified highlighter with sentence boundary scanner
@@ -49,7 +64,7 @@ def get_highlighter(
             "no_match_size": settings.highlighter_no_match_size,
             # "pre_tags": ["<em class='highlight-content'>"],
             # "post_tags": ["</em>"],
-            "max_analyzed_offset": settings.highlighter_max_analyzed_offset,
+            "max_analyzed_offset": max_analyzed_offset,
             # Where `content` has `index_phrases` shingles (things, and indexes
             # created before 5.4) an exact phrase runs against their subfield,
             # which only counts for `content` through `matched_fields`. ES
@@ -94,7 +109,7 @@ def get_highlighter(
         "type": "unified",
         "fragment_size": 150,  # Shorter since less important
         "number_of_fragments": 1,  # Just one fragment
-        "max_analyzed_offset": settings.highlighter_max_analyzed_offset,
+        "max_analyzed_offset": max_analyzed_offset,
         # "pre_tags": ["<em class='highlight-text'>"],
         # "post_tags": ["</em>"],
     }

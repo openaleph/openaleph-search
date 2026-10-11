@@ -401,12 +401,14 @@ class Query:
         operator = "AND"
         if query_string:
             operator = query_string["query_string"]["default_operator"]
+        offset = self.parser.max_highlight_analyzed_offset
         fields = {
             self.HIGHLIGHT_FIELD: get_highlighter(
                 self.HIGHLIGHT_FIELD,
                 text,
                 self.parser.highlight_count,
                 analyzer=hl_analyzer,
+                max_analyzed_offset=offset,
                 operator=operator,
             ),
             Field.NAMES: get_highlighter(Field.NAMES),
@@ -416,6 +418,7 @@ class Query:
                 Field.TEXT,
                 text,
                 analyzer=hl_analyzer,
+                max_analyzed_offset=offset,
                 operator=operator,
             )
         if settings.highlighter_translation_field:
@@ -423,6 +426,7 @@ class Query:
                 Field.TRANSLATION,
                 text,
                 analyzer=hl_analyzer,
+                max_analyzed_offset=offset,
                 operator=operator,
             )
         # Add filter value highlights to the main highlight field only.

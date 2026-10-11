@@ -176,16 +176,11 @@ class SearchQueryParser(QueryParser):
         self.highlight_length = 200
         # Number of snippets per document, 0 = return full document text.
         self.highlight_count = self.getint("highlight_count", 3)
-        # By default, the maximum number of characters analyzed for a highlight
-        # request is bounded by the value defined in the
-        # index.highlight.max_analyzed_offset setting (1000000 by default),
-        # and when the number of characters exceeds this limit an error is
-        # returned. By setting `max_analyzed_offset` to a non-negative value
-        # lower than `index.highlight.max_analyzed_offset`, the highlighting
-        # stops at this defined maximum limit, and the rest of the text is not
-        # processed, thus not highlighted and no error is returned.
+        # Characters analyzed per highlighted value; defaults to the
+        # `highlighter_max_analyzed_offset` setting and is capped below the
+        # index's `index.highlight.max_analyzed_offset` (see query.highlight)
         self.max_highlight_analyzed_offset = self.getint(
-            "max_highlight_analyzed_offset", 999999
+            "max_highlight_analyzed_offset"
         )
 
         # strip down entity payload for fast path search

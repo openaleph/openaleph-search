@@ -3,6 +3,7 @@ from unittest import TestCase
 import pytest
 
 from openaleph_search.parse.parser import SearchQueryParser
+from openaleph_search.query.highlight import MAX_ANALYZED_OFFSET
 from openaleph_search.query.queries import EntitiesQuery, Query
 from openaleph_search.query.util import schema_query
 from openaleph_search.settings import Settings
@@ -167,6 +168,23 @@ class QueryTestCase(TestCase):
                     },
                 },
             },
+        )
+
+    def test_highlight_max_analyzed_offset(self):
+        def offsets(args):
+            q = query([("q", "foo"), ("highlight", "true"), *args])
+            fields = q.get_highlight()["fields"].values()
+            return {
+                f["max_analyzed_offset"] for f in fields if "max_analyzed_offset" in f
+            }
+
+        self.assertEqual(offsets([]), {settings.highlighter_max_analyzed_offset})
+        self.assertEqual(offsets([("max_highlight_analyzed_offset", "5000")]), {5000})
+        # kept below ES's `index.highlight.max_analyzed_offset`, which fails
+        # the request for longer values
+        self.assertEqual(
+            offsets([("max_highlight_analyzed_offset", "5000000")]),
+            {MAX_ANALYZED_OFFSET},
         )
 
     def test_highlight_content_phrases(self):
