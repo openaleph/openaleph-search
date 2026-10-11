@@ -203,16 +203,12 @@ class FieldType:
     # identical to `DATE` so no `format` is pushed to ES.
     DATE = {"type": "date"}
     PARTIAL_DATE = DATE
-    # actual text content (bodyText et. al), optimized for highlighting and
-    # termvectors
+    # actual text content (bodyText et. al)
     CONTENT = {
         "type": "text",
         "analyzer": ICU_ANALYZER,
         "search_analyzer": ICU_ANALYZER,
         "index_phrases": True,  # shingles
-        "term_vector": (
-            "with_positions_offsets" if settings.content_term_vectors else False
-        ),
     }
     # additional text copied over from other properties for arbitrary lookups
     TEXT = {"type": "text", "analyzer": HTML_ANALYZER, "search_analyzer": HTML_ANALYZER}
@@ -423,17 +419,12 @@ def _copy_to_targets(name: str, prop: Any, schema: Any) -> Iterable[str]:
     """Top-level fields a property's value should be copied into.
 
     Only `registry.text` properties go into `Field.CONTENT`. `registry.html`
-    and `registry.json` go into `Field.TEXT` even though they're "fulltext"
-    in spirit — when more than one property `copy_to`s into the same
-    destination, ES 9.x's unified/FVH highlighter misaligns `<em>` markers
-    across values (it slices fragments at offsets computed against the
-    wrong value when content is `store: false` + excluded from `_source`).
-    Routing html/json to a separate destination keeps each field
-    single-source per type and sidesteps the bug — at the cost of html/json
-    fulltext using `text`'s `strip-html` analyzer rather than `content`'s
-    ICU + phrase analyzer. v5.2.1 widened this routing to include html/json
-    in content and broke highlight alignment for Emails carrying both
-    `bodyText` and `bodyHtml`; this restores the v5.2.0 behavior.
+    and `registry.json` go into `Field.TEXT`: `bodyHtml` mostly repeats
+    `bodyText`, and in `content` it would add a second, markup-laden snippet
+    for the same match. Without term vectors several sources in `content`
+    highlight correctly; with them (indexes created before 5.4) the
+    highlighter misplaces `<em>` across values, as it rebuilds a copy_to
+    field from its source properties.
     """
     if name == PROP_TRANSLATED:
         yield Field.TRANSLATION

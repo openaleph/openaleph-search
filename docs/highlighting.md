@@ -56,15 +56,6 @@ Used for: `content` (document text), `text` (secondary text), `translation` (tra
 
 The default highlighter for all fields. Balanced performance with good support for mixed content.
 
-### Fast Vector Highlighter (FVH)
-
-Optionally used for the `content` field. Provides more accurate phrase highlighting (wraps entire phrases in a single `<em>` tag) but requires term vectors. Disabled by default because it is incompatible with `copy_to` fields excluded from `_source` — for entities where multiple properties copy into `content` (e.g. HyperText with both `bodyHtml` and `indexText`), FVH causes term vector offset mismatches that drop hits from results.
-
-Configuration (via environment):
-
-- `OPENALEPH_SEARCH_HIGHLIGHTER_FVH_ENABLED=false` (default)
-- Requires `OPENALEPH_SEARCH_CONTENT_TERM_VECTORS=true` (default) when enabled
-
 ### Plain Highlighter
 
 Used for: `names` (keywords)
@@ -74,16 +65,6 @@ Fast highlighting for simple keyword matches.
 ## Configuration
 
 Control highlighting behavior via environment variables:
-
-### `highlighter_fvh_enabled`
-
-Use Fast Vector Highlighter for content field.
-
-```bash
-export OPENALEPH_SEARCH_HIGHLIGHTER_FVH_ENABLED=false
-```
-
-Default: `false`. When false, uses Unified Highlighter instead. See [Highlighter types](#highlighter-types) for trade-offs.
 
 ### `highlighter_fragment_size`
 
@@ -104,28 +85,6 @@ export OPENALEPH_SEARCH_HIGHLIGHTER_NUMBER_OF_FRAGMENTS=3
 ```
 
 Default: `3`
-
-### `highlighter_phrase_limit`
-
-Maximum phrases to analyze per document.
-
-```bash
-export OPENALEPH_SEARCH_HIGHLIGHTER_PHRASE_LIMIT=64
-```
-
-Default: `64`
-
-Lower values improve performance but may miss some matches.
-
-### `highlighter_boundary_max_scan`
-
-Characters to scan for sentence boundaries.
-
-```bash
-export OPENALEPH_SEARCH_HIGHLIGHTER_BOUNDARY_MAX_SCAN=100
-```
-
-Default: `100`
 
 ### `highlighter_no_match_size`
 
@@ -227,23 +186,14 @@ openaleph-search search query-string "corruption" \
 
 ## Performance considerations
 
-### Index size
+### Text analysis
 
-Fast Vector Highlighter requires term vectors, which increase index size by approximately 20-30%.
-
-Disable term vectors if index storage size is a serious concern:
-
-```bash
-export OPENALEPH_SEARCH_CONTENT_TERM_VECTORS=false
-```
-
-Requires reindexing to take effect.
+`content` is indexed without term vectors, so the unified highlighter re-analyzes the text of each returned hit, up to `highlighter_max_analyzed_offset` characters. The cost grows with the number of hits and their size, not with the size of the index.
 
 ### Query performance
 
 - More snippets (`highlight_count`) = slower queries
 - Larger documents = slower highlighting
-- Lower `phrase_limit` = faster but less accurate
 - Reduce `max_highlight_analyzed_offset` for large documents
 
 ### Optimization tips
@@ -273,12 +223,8 @@ Check that:
 ### Incomplete highlights
 
 - Document may exceed `max_highlight_analyzed_offset`
-- Query may exceed `phrase_limit`
-- Field may not have term vectors enabled
 
 ### Slow highlighting
 
 - Reduce `highlight_count`
 - Lower `max_highlight_analyzed_offset`
-- Decrease `phrase_limit`
-- The unified highlighter (default) generally performs well; FVH is not recommended due to compatibility issues with `copy_to` fields

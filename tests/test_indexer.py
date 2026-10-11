@@ -421,6 +421,23 @@ def test_rewrite_mapping_safe_preserves_explicit_immutables():
     assert result["properties"]["name"]["normalizer"] == "kw-normalizer"
 
 
+def test_rewrite_mapping_safe_keeps_content_features():
+    """Indexes created with term vectors keep them (and their shingles), as ES
+    refuses to change either."""
+    pending = {"properties": {"content": {"type": "text"}}}
+    existing = {
+        "properties": {
+            "content": {
+                "type": "text",
+                "index_phrases": True,
+                "term_vector": "with_positions_offsets",
+            }
+        }
+    }
+    result = rewrite_mapping_safe(pending, existing)
+    assert result["properties"]["content"] == existing["properties"]["content"]
+
+
 def test_rewrite_mapping_safe_passes_through_new_fields():
     """Fields absent from the live mapping keep all their immutables."""
     pending = {

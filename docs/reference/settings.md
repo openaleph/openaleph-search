@@ -308,27 +308,9 @@ Enable function_score wrapper for scoring.
 
 When enabled, wraps queries with Elasticsearch function_score to apply a scoring that de-penalizes entity matches with many names. In practice this means, for a term "Jane Doe" Person entity results with this name are considered more relevant as mentions of that name in documents full-text. This has effect on search performance in big clusters.
 
-### `content_term_vectors`
-
-Enable term vectors and offsets for content field.
-
-- Type: `bool`
-- Default: `true`
-
-Required for [Fast Vector Highlighter](https://www.elastic.co/docs/reference/elasticsearch/rest-apis/highlighting#fast-vector-highlighter) and improves [more like this](../more_like_this.md) matching queries. Disable to reduce index storage size.
-
 ## Highlighting
 
 [Read more](../highlighting.md)
-
-### `highlighter_fvh_enabled`
-
-Use Fast Vector Highlighter for content field.
-
-- Type: `bool`
-- Default: `false`
-
-When false, uses Unified Highlighter instead. FVH requires `content_term_vectors=true`. FVH is disabled by default because it is incompatible with `copy_to` fields excluded from `_source`.
 
 ### `highlighter_fragment_size`
 
@@ -343,22 +325,6 @@ Snippets per document.
 
 - Type: `int`
 - Default: `3`
-
-### `highlighter_phrase_limit`
-
-Maximum phrases to analyze per document.
-
-- Type: `int`
-- Default: `64`
-
-Prevents performance issues with documents containing many phrase matches.
-
-### `highlighter_boundary_max_scan`
-
-Characters to scan for sentence boundaries.
-
-- Type: `int`
-- Default: `100`
 
 ### `highlighter_no_match_size`
 

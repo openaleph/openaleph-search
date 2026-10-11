@@ -32,46 +32,24 @@ def get_highlighter(
 ) -> dict[str, Any]:
     # Content field - configurable highlighting
     if field == Field.CONTENT:
-        if settings.highlighter_fvh_enabled:
-            # FVH (Fast Vector Highlighter) configuration
-            highlighter = {
-                "type": "fvh",
-                "fragment_size": settings.highlighter_fragment_size,
-                # "fragment_offset": 50,
-                "number_of_fragments": count
-                or settings.highlighter_number_of_fragments,
-                "phrase_limit": settings.highlighter_phrase_limit,  # lower than default (256) for better memory performance  # noqa: B950
-                "order": "score",  # Best fragments first
-                "boundary_scanner": "chars",  # FVH needs 'chars'
-                "boundary_max_scan": settings.highlighter_boundary_max_scan,  # better sentence detection  # noqa: B950
-                # Explicit boundary chars added for csv/json/html/code raw text
-                "boundary_chars": '.\t\n ,!?;_-=(){}[]<>|"',
-                "no_match_size": settings.highlighter_no_match_size,  # Hard limit when no boundary/match found  # noqa: B950
-                "fragmenter": "span",  # More precise fragment boundaries
-                # "pre_tags": ["<em class='highlight-content'>"],
-                # "post_tags": ["</em>"],
-                "max_analyzed_offset": settings.highlighter_max_analyzed_offset,  # Handle large documents  # noqa: B950
-            }
-        else:
-            # Unified highlighter with sentence boundary scanner
-            highlighter = {
-                "type": "unified",
-                "fragment_size": settings.highlighter_fragment_size,
-                "number_of_fragments": count
-                or settings.highlighter_number_of_fragments,
-                "order": "score",
-                "boundary_scanner": "sentence",  # Use sentence boundary scanner
-                "no_match_size": settings.highlighter_no_match_size,
-                # "pre_tags": ["<em class='highlight-content'>"],
-                # "post_tags": ["</em>"],
-                "max_analyzed_offset": settings.highlighter_max_analyzed_offset,
-            }
+        # Unified highlighter with sentence boundary scanner
+        highlighter = {
+            "type": "unified",
+            "fragment_size": settings.highlighter_fragment_size,
+            "number_of_fragments": count or settings.highlighter_number_of_fragments,
+            "order": "score",
+            "boundary_scanner": "sentence",  # Use sentence boundary scanner
+            "no_match_size": settings.highlighter_no_match_size,
+            # "pre_tags": ["<em class='highlight-content'>"],
+            # "post_tags": ["</em>"],
+            "max_analyzed_offset": settings.highlighter_max_analyzed_offset,
+        }
         if text:
-            # Use [content, text] because content has term_vectors but is
-            # excluded from _source and not stored.  ES's FVH/unified
-            # highlighters fail on phrase queries with a single-field
-            # query_string in this configuration; adding a second field
-            # triggers an internal multi-field code path that works.
+            # Use [content, text] because content is excluded from _source
+            # and not stored.  ES's unified highlighter fails on phrase
+            # queries with a single-field query_string in this
+            # configuration; adding a second field triggers an internal
+            # multi-field code path that works.
             highlighter["highlight_query"] = make_field_highlight_query(
                 text, [Field.CONTENT, Field.TEXT], analyzer=analyzer
             )

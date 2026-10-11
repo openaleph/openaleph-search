@@ -138,13 +138,11 @@ Core fields present in all entities:
   "type": "text",
   "analyzer": "icu-default",
   "index_phrases": true,
-  "term_vector": "with_positions_offsets",
   "store": false
 }
 ```
 
 - `index_phrases`: Enable phrase queries
-- `term_vector`: Required for fast vector highlighter (if enabled via settings)
 - `store`: true only for pages bucket
 
 ### Name field

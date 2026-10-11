@@ -1,3 +1,5 @@
+import re
+
 from ftmq.util import make_entity
 
 from openaleph_search.index.entities import index_bulk
@@ -312,6 +314,32 @@ def test_highlighting_email_body_text_and_html(cleanup_after):
         assert (
             "<em>TARGET</em>" in fragment
         ), f"highlight markers misaligned in fragment: {fragment!r}"
+
+
+def test_highlighting_several_text_properties(cleanup_after):
+    """`content` collects several text properties; `<em>` lands on the match
+    in each (term vectors misplaced it by the other values' offsets)."""
+    entity = make_entity(
+        {
+            "id": "hl-several-text",
+            "schema": "PlainText",
+            "properties": {
+                "description": [
+                    "A long description that mentions nothing of interest."
+                ],
+                "summary": ["Summary: the TARGET appears in summary."],
+                "bodyText": ["Body: lorem ipsum dolor sit amet TARGET consectetur."],
+            },
+        }
+    )
+    index_bulk("test_hl_several_text", [entity], sync=True)
+
+    args = [("q", "TARGET"), ("highlight", "true")]
+    hit = EntitiesQuery(SearchQueryParser(args, None)).search()["hits"]["hits"][0]
+    fragments = hit["highlight"]["content"]
+    assert len(fragments) == 2
+    for fragment in fragments:
+        assert re.findall(r"<em>(.*?)</em>", fragment) == ["TARGET"]
 
 
 def test_highlighting_synonym_match(cleanup_after):
