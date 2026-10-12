@@ -308,10 +308,10 @@ Number of highlight snippets per document.
 
 ### `max_highlight_analyzed_offset`
 
-Maximum characters to analyze for highlighting.
+Maximum characters to analyze for highlighting. Values above `999999` are lowered to it: Elasticsearch fails the whole request when a hit is longer than its `index.highlight.max_analyzed_offset` (1000000) and more is asked for.
 
 - Type: `int`
-- Default: `999999`
+- Default: the `highlighter_max_analyzed_offset` setting (`100000`)
 
 ```bash
 --args "highlight=true&max_highlight_analyzed_offset=500000"

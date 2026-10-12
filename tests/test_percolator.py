@@ -437,3 +437,40 @@ def test_percolator_query_text_and_entity_id_mutually_exclusive():
         PercolatorQuery(parser, text="hello", entity_id="some-id")
     with pytest.raises(ValueError, match="exactly one"):
         PercolatorQuery(parser)
+
+
+def test_percolator_query_exact_phrases(cleanup_after):
+    """Stored name clauses are exact phrases: a name list that has both
+    tokens apart doesn't match."""
+    person = make_entity(
+        {
+            "id": "jane-exact",
+            "schema": "Person",
+            "properties": {"name": ["Jane Doelittle"]},
+        }
+    )
+    index_bulk("test_exact_phrases", [person], sync=True)
+
+    hits = _percolate("Yesterday we met Jane Doelittle in Berlin.")["hits"]["hits"]
+    assert "jane-exact" in {h["_id"] for h in hits}
+    hits = _percolate("Attendees: Jane Smith, John Doelittle.")["hits"]["hits"]
+    assert "jane-exact" not in {h["_id"] for h in hits}
+
+
+def test_percolator_query_highlight_long_text(cleanup_after):
+    """Text longer than the index's `index.highlight.max_analyzed_offset`
+    (1M chars) is highlighted up to the limit instead of failing."""
+    vessel = make_entity(
+        {
+            "id": "vessel-long",
+            "schema": "Vessel",
+            "properties": {"name": ["MV Long Tester"]},
+        }
+    )
+    index_bulk("test_long_text", [vessel], sync=True)
+
+    text = "The MV Long Tester left port. " + "Nothing happened then. " * 50_000
+    assert len(text) > 1_000_000
+    result = _percolate(text, args=[("highlight", "true")])
+    by_id = {h["_id"]: h for h in result["hits"]["hits"]}
+    assert by_id["vessel-long"]["_source"]["surface_forms"] == ["MV Long Tester"]

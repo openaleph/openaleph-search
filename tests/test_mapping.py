@@ -4,6 +4,7 @@ from followthemoney import EntityProxy, model
 
 from openaleph_search.index.entities import index_proxy
 from openaleph_search.index.indexes import (
+    BUCKETS,
     entities_read_index,
     make_schema_bucket_mapping,
 )
@@ -254,3 +255,20 @@ def test_mapping_schema_bucket():
         mapping = make_schema_bucket_mapping(bucket)
         assert mapping["properties"]["content"]["store"] is False
         assert mapping["properties"]["translation"]["store"] is False
+
+    # no term vectors; shingles for the percolator only; offsets where values
+    # are stored
+    for bucket in BUCKETS:
+        content = make_schema_bucket_mapping(bucket)["properties"]["content"]
+        assert "term_vector" not in content
+        assert content.get("index_phrases") is (True if bucket == "things" else None)
+        offsets = "offsets" if bucket == "pages" else None
+        assert content.get("index_options") == offsets
+
+
+def test_mapping_fulltext_routing():
+    properties = make_schema_bucket_mapping("documents")["properties"]["properties"]
+    properties = properties["properties"]
+    assert properties["bodyText"]["copy_to"] == ["content"]
+    assert properties["bodyHtml"]["copy_to"] == ["text"]
+    assert properties["headers"]["copy_to"] == ["text"]

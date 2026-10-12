@@ -137,15 +137,14 @@ Core fields present in all entities:
 {
   "type": "text",
   "analyzer": "icu-default",
-  "index_phrases": true,
-  "term_vector": "with_positions_offsets",
   "store": false
 }
 ```
 
-- `index_phrases`: Enable phrase queries
-- `term_vector`: Required for fast vector highlighter (if enabled via settings)
+- `index_phrases`: only in the things bucket, where shingles let the percolator skip stored queries whose exact name phrases a document doesn't hold (7 to 40 times faster percolation). Elsewhere exact phrases run as positional phrase queries and match the same documents; shingles there only made phrases of common words faster (`"in the matter of"`), at 2 to 4 times the indexing time, and in the pages bucket their subfield would also store the full text a second time.
 - `store`: true only for pages bucket
+- `index_options: offsets`: only in the pages bucket, so highlighting large documents reads offsets from the index instead of re-analyzing the text
+- Indexes created before 5.4 keep their term vectors and shingles on upgrade, as Elasticsearch can't change either; only a reindex drops them
 
 ### Name field
 

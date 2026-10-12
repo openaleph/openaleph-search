@@ -37,7 +37,7 @@ from openaleph_search.index.mapping import Field
 from openaleph_search.parse.parser import SearchQueryParser
 from openaleph_search.query.queries import EntitiesQuery
 from openaleph_search.query.util import bool_query, none_query
-from openaleph_search.transform.util import clean_matching_names
+from openaleph_search.transform.util import NAME_PHRASE_SLOP, clean_matching_names
 from openaleph_search.util import SchemaType
 
 MAX_SOURCE_NAMES = 10_000
@@ -152,15 +152,15 @@ def name_phrase_shoulds(names: list[str]) -> list[dict[str, Any]]:
     is excluded to avoid double-counting the same mention and to align
     with the percolator's single-field matching.
 
-    Clause count is linear in `len(names)`; slop=2 to align with
-    `PercolatorQuery`.
+    Clause count is linear in `len(names)`; `NAME_PHRASE_SLOP` to align
+    with `PercolatorQuery`.
     """
     return [
         {
             "match_phrase": {
                 Field.CONTENT: {
                     "query": name,
-                    "slop": 2,
+                    "slop": NAME_PHRASE_SLOP,
                 }
             }
         }

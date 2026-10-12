@@ -65,6 +65,16 @@ def _type_values(
     return values
 
 
+def _own_names(schema: Schema, properties: dict[str, list[str]]) -> set[str]:
+    """Name values except the ones an `Analyzable` mentions."""
+    values: set[str] = set()
+    for name, prop_values in properties.items():
+        prop = schema.properties[name]
+        if prop.type is registry.name and prop.schema.name != "Analyzable":
+            values.update(prop_values)
+    return values
+
+
 def _caption(schema: Schema, properties: dict[str, list[str]]) -> str:
     """`EntityProxy.caption` over a properties dict."""
     for name in schema.caption:
@@ -93,6 +103,7 @@ def _get_symbols(
     # sorted: the symbols `analyze_names` finds depend on the order of the names
     if schema.is_a("LegalEntity"):
         matchable = _type_values(schema, properties, registry.name, matchable=True)
+        matchable &= names  # `names` may be capped
         return {str(s) for s in get_name_symbols(schema, *sorted(matchable))}
     ordered = sorted(names)
     symbols.update(map(str, get_name_symbols(model["Person"], *ordered)))
@@ -222,6 +233,15 @@ def format_entity(dataset: str, entity: EntityLike, **kwargs) -> Action | None:
 
     # all names, including mentioned ones, for lookups
     names = _type_values(schema, properties, registry.name)
+    if len(names) > settings.indexer_max_names:
+        # the entity's own names first, then a stable cut of the mentioned ones
+        own = _own_names(schema, properties)
+        ordered = sorted(own) + sorted(names - own)
+        log.warning(
+            "Capped names to %d of %d" % (settings.indexer_max_names, len(names)),
+            entity_id=data["id"],
+        )
+        names = set(ordered[: settings.indexer_max_names])
     symbols = list(_get_symbols(schema, properties, names, text))
     if symbols:
         data[Field.NAME_SYMBOLS] = symbols
