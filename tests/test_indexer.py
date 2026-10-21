@@ -876,6 +876,73 @@ def test_throttle_keeps_round_trips_within_the_target():
     assert limits[-1] == 1
 
 
+# (finished, round trip) of bulk requests from a run that logged a lower
+# concurrency every few requests: ~0.15s with a 0.3s one every six or so, and
+# no rejections
+LOGGED_REQUESTS = [
+    (51.900988, 0.204),
+    (51.905604, 0.138),
+    (51.974633, 0.133),
+    (52.101434, 0.188),
+    (52.104255, 0.121),
+    (52.178213, 0.132),
+    (52.400055, 0.288),
+    (52.402682, 0.216),
+    (52.479120, 0.143),
+    (52.552690, 0.142),
+    (52.624068, 0.137),
+    (52.702041, 0.133),
+    (52.768798, 0.135),
+    (52.901978, 0.192),
+    (52.909696, 0.133),
+    (52.977315, 0.133),
+    (53.118755, 0.201),
+    (53.121189, 0.132),
+    (53.190917, 0.136),
+    (53.472608, 0.343),
+    (53.475192, 0.277),
+    (53.479671, 0.129),
+    (53.548529, 0.136),
+    (53.679794, 0.192),
+    (53.682394, 0.126),
+    (53.758807, 0.138),
+    (53.913287, 0.223),
+    (53.916121, 0.145),
+    (54.013180, 0.165),
+    (54.237720, 0.310),
+    (54.248554, 0.226),
+    (54.254454, 0.156),
+    (54.329128, 0.154),
+    (54.584832, 0.320),
+    (54.587786, 0.145),
+    (54.668485, 0.156),
+    (54.822924, 0.226),
+    (54.831942, 0.154),
+    (54.912305, 0.153),
+    (55.152302, 0.311),
+    (55.155147, 0.228),
+    (55.160538, 0.161),
+    (55.244744, 0.161),
+    (55.400302, 0.230),
+    (55.403205, 0.149),
+    (55.486147, 0.156),
+    (55.726863, 0.310),
+    (55.729512, 0.235),
+]
+
+
+def test_throttle_ignores_single_slow_requests():
+    throttle, clock = _throttle()
+    throttle.limit = 5
+    limits = []
+    for finished, rtt in LOGGED_REQUESTS:
+        clock.now = finished
+        throttle.full(throttle.limit)
+        throttle.record(finished - rtt)
+        limits.append(throttle.limit)
+    assert limits == sorted(limits)
+
+
 def test_throttle_ignores_requests_sent_before_a_decrease():
     throttle, clock = _throttle()
     for _ in range(7):
@@ -944,3 +1011,12 @@ def test_indexer_keeps_to_the_limit(entities, monkeypatch, fresh_throttle, adapt
         assert 1 <= peak <= 3
     else:
         assert peak == 3
+
+
+def test_indexer_counts_only_unfinished_requests(entities, monkeypatch, fresh_throttle):
+    # each request finishes before the next batch, so the limit of 1 is never
+    # reached and must not grow
+    _fake_bulk(monkeypatch, lambda call, ids: [200] * len(ids))
+    stats = Indexer("test_dataset", chunk_size=1, concurrency=8).index(entities)
+    assert stats.indexed == 21
+    assert indexer_module._get_throttle().limit == 1

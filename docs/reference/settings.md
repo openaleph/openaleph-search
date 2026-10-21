@@ -69,7 +69,7 @@ Indexing runs in a **single process**: entities are transformed inline and each 
 
 ### `indexer_adaptive_concurrency`
 
-Adapt the outstanding bulk requests to how Elasticsearch copes, like TCP congestion control (after Vector's adaptive request concurrency). Starting at 1, the indexer adds one request per round trip while round trips stay within 1.5x their moving average and within `indexer_target_latency`. It halves the number on a rejection (429, 502-504, connection errors) and cuts it by 10% when a round trip exceeds either. Each process adapts on its own, and several processes sharing a cluster settle where its round trips meet the target. The number is logged when it is lowered and at the end of a run. Turn it off for benchmarks that need a fixed concurrency.
+Adapt the outstanding bulk requests to how Elasticsearch copes, like TCP congestion control (after Vector's adaptive request concurrency). Starting at 1, the indexer adds one request per round trip while round trips stay within 1.5x their moving average and within `indexer_target_latency`. It halves the number on a rejection (429, 502-504, connection errors) and cuts it by 10% when a round trip exceeds either. A round trip is judged by the mean of its requests, so a single slow request does not lower the number. Each process adapts on its own, and several processes sharing a cluster settle where its round trips meet the target. The number is logged when it is lowered and at the end of a run. Turn it off for benchmarks that need a fixed concurrency.
 
 - Type: `bool`
 - Default: `true`

@@ -97,12 +97,13 @@ class Throttle:
     """Adapts the bulk requests in flight to how Elasticsearch copes and holds
     back new requests while a batch backs off.
 
-    AIMD: the limit grows by one per round trip (`limit` requests that stayed
-    within the moving average and `target`) once it was reached, halves on a
-    rejection and drops by a tenth on a round trip over either. Requests sent
-    before the last decrease are ignored, so one burst of rejections cuts
-    once. Without `target` the limit climbs until Elasticsearch rejects; with
-    it, all indexers settle where its round trips meet the target.
+    AIMD: a round trip is `limit` finished requests, judged by their mean.
+    The limit grows by one per round trip within 1.5x the moving average and
+    `target` if it was reached meanwhile, halves on a rejection and drops by a
+    tenth on a round trip over either. Requests sent before the last decrease
+    are ignored, so one burst of rejections cuts once. Without `target` the
+    limit climbs until Elasticsearch rejects; with it, all indexers settle
+    where its round trips meet the target.
     """
 
     def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
@@ -114,7 +115,8 @@ class Throttle:
         self.until = 0.0
         self._rtt_mean: float | None = None
         self._decreased_at = -math.inf
-        self._credit = 0
+        self._rtt_sum = 0.0
+        self._rtt_count = 0
         self._reached = False
 
     def start(self, max_limit: int, adaptive: bool, target: float = 0) -> None:
@@ -146,20 +148,24 @@ class Throttle:
         if rejected:
             self._decrease(now, REJECTED_DECREASE, "rejected")
             return
-        rtt = now - started
+        self._rtt_sum += now - started
+        self._rtt_count += 1
+        if self._rtt_count < self.limit:
+            return
+        # judged per round trip: single slow requests are noise, and a
+        # slowdown shows in all of them
+        rtt = self._rtt_sum / self._rtt_count
         mean = rtt if self._rtt_mean is None else self._rtt_mean
         self._rtt_mean = mean + RTT_ALPHA * (rtt - mean)
         if rtt > min(self.target, SLOWER_RATIO * mean):
             self._decrease(now, SLOWER_DECREASE, "%.2fs round trip" % rtt)
-        elif self._reached and self.limit < self.max_limit:
-            self._credit += 1
-            if self._credit >= self.limit:
-                self.limit += 1
-                self._credit = 0
-                self._reached = False
-                log.info(
-                    "Bulk concurrency raised to %d" % self.limit, concurrency=self.limit
-                )
+            return
+        if self._reached and self.limit < self.max_limit:
+            self.limit += 1
+            log.info(
+                "Bulk concurrency raised to %d" % self.limit, concurrency=self.limit
+            )
+        self._next_round_trip()
 
     def _decrease(self, now: float, factor: float, reason: str) -> None:
         limit = max(1, int(self.limit * factor))
@@ -170,8 +176,13 @@ class Throttle:
                 concurrency=limit,
             )
         self.limit = limit
-        self._credit = 0
         self._decreased_at = now
+        self._next_round_trip()
+
+    def _next_round_trip(self) -> None:
+        self._rtt_sum = 0.0
+        self._rtt_count = 0
+        self._reached = False
 
 
 def _get_throttle() -> Throttle:
@@ -372,6 +383,11 @@ class Indexer:
             for actions in batches:
                 if not actions:
                     continue
+                # Finished requests left in `pending` would count as in
+                # flight and report the limit as reached when it is not.
+                done = {task for task in pending if task.done()}
+                pending -= done
+                await drain(done)
                 # Backpressure: never hold more requests open than the
                 # throttle's limit, which also bounds resident memory to
                 # concurrency * batch_bytes.

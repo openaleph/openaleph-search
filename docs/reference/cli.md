@@ -178,7 +178,19 @@ parallel --pipe-part -a entities.ijson --block -4 -j 8 --line-buffer --tagstring
 
 Each worker adapts its outstanding bulk requests to how Elasticsearch copes ([`indexer_adaptive_concurrency`](settings.md#indexer_adaptive_concurrency)), so together they back off when the cluster slows down or rejects writes, with at most `-j` x `indexer_concurrency` requests at once. Lower `OPENALEPH_SEARCH_INDEXER_TARGET_LATENCY` to leave more headroom for searches during the load. With adaptive concurrency turned off every worker keeps `indexer_concurrency` requests outstanding, 64 here with the default of 8, which can make the cluster reject writes (HTTP 429); set `OPENALEPH_SEARCH_INDEXER_CONCURRENCY=2` then, and aim for 1-2x the write threads across your data nodes in total.
 
-Run `openaleph-search upgrade` first: the indexer does not create indexes itself. Don't add `--resume-failed`, because with `--pipe-part` it gives the resumed jobs the wrong chunks. Indexing replaces documents by id, so after a failure it is safe to run the whole command again. For compressed or streamed input, pipe it in and replace `--pipe-part -a entities.ijson --block -4` with `--pipe --roundrobin --block 10M`, e.g. `zcat entities.ijson.gz | parallel --pipe --roundrobin --block 10M ...`.
+Run `openaleph-search upgrade` first: the indexer does not create indexes itself. Indexing replaces documents by id, so after a failure it is safe to run the whole command again. Don't add `--resume-failed` to the command above: with `--pipe-part` it gives the resumed jobs the wrong chunks.
+
+**Compressed input, resuming.** Decompress the input into chunk files and index one file per job:
+
+```bash
+mkdir chunks
+zstd -dcq entities.ijson.zst | split -C 1G -d -a 4 --additional-suffix=.ijson - chunks/part-
+parallel -j 8 --line-buffer --tagstring '[{%}/{#}]' --joblog index.joblog --halt now,fail=1 openaleph-search index-entities -d mydataset -i {} ::: chunks/*.ijson
+```
+
+`split -C 1G` cuts the stream at line boundaries into files of at most 1 GB. Each file starts a new process, so keep them large, but small enough for several files per job slot. After a failure or an interrupt, run the same command with `--resume-failed` added: it skips the files the joblog records as done and runs the failed and unfinished ones again. Keep the chunk files and the command unchanged until the load is complete, since the joblog refers to files by their position in the argument list. A job only fails when its process does: documents Elasticsearch rejects one by one are counted in the job's final `failed=` log line.
+
+Piping the stream into `parallel --pipe` needs no disk space but is slower: all data then passes through the one `parallel` process, which hands it out more slowly than the workers index it (122 MB/s with `--roundrobin --block 10M`, while a single worker indexed 120 MB/s of emails against a stub cluster). If you have to, use `--pipe --roundrobin --block 1M`, e.g. `zstd -dcq entities.ijson.zst | parallel --pipe --roundrobin --block 1M ...`: larger blocks are slower still, and this variant can't be resumed.
 
 ### index-actions
 
