@@ -1,11 +1,12 @@
 import asyncio
 import itertools
+import math
 import os
 import random
 import threading
 import time
 from datetime import datetime, timedelta
-from typing import Any, Iterable, NamedTuple
+from typing import Any, Callable, Iterable, NamedTuple
 
 from anystore.decorators import error_handler
 from anystore.io import logged_items
@@ -29,13 +30,8 @@ _local = threading.local()
 
 
 def _get_loop() -> asyncio.AbstractEventLoop:
-    """Persistent per-thread event loop for the indexer.
-
-    Reusing one loop across calls keeps the per-loop cached async ES client
-    (see `core.get_async_ingest_es`) alive, instead of paying a fresh client
-    plus `es.info()` handshake per call as `asyncio.run` would. Pid-guarded so
-    processes forked after creation don't reuse the parent's loop.
-    """
+    """Persistent per-thread event loop for the indexer to keep ES client
+    alive"""
     if getattr(_local, "pid", None) != os.getpid() or _local.loop.is_closed():
         _local.loop = asyncio.new_event_loop()
         _local.pid = os.getpid()
@@ -82,26 +78,115 @@ def _backoff(attempt: int) -> float:
     return random.uniform(delay / 2, delay)
 
 
-class _Gate:
-    """Holds back new bulk requests while a batch backs off, so the whole
-    indexer eases off an overloaded node."""
+# throttle settings
 
-    def __init__(self) -> None:
+REJECTED_DECREASE = 0.5
+"""Limit factor after a rejection."""
+
+SLOWER_DECREASE = 0.9
+"""Limit factor after a round trip markedly slower than the average."""
+
+SLOWER_RATIO = 1.5
+"""Round trips this many times the moving average count as markedly slower."""
+
+RTT_ALPHA = 0.4
+"""Weight of the latest round trip in the moving average."""
+
+
+class Throttle:
+    """Adapts the bulk requests in flight to how Elasticsearch copes and holds
+    back new requests while a batch backs off.
+
+    AIMD: the limit grows by one per round trip (`limit` requests that stayed
+    within the moving average and `target`) once it was reached, halves on a
+    rejection and drops by a tenth on a round trip over either. Requests sent
+    before the last decrease are ignored, so one burst of rejections cuts
+    once. Without `target` the limit climbs until Elasticsearch rejects; with
+    it, all indexers settle where its round trips meet the target.
+    """
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self.clock = clock
+        self.limit = 1
+        self.max_limit = 1
+        self.adaptive = True
+        self.target = math.inf
+        self.until = 0.0
+        self._rtt_mean: float | None = None
+        self._decreased_at = -math.inf
+        self._credit = 0
+        self._reached = False
+
+    def start(self, max_limit: int, adaptive: bool, target: float = 0) -> None:
+        """Set up for a run, keeping what earlier runs learned."""
+        self.max_limit = max_limit
+        self.adaptive = adaptive
+        self.target = target or math.inf
+        self.limit = min(self.limit, max_limit) if adaptive else max_limit
         self.until = 0.0
 
+    def full(self, in_flight: int) -> bool:
+        if in_flight < self.limit:
+            return False
+        self._reached = True
+        return True
+
     def close(self, delay: float) -> None:
-        self.until = max(self.until, time.monotonic() + delay)
+        self.until = max(self.until, self.clock() + delay)
 
     async def wait(self) -> None:
-        while (delay := self.until - time.monotonic()) > 0:
+        while (delay := self.until - self.clock()) > 0:
             await asyncio.sleep(delay)
+
+    def record(self, started: float, rejected: bool = False) -> None:
+        """Record a request sent at `started` (by `clock`) that just finished."""
+        if not self.adaptive or started < self._decreased_at:
+            return
+        now = self.clock()
+        if rejected:
+            self._decrease(now, REJECTED_DECREASE, "rejected")
+            return
+        rtt = now - started
+        mean = rtt if self._rtt_mean is None else self._rtt_mean
+        self._rtt_mean = mean + RTT_ALPHA * (rtt - mean)
+        if rtt > min(self.target, SLOWER_RATIO * mean):
+            self._decrease(now, SLOWER_DECREASE, "%.2fs round trip" % rtt)
+        elif self._reached and self.limit < self.max_limit:
+            self._credit += 1
+            if self._credit >= self.limit:
+                self.limit += 1
+                self._credit = 0
+                self._reached = False
+                log.info(
+                    "Bulk concurrency raised to %d" % self.limit, concurrency=self.limit
+                )
+
+    def _decrease(self, now: float, factor: float, reason: str) -> None:
+        limit = max(1, int(self.limit * factor))
+        if limit < self.limit:
+            log.info(
+                "Bulk concurrency lowered from %d to %d (%s)"
+                % (self.limit, limit, reason),
+                concurrency=limit,
+            )
+        self.limit = limit
+        self._credit = 0
+        self._decreased_at = now
+
+
+def _get_throttle() -> Throttle:
+    """Keep throttle state per-thread"""
+    if getattr(_local, "throttle_pid", None) != os.getpid():
+        _local.throttle = Throttle()
+        _local.throttle_pid = os.getpid()
+    return _local.throttle
 
 
 async def _bulk(
     es: AsyncElasticsearch,
     actions: list[Action],
     sync: bool | None,
-    gate: _Gate,
+    throttle: Throttle,
     max_retries: int,
 ) -> tuple[int, int]:
     """Bulk index `actions`, re-sending what Elasticsearch rejects.
@@ -122,6 +207,7 @@ async def _bulk(
         too_large: list[Action] = []
         reason = ""
         done = 0
+        start = throttle.clock()
         try:
             # The helper's own retries stay off: without them it yields one
             # result per action, in order, which maps results to `actions`.
@@ -169,6 +255,8 @@ async def _bulk(
         except (ESConnectionError, ConnectionTimeout) as e:
             retry.extend(actions[done:])
             reason = type(e).__name__
+        if retry or not too_large:
+            throttle.record(start, rejected=bool(retry))
         if len(too_large) == 1:
             failed += 1
             log.error(
@@ -183,7 +271,7 @@ async def _bulk(
             mid = len(too_large) // 2
             for part in (too_large[:mid], too_large[mid:]):
                 part_indexed, part_failed = await _bulk(
-                    es, part, sync, gate, max_retries
+                    es, part, sync, throttle, max_retries
                 )
                 indexed += part_indexed
                 failed += part_failed
@@ -197,7 +285,7 @@ async def _bulk(
             )
         attempt += 1
         delay = _backoff(attempt)
-        gate.close(delay)
+        throttle.close(delay)
         log.warning(
             "Elasticsearch rejected %d of %d actions (%s), retry %d/%d in %.1fs"
             % (len(retry), len(actions), reason, attempt, max_retries, delay)
@@ -263,7 +351,12 @@ class Indexer:
     async def _run_async(self, batches: Iterable[list[Action]]) -> IndexStats:
         start = datetime.now()
         es = await get_async_ingest_es()
-        gate = _Gate()
+        throttle = _get_throttle()
+        throttle.start(
+            self.concurrency,
+            settings.indexer_adaptive_concurrency,
+            settings.indexer_target_latency,
+        )
         indexed = 0
         failed = 0
         pending: set[asyncio.Task] = set()
@@ -279,18 +372,18 @@ class Indexer:
             for actions in batches:
                 if not actions:
                     continue
-                # Backpressure: never hold more than `concurrency` requests
-                # open, which also bounds resident memory to
+                # Backpressure: never hold more requests open than the
+                # throttle's limit, which also bounds resident memory to
                 # concurrency * batch_bytes.
-                while len(pending) >= self.concurrency:
+                while throttle.full(len(pending)):
                     done, pending = await asyncio.wait(
                         pending, return_when=asyncio.FIRST_COMPLETED
                     )
                     await drain(done)
-                await gate.wait()
+                await throttle.wait()
                 pending.add(
                     asyncio.create_task(
-                        _bulk(es, actions, self.sync, gate, self.max_retries)
+                        _bulk(es, actions, self.sync, throttle, self.max_retries)
                     )
                 )
                 # Yield to the loop so the requests we just queued actually get
@@ -322,6 +415,7 @@ class Indexer:
         log.info(
             "Bulk indexing completed: %d successful, %d failed" % (indexed, failed),
             took=took,
+            concurrency=throttle.limit,
         )
         return IndexStats(indexed, failed, took)
 

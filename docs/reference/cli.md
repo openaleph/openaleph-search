@@ -161,6 +161,25 @@ openaleph-search index-entities -d mydata -i entities.ftm.json --unsafe
 
 With `--unsafe`, each line is indexed as it is: values are neither cleaned nor validated, and only properties outside the entity's schema are dropped. A `caption` in the line is used as is. Use it for data written by followthemoney itself, such as an `entities.ftm.json` export, where it skips the proxy round trip. In Python, `index_bulk` and `Indexer.index` take such entity dicts directly, as well as the output of `ftmq.aggregate.aggregate_fragments_unsafe` / `aggregate_statements_unsafe` and `EntityPayload`s.
 
+#### Parallel bulk indexing
+
+A single `index-entities` process transforms entities on one CPU core. To use more cores on a large file, split it across several processes with [GNU parallel](https://www.gnu.org/software/parallel/):
+
+```bash
+parallel --pipe-part -a entities.ijson --block -4 -j 8 --line-buffer --tagstring '[{%}/{#}]' --joblog index.joblog --halt now,fail=1 openaleph-search index-entities -d mydataset
+```
+
+- `--pipe-part -a entities.ijson` - each job reads its own byte range straight from the file, so the data never passes through `parallel`. The file must be a regular file, not a pipe.
+- `--block -4 -j 8` - 4 chunks per job slot, so 32 jobs with at most 8 running. Set `-j` to the number of free CPU cores on the client.
+- `--line-buffer` - prints each worker's log lines as they happen. The default (`--group`) holds all output in temporary files in `$TMPDIR` until each job ends.
+- `--tagstring '[{%}/{#}]'` - prefixes each log line with the worker slot and chunk number.
+- `--joblog index.joblog` - records the runtime and exit code for each chunk.
+- `--halt now,fail=1` - stops everything on the first failed job, so a crashed worker doesn't silently drop its chunk.
+
+Each worker adapts its outstanding bulk requests to how Elasticsearch copes ([`indexer_adaptive_concurrency`](settings.md#indexer_adaptive_concurrency)), so together they back off when the cluster slows down or rejects writes, with at most `-j` x `indexer_concurrency` requests at once. Lower `OPENALEPH_SEARCH_INDEXER_TARGET_LATENCY` to leave more headroom for searches during the load. With adaptive concurrency turned off every worker keeps `indexer_concurrency` requests outstanding, 64 here with the default of 8, which can make the cluster reject writes (HTTP 429); set `OPENALEPH_SEARCH_INDEXER_CONCURRENCY=2` then, and aim for 1-2x the write threads across your data nodes in total.
+
+Run `openaleph-search upgrade` first: the indexer does not create indexes itself. Don't add `--resume-failed`, because with `--pipe-part` it gives the resumed jobs the wrong chunks. Indexing replaces documents by id, so after a failure it is safe to run the whole command again. For compressed or streamed input, pipe it in and replace `--pipe-part -a entities.ijson --block -4` with `--pipe --roundrobin --block 10M`, e.g. `zcat entities.ijson.gz | parallel --pipe --roundrobin --block 10M ...`.
+
 ### index-actions
 
 Index pre-formatted actions.

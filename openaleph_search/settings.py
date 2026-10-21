@@ -42,7 +42,15 @@ class Settings(BaseSettings):
     connection_pool_limit_per_host: int = 25
 
     indexer_concurrency: int = 8
-    """Number of bulk requests the indexer keeps outstanding at once."""
+    """Upper bound on bulk requests the indexer keeps outstanding at once."""
+
+    indexer_adaptive_concurrency: bool = True
+    """Adapt the outstanding bulk requests between 1 and `indexer_concurrency`
+    to how Elasticsearch copes. Off: always `indexer_concurrency`."""
+
+    indexer_target_latency: float = 5
+    """Seconds a bulk request may take before adaptive concurrency eases off;
+    0 to only react to rejections and sudden slowdowns."""
 
     indexer_chunk_size: int = 1000
     """Upper bound on entities per batch (one batch = one bulk request)."""

@@ -1,4 +1,5 @@
 import asyncio
+import os
 
 import orjson
 import pytest
@@ -26,8 +27,8 @@ from openaleph_search.index.entities import (
 )
 from openaleph_search.index.indexer import (
     Indexer,
+    Throttle,
     _bulk,
-    _Gate,
     iter_action_batches,
 )
 from openaleph_search.settings import Settings
@@ -650,11 +651,11 @@ def _fake_bulk(monkeypatch, respond):
     return requests
 
 
-def _run_bulk(actions, max_retries=3, gate=None):
+def _run_bulk(actions, max_retries=3, throttle=None):
     async def run():
         es = AsyncElasticsearch("http://localhost:9200")
         try:
-            return await _bulk(es, actions, False, gate or _Gate(), max_retries)
+            return await _bulk(es, actions, False, throttle or Throttle(), max_retries)
         finally:
             await es.close()
 
@@ -775,7 +776,7 @@ def test_bulk_gives_up_after_max_retries(monkeypatch, no_backoff):
     assert [e["index"]["_id"] for e in exc.value.errors] == ["1"]
 
 
-def test_bulk_shuts_gate_on_retry(monkeypatch):
+def test_bulk_holds_back_new_requests_on_retry(monkeypatch):
     monkeypatch.setattr(indexer_module.settings, "indexer_retry_backoff", 0.01)
 
     def respond(call, ids):
@@ -784,9 +785,9 @@ def test_bulk_shuts_gate_on_retry(monkeypatch):
         return [200] * len(ids)
 
     _fake_bulk(monkeypatch, respond)
-    gate = _Gate()
-    assert _run_bulk(_actions(1), gate=gate) == (1, 0)
-    assert gate.until > 0
+    throttle = Throttle()
+    assert _run_bulk(_actions(1), throttle=throttle) == (1, 0)
+    assert throttle.until > 0
 
 
 def test_indexer_survives_rejection(entities, cleanup_after, monkeypatch, no_backoff):
@@ -820,3 +821,164 @@ def test_index_proxy_keeps_request_retries(cleanup_after, monkeypatch, no_backof
     with pytest.raises(BulkIndexError):
         index_proxy("test_dataset", proxy)
     assert len(requests) == Settings().max_retries + 1
+
+
+def test_bulk_lowers_the_limit_on_rejection(monkeypatch, no_backoff):
+    def respond(call, ids):
+        if call == 1:
+            return _api_error(429, "circuit_breaking_exception")
+        return [200] * len(ids)
+
+    _fake_bulk(monkeypatch, respond)
+    throttle = Throttle()
+    throttle.start(8, adaptive=True)
+    throttle.limit = 4
+    assert _run_bulk(_actions(1), throttle=throttle) == (1, 0)
+    assert throttle.limit == 2
+
+
+class _Clock:
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+
+def _throttle(max_limit=8, adaptive=True, target=0):
+    clock = _Clock()
+    throttle = Throttle(clock)
+    throttle.start(max_limit, adaptive, target)
+    return throttle, clock
+
+
+def _round_trip(throttle, clock, rtt, rejected=False, reached=True):
+    """One round trip: fill the limit, then finish that many requests `rtt`
+    seconds after they were sent. Times are exact in binary so steady round
+    trips compare equal."""
+    if reached:
+        throttle.full(throttle.limit)
+    clock.now += 8
+    for _ in range(throttle.limit):
+        throttle.record(clock.now - rtt, rejected=rejected)
+
+
+def test_throttle_grows_while_round_trips_hold():
+    throttle, clock = _throttle(max_limit=4)
+    assert throttle.limit == 1
+    for _ in range(6):
+        _round_trip(throttle, clock, 0.125)
+    assert throttle.limit == 4
+
+
+def test_throttle_grows_only_when_the_limit_was_reached():
+    throttle, clock = _throttle()
+    for _ in range(5):
+        _round_trip(throttle, clock, 0.125, reached=False)
+    assert throttle.limit == 1
+
+
+def test_throttle_halves_on_rejection():
+    throttle, clock = _throttle()
+    for _ in range(7):
+        _round_trip(throttle, clock, 0.125)
+    assert throttle.limit == 8
+    _round_trip(throttle, clock, 0.125, rejected=True)
+    assert throttle.limit == 4
+    for _ in range(5):
+        _round_trip(throttle, clock, 0.125, rejected=True)
+    assert throttle.limit == 1
+
+
+def test_throttle_eases_off_on_slower_round_trips():
+    throttle, clock = _throttle()
+    for rtt in [0.125, 0.1875] * 6:
+        _round_trip(throttle, clock, rtt)
+    limit = throttle.limit
+    assert limit > 1
+    _round_trip(throttle, clock, 1.0)
+    assert throttle.limit == int(limit * 0.9)
+
+
+def test_throttle_keeps_round_trips_within_the_target():
+    throttle, clock = _throttle(target=0.25)
+    for _ in range(3):
+        _round_trip(throttle, clock, 0.125)
+    assert throttle.limit == 4
+    # steady but over the target: the moving average alone would accept it
+    limits = []
+    for _ in range(12):
+        _round_trip(throttle, clock, 0.375)
+        limits.append(throttle.limit)
+    assert limits == sorted(limits, reverse=True)
+    assert limits[-1] == 1
+
+
+def test_throttle_ignores_requests_sent_before_a_decrease():
+    throttle, clock = _throttle()
+    for _ in range(7):
+        _round_trip(throttle, clock, 0.125)
+    sent = clock.now
+    _round_trip(throttle, clock, 0.125, rejected=True)
+    assert throttle.limit == 4
+    # still in flight at the decrease, so they reflect the old limit
+    for _ in range(3):
+        clock.now += 8
+        throttle.record(sent, rejected=True)
+    assert throttle.limit == 4
+    _round_trip(throttle, clock, 0.125, rejected=True)
+    assert throttle.limit == 2
+
+
+def test_throttle_keeps_a_fixed_limit_when_not_adaptive():
+    throttle, clock = _throttle(adaptive=False)
+    assert throttle.limit == 8
+    _round_trip(throttle, clock, 0.125, rejected=True)
+    _round_trip(throttle, clock, 5.0)
+    assert throttle.limit == 8
+
+
+def test_throttle_start_keeps_the_limit_within_the_ceiling():
+    throttle, clock = _throttle()
+    for _ in range(7):
+        _round_trip(throttle, clock, 0.125)
+    throttle.start(4, adaptive=True)
+    assert throttle.limit == 4
+    throttle.start(16, adaptive=True)
+    assert throttle.limit == 4
+
+
+@pytest.fixture
+def fresh_throttle(monkeypatch):
+    monkeypatch.setattr(indexer_module._local, "throttle", Throttle(), raising=False)
+    monkeypatch.setattr(
+        indexer_module._local, "throttle_pid", os.getpid(), raising=False
+    )
+
+
+@pytest.mark.parametrize("adaptive", [True, False])
+def test_indexer_keeps_to_the_limit(entities, monkeypatch, fresh_throttle, adaptive):
+    monkeypatch.setattr(
+        indexer_module.settings, "indexer_adaptive_concurrency", adaptive
+    )
+    _fake_bulk(monkeypatch, lambda call, ids: [200] * len(ids))
+    fake = AsyncElasticsearch.bulk
+    in_flight = peak = 0
+
+    async def bulk(self, *args, **kwargs):
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        try:
+            await asyncio.sleep(0.01)
+            return await fake(self, *args, **kwargs)
+        finally:
+            in_flight -= 1
+
+    monkeypatch.setattr(AsyncElasticsearch, "bulk", bulk)
+    stats = Indexer("test_dataset", chunk_size=1, concurrency=3).index(entities)
+    assert stats.indexed == 21
+    if adaptive:
+        assert 1 <= peak <= 3
+    else:
+        assert peak == 3

@@ -60,14 +60,26 @@ Connection pool limit for AsyncElasticsearch.
 
 ### `indexer_concurrency`
 
-Number of bulk requests the indexer keeps outstanding at once.
+Upper bound on bulk requests the indexer keeps outstanding at once.
 
-Indexing runs in a **single process**: entities are transformed inline and each finished batch is handed to the event loop as a concurrent bulk request. This setting is the only concurrency knob — there is no process or thread pool. It also bounds resident memory, to roughly `indexer_concurrency * indexer_batch_bytes`.
-
-Raise it if the Elasticsearch cluster is fast enough that the indexer spends its time waiting on round trips; lower it if the cluster starts rejecting writes (check `_cat/thread_pool/write` for a climbing `rejected` count).
+Indexing runs in a **single process**: entities are transformed inline and each finished batch is handed to the event loop as a concurrent bulk request; there is no process or thread pool. With `indexer_adaptive_concurrency` the indexer picks the number itself, between 1 and this bound. The bound also caps resident memory, to roughly `indexer_concurrency * indexer_batch_bytes`.
 
 - Type: `int`
 - Default: `8`
+
+### `indexer_adaptive_concurrency`
+
+Adapt the outstanding bulk requests to how Elasticsearch copes, like TCP congestion control (after Vector's adaptive request concurrency). Starting at 1, the indexer adds one request per round trip while round trips stay within 1.5x their moving average and within `indexer_target_latency`. It halves the number on a rejection (429, 502-504, connection errors) and cuts it by 10% when a round trip exceeds either. Each process adapts on its own, and several processes sharing a cluster settle where its round trips meet the target. The number is logged when it is lowered and at the end of a run. Turn it off for benchmarks that need a fixed concurrency.
+
+- Type: `bool`
+- Default: `true`
+
+### `indexer_target_latency`
+
+Seconds a bulk request may take before the indexer eases off. A healthy cluster answers a 5 MB bulk request in well under a second, so the default only reacts to a struggling cluster; lower it to leave more headroom for searches during a reindex. 0 reacts only to rejections and sudden slowdowns, which lets the indexer push until Elasticsearch rejects.
+
+- Type: `float`
+- Default: `5`
 
 ### `indexer_chunk_size`
 
