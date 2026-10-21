@@ -122,6 +122,13 @@ Upper bound in UTF-8 bytes for an entity's `indexText` (the `content` field); lo
 - Type: `int`
 - Default: `104857600` (100 MB)
 
+### `indexer_max_names`
+
+Upper bound on the names of an entity that `name_keys`, `name_parts`, `name_phonetic` and `name_symbols` are computed for. The entity's own names come first, then the names it mentions (`namesMentioned`, `peopleMentioned`, `companiesMentioned`) in a stable order; a warning is logged. The properties themselves are indexed in full.
+
+- Type: `int`
+- Default: `1000`
+
 ## Index structure
 
 ### `index_prefix`
@@ -308,27 +315,9 @@ Enable function_score wrapper for scoring.
 
 When enabled, wraps queries with Elasticsearch function_score to apply a scoring that de-penalizes entity matches with many names. In practice this means, for a term "Jane Doe" Person entity results with this name are considered more relevant as mentions of that name in documents full-text. This has effect on search performance in big clusters.
 
-### `content_term_vectors`
-
-Enable term vectors and offsets for content field.
-
-- Type: `bool`
-- Default: `true`
-
-Required for [Fast Vector Highlighter](https://www.elastic.co/docs/reference/elasticsearch/rest-apis/highlighting#fast-vector-highlighter) and improves [more like this](../more_like_this.md) matching queries. Disable to reduce index storage size.
-
 ## Highlighting
 
 [Read more](../highlighting.md)
-
-### `highlighter_fvh_enabled`
-
-Use Fast Vector Highlighter for content field.
-
-- Type: `bool`
-- Default: `false`
-
-When false, uses Unified Highlighter instead. FVH requires `content_term_vectors=true`. FVH is disabled by default because it is incompatible with `copy_to` fields excluded from `_source`.
 
 ### `highlighter_fragment_size`
 
@@ -343,22 +332,6 @@ Snippets per document.
 
 - Type: `int`
 - Default: `3`
-
-### `highlighter_phrase_limit`
-
-Maximum phrases to analyze per document.
-
-- Type: `int`
-- Default: `64`
-
-Prevents performance issues with documents containing many phrase matches.
-
-### `highlighter_boundary_max_scan`
-
-Characters to scan for sentence boundaries.
-
-- Type: `int`
-- Default: `100`
 
 ### `highlighter_no_match_size`
 
@@ -383,7 +356,7 @@ Include the `translation` field in highlight response.
 
 ### `highlighter_max_analyzed_offset`
 
-Maximum characters to analyze for highlighting.
+Maximum characters to analyze for highlighting, unless a request sets `max_highlight_analyzed_offset`. Values above `999999` are lowered to it, as Elasticsearch fails the whole request when a hit is longer than its `index.highlight.max_analyzed_offset` (1000000) and more is asked for.
 
 - Type: `int`
 - Default: `100000`

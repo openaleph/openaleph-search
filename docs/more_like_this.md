@@ -4,8 +4,8 @@ Find documents and pages with similar text content using Elasticsearch's More Li
 
 [Read more in the Elasticsearch documentation](https://www.elastic.co/docs/reference/query-languages/query-dsl/query-dsl-mlt-query)
 
-!!! info "Indexing with term vectors"
-    According to Elasticsearch documentation, indexing the `content` field with term vectors enabled (which is the default setting) helps to get better results. But if index storage size is a serious concern and term vectors are disabled (`OPENALEPH_SEARCH_CONTENT_TERM_VECTORS=0`) "more like this" still works.
+!!! info "No term vectors"
+    The `content` field is indexed without term vectors, so Elasticsearch re-analyzes the text of the source document to pick its terms. The results are the same; the time grows with the size of the source document.
 
 ## How it works
 

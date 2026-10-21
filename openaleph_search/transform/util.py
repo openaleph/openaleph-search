@@ -157,6 +157,10 @@ def clean_matching_names(
 
 NAME_BOOST = 2.0
 OTHER_NAME_BOOST = 0.8
+# Exact name phrases: a slop let in name lists ("Jane Smith, John Doe"
+# matching "Jane Doe"), and only an exact phrase runs against the
+# `index_phrases` shingles of the things bucket, which percolates ~10x faster.
+NAME_PHRASE_SLOP = 0
 
 
 def make_percolator_query(
@@ -176,12 +180,9 @@ def make_percolator_query(
 
     Net ranking tier: name (2.0) > other_name (0.8).
 
-    Names use `match_phrase` with `slop: 2` — tolerant of inserted
-    middle initials (`"Jane Doe"` matches `"Jane A. Doe"`), reversed
-    last-name-first variants (`"Doe, Jane"`), and small token gaps.
-    Performance is essentially the same as `slop: 1`; both fall off
-    the `index_phrases` shingle fast path that `slop: 0` uses, and the
-    slop value only affects a constant-time budget check at match time.
+    Names use exact `match_phrase` clauses (`NAME_PHRASE_SLOP`), so
+    `"Jane Doe"` matches neither `"Jane A. Doe"` nor `"Doe, Jane"`;
+    variants like these have to be among the entity's names.
 
     All cleaned values become clauses — there is no cap. OpenSanctions-
     style entities with many language variants or aliases produce many
@@ -209,7 +210,7 @@ def make_percolator_query(
                 "match_phrase": {
                     Field.CONTENT: {
                         "query": n,
-                        "slop": 2,
+                        "slop": NAME_PHRASE_SLOP,
                         "boost": NAME_BOOST,
                         "_name": "name",
                     }
@@ -222,7 +223,7 @@ def make_percolator_query(
                 "match_phrase": {
                     Field.CONTENT: {
                         "query": n,
-                        "slop": 2,
+                        "slop": NAME_PHRASE_SLOP,
                         "boost": OTHER_NAME_BOOST,
                         "_name": "other_name",
                     }

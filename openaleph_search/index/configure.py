@@ -20,7 +20,16 @@ log = get_logger(__name__)
 settings = Settings()
 
 
-IMMUTABLE_MAPPING_PARAMS = ("type", "analyzer", "normalizer", "index", "store")
+IMMUTABLE_MAPPING_PARAMS = (
+    "type",
+    "analyzer",
+    "normalizer",
+    "index",
+    "store",
+    "index_options",
+    "index_phrases",
+    "term_vector",
+)
 
 
 @error_handler(logger=log, max_retries=settings.max_retries)
@@ -28,7 +37,8 @@ def rewrite_mapping_safe(pending, existing):
     """Reconcile a pending mapping against the one ES is already serving.
 
     For every IMMUTABLE_MAPPING_PARAMS key (``type``, ``analyzer``,
-    ``normalizer``, ``index``, ``store``) ES will reject any field-level
+    ``normalizer``, ``index``, ``store``, ``index_options``,
+    ``index_phrases``, ``term_vector``) ES will reject any field-level
     change after creation. We handle two cases:
 
     1. The existing field spec carries an explicit value for the key →

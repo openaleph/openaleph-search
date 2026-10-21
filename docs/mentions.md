@@ -20,7 +20,7 @@ The mention clause is a `bool.should` of **per-entity sub-bools** with `minimum_
 
 Each per-entity sub-bool combines two clauses:
 
-1. **Fulltext phrase match** – one `match_phrase` clause per matchable name on `Field.CONTENT`, with `slop: 2`. Slop 2 matches the percolator's ingest clauses, tolerating inserted middle initials (`"Jane Doe"` matches `"Jane A. Doe"`) and reversed last-name-first variants (`"Doe, Jane"`). `Field.TEXT` (the per-property text group) is deliberately excluded – `content` already aggregates every text-type value, and matching both fields double-counts the same mention. Name-synonym matching is handled by the `Field.CONTENT` analyzer at search time (ICU + rigour name synonyms), so an explicit `name_symbols` / `name_keys` keyword expansion is *not* added.
+1. **Fulltext phrase match** – one exact `match_phrase` clause (`slop: 0`) per matchable name on `Field.CONTENT`, like the percolator's stored clauses. `Field.TEXT` (the per-property text group) is deliberately excluded – `content` already aggregates every text-type value, and matching both fields double-counts the same mention. Name-synonym matching is handled by the `Field.CONTENT` analyzer at search time (ICU + rigour name synonyms), so an explicit `name_symbols` / `name_keys` keyword expansion is *not* added.
 2. **Structured-name bonus** – a `terms` clause over `Field.NAMES` (keyword) across this entity's matchable name variants, boosted to `2.0`. This catches documents that carry the entity's name as an extracted property value (`names` group) rather than only as free text.
 
 The mention clause is ANDed (`bool.must`) with the rest of the query built by `EntitiesQuery` – `parser.text`, filters, negative filters, auth – so `parser.text` narrows mention hits instead of replacing them.
@@ -138,7 +138,7 @@ The source parser can span **multiple datasets** at once (repeat `filter:dataset
 
 The match surface, ranking, and highlight behaviour are identical:
 
-- Same `match_phrase` clauses on `Field.CONTENT` (slop 2), with the same reliance on the analyzer for name-synonym matching.
+- Same exact `match_phrase` clauses on `Field.CONTENT`, with the same reliance on the analyzer for name-synonym matching.
 - Same structured-name bonus on `Field.NAMES` (boost 2.0).
 - Same default schema scope (`["Document"]`), overridable via `filter:schema`.
 - Same `_score` default sort and same `content` highlight injection.
@@ -170,9 +170,9 @@ Three specific cleaner effects worth knowing here: (1) any single-token name sho
 
 If recall matters beyond what the analyzer + cleaner allow, enrich the entity with longer / multi-token aliases / `previousName` values on the source side, or lower the cleaner threshold globally.
 
-### Phrase matching tolerates small slop
+### Phrase matching is exact
 
-`match_phrase` clauses use `slop: 2`, matching the percolator's ingest side. That tolerates inserted middle initials (`"Jane Doe"` matches `"Jane A. Doe"`) and reversed last-name-first variants (`"Doe, Jane"` / `"Doe Jane"`). It does *not* tolerate large token gaps or out-of-order rearrangements beyond two positions – for those, store explicit alias variants on the source side.
+`match_phrase` clauses use `slop: 0`, matching the percolator's ingest side. Inserted middle initials (`"Jane A. Doe"`) and reversed variants (`"Doe, Jane"`) don't match `"Jane Doe"`; store them as alias variants on the source side. A slop would also match across name lists (`"Jane Smith, John Doe"`).
 
 ### No identifier signal
 

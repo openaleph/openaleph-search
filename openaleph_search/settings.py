@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     """Upper bound in UTF-8 bytes for an entity's `indexText`, truncated
     beyond. Defaults to Elasticsearch's default `http.max_content_length`."""
 
+    indexer_max_names: int = 1000
+    """Upper bound on the names of an entity that name keys, parts, phonetics
+    and symbols are computed for, its own names before the mentioned ones.
+    Documents can mention hundreds of thousands of names."""
+
     index_shards: int = 10
     index_replicas: int = 0
     index_prefix: str = "openaleph"
@@ -98,15 +103,9 @@ class Settings(BaseSettings):
     # enable/disable function_score wrapper for performance tuning
     query_function_score: bool = False
 
-    # enable/disable term vectors and offsets for content field (used for highlighting)
-    content_term_vectors: bool = True
-
     # Highlighter configuration
-    highlighter_fvh_enabled: bool = False
     highlighter_fragment_size: int = 200
     highlighter_number_of_fragments: int = 3
-    highlighter_phrase_limit: int = 64
-    highlighter_boundary_max_scan: int = 100
     highlighter_no_match_size: int = 300
     highlighter_text_field: bool = True
     highlighter_translation_field: bool = True

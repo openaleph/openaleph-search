@@ -13,7 +13,7 @@ from openaleph_search.index.entities import ENTITY_SOURCE, PROXY_INCLUDES
 from openaleph_search.index.indexes import entities_read_index
 from openaleph_search.index.mapping import Field
 from openaleph_search.query.base import Query
-from openaleph_search.query.highlight import get_highlighter
+from openaleph_search.query.highlight import MAX_ANALYZED_OFFSET, get_highlighter
 from openaleph_search.query.matching import match_query
 from openaleph_search.query.more_like_this import more_like_this_query
 from openaleph_search.query.util import field_filter_query
@@ -472,13 +472,14 @@ class PercolatorQuery(EntitiesQuery):
           `get_highlighter` when no text is provided) is dropped so ES
           uses the matching stored percolator query as the highlight
           query, which is the percolator default and what we want.
-        - `require_field_match: False` is NOT set. With it, the
-          unified highlighter switches to per-token marking
-          (`<em>Banana</em> <em>ba</em> <em>Nana</em>`); without it,
-          whole phrases are wrapped in a single `<em>…</em>` tag
-          (`<em>Banana ba Nana</em>`). For percolator queries the
-          highlight always targets the same field as the query
-          (`content`), so cross-field matching isn't needed.
+        - The analyzed text is not capped at the
+          `highlighter_max_analyzed_offset` setting but at the most ES
+          accepts (`MAX_ANALYZED_OFFSET`), since the surface forms are
+          the point; `max_highlight_analyzed_offset` lowers it.
+
+        The stored clauses are exact phrases, which run against the
+        `content._index_phrase` shingles of the things bucket;
+        `get_highlighter`'s `matched_fields` maps them back onto `content`.
 
         `parser.highlight_count` flows through to control the number
         of fragments returned (default 3), same as on search-side
@@ -486,10 +487,14 @@ class PercolatorQuery(EntitiesQuery):
         """
         if not self.parser.highlight:
             return {}
-        highlighter = get_highlighter(Field.CONTENT, count=self.parser.highlight_count)
+        highlighter = get_highlighter(
+            Field.CONTENT,
+            count=self.parser.highlight_count,
+            max_analyzed_offset=(
+                self.parser.max_highlight_analyzed_offset or MAX_ANALYZED_OFFSET
+            ),
+        )
         highlighter["no_match_size"] = 0
-        # we really want to find all surface forms
-        highlighter["max_analyzed_offset"] = 9999999
         highlighter.pop("highlight_query", None)
         return {
             "encoder": "html",

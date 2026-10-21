@@ -214,7 +214,7 @@ def cli_search_mentions(
     """Find documents that mention a given named entity.
 
     Runs `MentionsQuery` against the Document hierarchy — phrase-matches the
-    entity's matchable name variants on `Field.CONTENT` (slop 2) and adds a
+    entity's matchable name variants on `Field.CONTENT` (exact phrases) and adds a
     structured-name bonus via `Field.NAMES`. Results rank by `_score` desc.
 
     Standard parser knobs apply via `--args`, e.g.:

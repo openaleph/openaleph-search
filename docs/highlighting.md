@@ -35,12 +35,12 @@ Number of snippets per document.
 
 ### `max_highlight_analyzed_offset`
 
-Maximum characters to analyze per document.
+Maximum characters to analyze per document. Values above `999999` are lowered to it, as Elasticsearch fails the whole request when a hit is longer than its `index.highlight.max_analyzed_offset` (1000000) and more is asked for.
 
 - Type: `int`
-- Default: `999999`
+- Default: the `highlighter_max_analyzed_offset` setting (`100000`)
 
-Reduce this value for better performance on large documents:
+Raise it to highlight further into large documents, at the cost of slower highlighting:
 
 ```bash
 --args "highlight=true&max_highlight_analyzed_offset=500000"
@@ -56,14 +56,7 @@ Used for: `content` (document text), `text` (secondary text), `translation` (tra
 
 The default highlighter for all fields. Balanced performance with good support for mixed content.
 
-### Fast Vector Highlighter (FVH)
-
-Optionally used for the `content` field. Provides more accurate phrase highlighting (wraps entire phrases in a single `<em>` tag) but requires term vectors. Disabled by default because it is incompatible with `copy_to` fields excluded from `_source` — for entities where multiple properties copy into `content` (e.g. HyperText with both `bodyHtml` and `indexText`), FVH causes term vector offset mismatches that drop hits from results.
-
-Configuration (via environment):
-
-- `OPENALEPH_SEARCH_HIGHLIGHTER_FVH_ENABLED=false` (default)
-- Requires `OPENALEPH_SEARCH_CONTENT_TERM_VECTORS=true` (default) when enabled
+On `content` a phrase is highlighted as one span (`<em>Paul Manafort</em>`). Where `content` has `index_phrases` shingles (the things bucket, and indexes created before 5.4), exact phrases run against them, so its highlighter lists them in `matched_fields`, which Elasticsearch only accepts with `require_field_match: true` on that field.
 
 ### Plain Highlighter
 
@@ -74,16 +67,6 @@ Fast highlighting for simple keyword matches.
 ## Configuration
 
 Control highlighting behavior via environment variables:
-
-### `highlighter_fvh_enabled`
-
-Use Fast Vector Highlighter for content field.
-
-```bash
-export OPENALEPH_SEARCH_HIGHLIGHTER_FVH_ENABLED=false
-```
-
-Default: `false`. When false, uses Unified Highlighter instead. See [Highlighter types](#highlighter-types) for trade-offs.
 
 ### `highlighter_fragment_size`
 
@@ -105,28 +88,6 @@ export OPENALEPH_SEARCH_HIGHLIGHTER_NUMBER_OF_FRAGMENTS=3
 
 Default: `3`
 
-### `highlighter_phrase_limit`
-
-Maximum phrases to analyze per document.
-
-```bash
-export OPENALEPH_SEARCH_HIGHLIGHTER_PHRASE_LIMIT=64
-```
-
-Default: `64`
-
-Lower values improve performance but may miss some matches.
-
-### `highlighter_boundary_max_scan`
-
-Characters to scan for sentence boundaries.
-
-```bash
-export OPENALEPH_SEARCH_HIGHLIGHTER_BOUNDARY_MAX_SCAN=100
-```
-
-Default: `100`
-
 ### `highlighter_no_match_size`
 
 Fragment size when no match found.
@@ -145,7 +106,7 @@ Maximum characters to analyze.
 export OPENALEPH_SEARCH_HIGHLIGHTER_MAX_ANALYZED_OFFSET=100000
 ```
 
-Default: `100000`
+Default: `100000`, the default of `max_highlight_analyzed_offset`. Values above `999999` are lowered to it.
 
 ## Response format
 
@@ -227,23 +188,14 @@ openaleph-search search query-string "corruption" \
 
 ## Performance considerations
 
-### Index size
+### Text analysis
 
-Fast Vector Highlighter requires term vectors, which increase index size by approximately 20-30%.
-
-Disable term vectors if index storage size is a serious concern:
-
-```bash
-export OPENALEPH_SEARCH_CONTENT_TERM_VECTORS=false
-```
-
-Requires reindexing to take effect.
+`content` is indexed without term vectors, so the unified highlighter re-analyzes the text of each returned hit, up to `max_highlight_analyzed_offset` characters. The cost grows with the number of hits and their size, not with the size of the index. In the pages bucket `content` keeps offsets in the index (`index_options: offsets`), which spares the re-analysis of large documents.
 
 ### Query performance
 
 - More snippets (`highlight_count`) = slower queries
 - Larger documents = slower highlighting
-- Lower `phrase_limit` = faster but less accurate
 - Reduce `max_highlight_analyzed_offset` for large documents
 
 ### Optimization tips
@@ -273,12 +225,8 @@ Check that:
 ### Incomplete highlights
 
 - Document may exceed `max_highlight_analyzed_offset`
-- Query may exceed `phrase_limit`
-- Field may not have term vectors enabled
 
 ### Slow highlighting
 
 - Reduce `highlight_count`
 - Lower `max_highlight_analyzed_offset`
-- Decrease `phrase_limit`
-- The unified highlighter (default) generally performs well; FVH is not recommended due to compatibility issues with `copy_to` fields

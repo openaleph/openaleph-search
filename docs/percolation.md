@@ -19,7 +19,7 @@ Clauses come from two name tiers:
 - **Primary names** – the entity's canonical `name` values. Tagged `_name: "name"` and boosted at 2.0.
 - **Other names** – secondary name signals (`alias`, `previousName`). Tagged `_name: "other_name"` and boosted at 0.8, so canonical-name matches rank above alias-only matches.
 
-All clauses use `match_phrase` with `slop: 2` – tolerant of inserted middle initials (`"Jane Doe"` matches `"Jane A. Doe"`), reversed last-name-first variants (`"Doe, Jane"`), and small token gaps. Performance is essentially the same as `slop: 1`; both fall off the `index_phrases` shingle fast path that `slop: 0` uses, so once you're paying the slop cost the value itself is free.
+All clauses are exact phrases (`match_phrase` with `slop: 0`): `"Jane Doe"` matches neither `"Jane A. Doe"` nor `"Doe, Jane"`, so such variants have to be among the entity's names. An exact phrase runs against the `index_phrases` shingles of the things bucket, which makes a stored query a candidate only when the document holds its two-word combinations. Against 780k stored OpenSanctions queries this percolates 7 to 40 times faster than `slop: 2`, which also matched names across lists (`"Jane Smith, John Doe"` for `"Jane Doe"`), about three quarters of its extra hits. Entities indexed before 5.4 keep their `slop: 2` queries until they are reindexed.
 
 Percolating a document is then a normal entity search against the things bucket with three extra ingredients:
 

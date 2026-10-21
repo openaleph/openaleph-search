@@ -351,6 +351,27 @@ def test_format_entity_caps_index_text(monkeypatch):
     assert source["translation"] == ["hallo"]
 
 
+def test_format_entity_caps_names(monkeypatch):
+    monkeypatch.setattr(transform_module.settings, "indexer_max_names", 3)
+    entity = make_entity(
+        {
+            "id": "pages-mentions",
+            "schema": "Pages",
+            "properties": {
+                "name": ["Zeta Holdings Report"],
+                "peopleMentioned": ["Jane Doe", "John Smith", "Maria Lopez"],
+            },
+        }
+    )
+    action = format_entity("test_dataset", entity)
+    assert action is not None
+    source = action["_source"]
+    # own name first, then the first mentions in a stable order
+    assert set(source["name_keys"]) == {"holdingsreportzeta", "doejane", "johnsmith"}
+    # the properties themselves are not capped
+    assert len(source["properties"]["peopleMentioned"]) == 3
+
+
 def test_rewrite_mapping_safe_preserves_default_immutables():
     """Regression for the e864564 ``index: false`` bugfix.
 
@@ -419,6 +440,23 @@ def test_rewrite_mapping_safe_preserves_explicit_immutables():
     }
     result = rewrite_mapping_safe(pending, existing)
     assert result["properties"]["name"]["normalizer"] == "kw-normalizer"
+
+
+def test_rewrite_mapping_safe_keeps_content_features():
+    """Indexes created with term vectors and shingles keep them and don't take
+    `offsets`, as ES refuses to change any of them."""
+    pending = {"properties": {"content": {"type": "text", "index_options": "offsets"}}}
+    existing = {
+        "properties": {
+            "content": {
+                "type": "text",
+                "index_phrases": True,
+                "term_vector": "with_positions_offsets",
+            }
+        }
+    }
+    result = rewrite_mapping_safe(pending, existing)
+    assert result["properties"]["content"] == existing["properties"]["content"]
 
 
 def test_rewrite_mapping_safe_passes_through_new_fields():

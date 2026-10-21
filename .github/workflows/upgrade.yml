@@ -20,6 +20,17 @@ jobs:
           "xpack.security.transport.ssl.enabled": false
           "xpack.security.http.ssl.enabled": false
 
+    env:
+      DEBUG: 1
+      OPENALEPH_SEARCH_PERCOLATION: 1
+      # entity ids from the fixtures, found by every version since 5.1.0
+      SAMPLE_ID: 242d6724b38425f11df37437c38125b71fb13300
+      PAGES_ID: f61295777cf69f423855655f1614794ce22086d8
+
+    defaults:
+      run:
+        shell: bash  # -eo pipefail
+
     steps:
     - uses: actions/checkout@v7
 
@@ -28,20 +39,41 @@ jobs:
       with:
         python-version: "3.13"
 
-    - name: Install 5.1.0 version and create indexes
+    - name: Install 5.1.0 version, create indexes and index the fixtures
       run: |
         pip install openaleph-search==5.1.0 "anystore<=1.1.2"
         openaleph-search upgrade
+        openaleph-search index-entities -d upgrade_test -i tests/fixtures/samples.ijson
+        openaleph-search index-entities -d upgrade_test -i tests/fixtures/pages.jsonl
+        curl -s -XPOST localhost:9200/_refresh > /dev/null
+        openaleph-search search query-string '"paul manafort"' | grep $SAMPLE_ID > /dev/null
+        openaleph-search search query-string '"MIT license"' --args "filter:schema=Pages" | grep $PAGES_ID > /dev/null
 
-    - name: Install 5.2.0 version and upgrade
+    - name: Install 5.2.0 version, upgrade and search
       run: |
         pip install openaleph-search==5.2.0
         openaleph-search upgrade
+        openaleph-search search query-string '"paul manafort"' | grep $SAMPLE_ID > /dev/null
+        openaleph-search search query-string '"MIT license"' --args "filter:schema=Pages" | grep $PAGES_ID > /dev/null
 
-    - name: Install 5.2.2 version and upgrade
+    - name: Install 5.2.2 version, upgrade and search
       run: |
         pip install openaleph-search==5.2.2
         openaleph-search upgrade
+        openaleph-search search query-string '"paul manafort"' | grep $SAMPLE_ID > /dev/null
+        openaleph-search search query-string '"MIT license"' --args "filter:schema=Pages" | grep $PAGES_ID > /dev/null
+
+    # 5.3 indexes carry term vectors and shingles on every `content`; the
+    # samples re-index adds stored percolator queries (slop 2), the pages
+    # stay as 5.1.0 indexed them
+    - name: Install 5.3.3 version, upgrade, search and re-index the samples
+      run: |
+        pip install openaleph-search==5.3.3
+        openaleph-search upgrade
+        openaleph-search search query-string '"paul manafort"' | grep $SAMPLE_ID > /dev/null
+        openaleph-search search query-string '"MIT license"' --args "filter:schema=Pages" | grep $PAGES_ID > /dev/null
+        openaleph-search index-entities -d upgrade_test -i tests/fixtures/samples.ijson
+        curl -s -XPOST localhost:9200/_refresh > /dev/null
 
     - name: Install current version
       run: |
@@ -51,3 +83,27 @@ jobs:
 
     - name: Upgrade indexes
       run: openaleph-search upgrade
+
+    # reindexing is optional, so the data of older versions has to work as is
+    - name: Search the upgraded indexes
+      run: |
+        openaleph-search search query-string '"paul manafort"' --args "highlight=true" \
+          | grep "<em>Paul Manafort</em>" | grep $SAMPLE_ID > /dev/null
+        openaleph-search search query-string '"MIT license"' --args "highlight=true&filter:schema=Pages" \
+          | grep "<em>MIT license</em>" | grep $PAGES_ID > /dev/null
+        echo "Yesterday we met Vladimir L. in Berlin." \
+          | openaleph-search percolate-text --args "highlight=true" \
+          | grep '"surface_forms":\["Vladimir L"\]' > /dev/null
+
+    - name: Re-index and search with the current version
+      run: |
+        openaleph-search index-entities -d upgrade_test -i tests/fixtures/samples.ijson
+        openaleph-search index-entities -d upgrade_test -i tests/fixtures/pages.jsonl
+        curl -s -XPOST localhost:9200/_refresh > /dev/null
+        openaleph-search search query-string '"paul manafort"' --args "highlight=true" \
+          | grep "<em>Paul Manafort</em>" | grep $SAMPLE_ID > /dev/null
+        openaleph-search search query-string '"MIT license"' --args "highlight=true&filter:schema=Pages" \
+          | grep "<em>MIT license</em>" | grep $PAGES_ID > /dev/null
+        echo "Yesterday we met Vladimir L. in Berlin." \
+          | openaleph-search percolate-text --args "highlight=true" \
+          | grep '"surface_forms":\["Vladimir L"\]' > /dev/null
