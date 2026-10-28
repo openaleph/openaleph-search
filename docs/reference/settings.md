@@ -149,10 +149,11 @@ Read index version(s).
 - Type: `str | list[str]`
 - Default: `["v1"]`
 
-Accepts a json string for multiple values:
+Accepts a comma-separated string or a JSON list for multiple values:
 
 ```bash
-export OPENALEPH_SEARCH_INDEX_READ=["v1","v2"]
+export OPENALEPH_SEARCH_INDEX_READ=v1,v2
+export OPENALEPH_SEARCH_INDEX_READ='["v1","v2"]'
 ```
 
 ### `index_shards`
