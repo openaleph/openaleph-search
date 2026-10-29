@@ -31,6 +31,13 @@ settings = Settings()
 
 
 class Query:
+    """Base class of the search queries: builds an Elasticsearch request body
+    from query parameters and runs it.
+
+    Args:
+        parser: Query parameters.
+    """
+
     TEXT_FIELDS: ClassVar[list[str]] = [Field.TEXT]
     PREFIX_FIELD: ClassVar[str] = Field.NAME
     SKIP_FILTERS: ClassVar[list[str]] = []
@@ -411,7 +418,6 @@ class Query:
                 max_analyzed_offset=offset,
                 operator=operator,
             ),
-            Field.NAMES: get_highlighter(Field.NAMES),
         }
         if settings.highlighter_text_field and Field.TEXT not in fields:
             fields[Field.TEXT] = get_highlighter(
@@ -533,7 +539,11 @@ class Query:
         return " ".join([p for p in parts if p is not None])
 
     def search(self) -> ObjectApiResponse:
-        """Execute the query as assmbled."""
+        """Run the query.
+
+        Returns:
+            The Elasticsearch response.
+        """
         log.debug("Search index: %s" % self.get_index())
         es = get_es()
 
