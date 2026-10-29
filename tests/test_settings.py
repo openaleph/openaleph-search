@@ -6,7 +6,7 @@ from openaleph_search.settings import Settings
 @pytest.mark.parametrize(
     "value,expected",
     [
-        ("v1", "v1"),
+        ("v1", ["v1"]),
         ("v1,v2", ["v1", "v2"]),
         (" v1 , v2 ,", ["v1", "v2"]),
         ('["v1","v2"]', ["v1", "v2"]),
