@@ -210,6 +210,7 @@ Follow the Money property types map to Elasticsearch types:
 Properties are copied to aggregation fields:
 
 - `text` type properties → copied to `content`
+- Mentioned properties (`peopleMentioned`, `emailMentioned`, ...) → copied to their group field
 - Other properties → copied to `text`
 - Properties with type groups → copied to group field
 
@@ -218,6 +219,7 @@ Example:
 properties.nationality → text + countries (group field)
 properties.bodyText → content
 properties.email → text + emails (group field)
+properties.peopleMentioned → names (group field)
 ```
 
 ## Group fields

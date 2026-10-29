@@ -17,6 +17,14 @@ MappingProperty: TypeAlias = dict[str, Any]
 Mapping: TypeAlias = dict[str, MappingProperty]
 
 PROP_TRANSLATED = "translatedText"
+# Values an analyzer detected in the entity's own text: `peopleMentioned`,
+# `emailMentioned`, ... (`Analyzable`, and `namesMentioned` on `Interval`)
+MENTIONED_PROPS = frozenset(
+    name
+    for schema in model.schemata.values()
+    for name in schema.properties
+    if name.endswith("Mentioned")
+)
 
 # MAPPING SHORTCUTS #
 DEFAULT_ANALYZER = "default"
@@ -429,12 +437,15 @@ def _copy_to_targets(name: str, prop: Any, schema: Any) -> Iterable[str]:
     highlight correctly; with them (indexes created before 5.4) the
     highlighter misplaces `<em>` across values, as it rebuilds a copy_to
     field from its source properties.
+
+    `MENTIONED_PROPS` go into neither: `content` holds the text their values
+    were detected in.
     """
     if name == PROP_TRANSLATED:
         yield Field.TRANSLATION
     elif prop.type == registry.text:
         yield Field.CONTENT
-    else:
+    elif name not in MENTIONED_PROPS:
         yield Field.TEXT
     if prop.type.group:
         yield prop.type.group

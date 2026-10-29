@@ -58,12 +58,6 @@ The default highlighter for all fields. Balanced performance with good support f
 
 On `content` a phrase is highlighted as one span (`<em>Paul Manafort</em>`). Where `content` has `index_phrases` shingles (the things bucket, and indexes created before 5.4), exact phrases run against them, so its highlighter lists them in `matched_fields`, which Elasticsearch only accepts with `require_field_match: true` on that field.
 
-### Plain Highlighter
-
-Used for: `names` (keywords)
-
-Fast highlighting for simple keyword matches.
-
 ## Configuration
 
 Control highlighting behavior via environment variables:
@@ -141,11 +135,10 @@ Matched terms are wrapped in `<em>` tags.
 Multiple fields are highlighted automatically:
 
 - `content` - Main document text (primary highlight field for entities)
-- `names` - Normalized name keywords
 - `text` - Secondary text content (catch-all `copy_to` target)
 - `translation` - Translated text content
 
-The `text` and `translation` highlight fields can be disabled via settings:
+The `text` and `translation` highlight fields can be disabled via settings for better performance on search results return:
 
 - `OPENALEPH_SEARCH_HIGHLIGHTER_TEXT_FIELD=false`
 - `OPENALEPH_SEARCH_HIGHLIGHTER_TRANSLATION_FIELD=false`
