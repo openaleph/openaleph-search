@@ -71,7 +71,23 @@ def iter_entities(
     es_scroll="5m",
     es_scroll_size=1000,
 ):
-    """Scan all entities matching the given criteria."""
+    """Scan all entities matching the given criteria.
+
+    Args:
+        auth: Only the datasets it may read.
+        dataset: Only this dataset; ignored with `collection_id`.
+        collection_id: Only this collection.
+        schemata: Only entities of these schemata or their descendants.
+        includes: `_source` fields to return.
+        excludes: `_source` fields to leave out.
+        filters: More Elasticsearch filter clauses.
+        sort: Sort to scan in; unsorted scans are faster.
+        es_scroll: Lifetime of the scroll context.
+        es_scroll_size: Hits per scroll page.
+
+    Yields:
+        Entities as [`unpack_result`][unpack_result] returns them.
+    """
     query = {
         "query": _entities_query(filters, auth, dataset, collection_id, schemata),
         "_source": _source_spec(includes, excludes),
@@ -240,8 +256,18 @@ def iter_adjacent(dataset, entity_id):
 def entities_by_ids(
     ids, schemata=None, cached=False, includes=PROXY_INCLUDES, excludes=None
 ):
-    """Iterate over unpacked entities based on a search for the given
-    entity IDs."""
+    """Iterate over the entities with the given IDs.
+
+    Args:
+        ids: One or more entity IDs.
+        schemata: Only look in the buckets of these schemata.
+        cached: Not implemented, logs a warning.
+        includes: `_source` fields to return.
+        excludes: `_source` fields to leave out.
+
+    Yields:
+        Entities as [`unpack_result`][unpack_result] returns them.
+    """
     ids = ensure_list(ids)
     if not len(ids):
         return
@@ -265,7 +291,15 @@ def entities_by_ids(
 
 
 def get_entity(entity_id, **kwargs):
-    """Fetch an entity from the index."""
+    """Fetch an entity from the index.
+
+    Args:
+        entity_id: The entity ID.
+        **kwargs: Passed to [`entities_by_ids`][entities_by_ids].
+
+    Returns:
+        The entity, or `None` if it is not indexed.
+    """
     for entity in entities_by_ids(entity_id, cached=False, **kwargs):
         return entity
 
@@ -307,17 +341,15 @@ def get_entity_version(entity_id: str) -> EntityVersion | None:
 
 
 def get_entity_content(entity_id: str) -> str | None:
-    """Fetch the indexed fulltext of a Document or Pages entity by id.
+    """Fetch the indexed fulltext of a `Document` or `Pages` entity: its
+    `bodyText`, or the stored `content` of the pages bucket.
 
-    For Document and its descendants, text lives in `properties.bodyText`
-    (in _source). For Pages, bodyText is empty and the aggregated text is
-    in Field.CONTENT, which the pages bucket persists via store=true (see
-    openaleph_search/index/indexes.py:125). Page entities are deliberately
-    excluded — Page does not inherit from Document, so the schema check
-    rejects them.
+    Args:
+        entity_id: The entity ID.
 
-    Returns the joined text, or None if the entity is not found, not a
-    Document descendant, or has no retrievable fulltext.
+    Returns:
+        The text joined by newlines, or `None` if the entity is not indexed,
+            not a `Document` (`Page` is not) or has no text.
     """
     es = get_es()
     index = entities_read_index(schema="Document")
@@ -344,6 +376,18 @@ def get_entity_content(entity_id: str) -> str | None:
 
 
 def index_proxy(dataset: str, proxy: EntityProxy, sync=False, **kwargs) -> IndexStats:
+    """Index one entity and delete it from the indexes of other schemata, with
+    the short `max_retries` budget of a request.
+
+    Args:
+        dataset: Dataset of the entity.
+        proxy: The entity.
+        sync: Refresh, so the entity is searchable on return.
+        **kwargs: Passed to [`Indexer`][Indexer].
+
+    Returns:
+        Counts of the run.
+    """
     delete_entity(proxy.id, exclude=proxy.schema, sync=False)
     # usually runs inside an API request: keep the short request retry budget
     kwargs.setdefault("max_retries", settings.max_retries)
@@ -353,19 +397,36 @@ def index_proxy(dataset: str, proxy: EntityProxy, sync=False, **kwargs) -> Index
 def index_bulk(
     dataset: str, entities: Iterable[EntityLike], sync=False, **kwargs
 ) -> IndexStats:
-    """Transform and index a set of entities, proxies or trusted entity data."""
+    """Transform and index entities.
+
+    Args:
+        dataset: Dataset of the entities.
+        entities: Proxies, `EntityPayload`s or trusted entity dicts, see
+            [`format_entity`][openaleph_search.transform.entity.format_entity].
+        sync: Refresh, so the entities are searchable on return.
+        **kwargs: Passed to [`Indexer`][Indexer].
+
+    Returns:
+        Counts of the run.
+    """
     return Indexer(dataset, sync=sync, **kwargs).index(entities)
 
 
 def delete_entity(entity_id, exclude=None, sync=False):
-    """Delete an entity from the index."""
+    """Delete an entity from the index.
+
+    Args:
+        entity_id: The entity ID.
+        exclude: Keep it in the write index of this schema.
+        sync: Refresh, so the deletion is visible on return.
+    """
     if exclude is not None:
         exclude = entities_write_index(exclude)
     for entity in entities_by_ids(entity_id, excludes="*"):
         index = entity.get("_index")
         if index == exclude:
             continue
-        delete_safe(index, entity_id)
+        delete_safe(index, entity_id, sync=sync)
 
 
 def checksums_count(checksums):
