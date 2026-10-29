@@ -1,5 +1,7 @@
+from typing import Any
+
 from anystore.settings import BaseSettings
-from pydantic import AliasChoices, Field, HttpUrl
+from pydantic import AliasChoices, Field, HttpUrl, field_validator
 from pydantic_settings import SettingsConfigDict
 
 __version__ = "5.3.3"
@@ -166,3 +168,11 @@ class Settings(BaseSettings):
 
     # search control
     allow_leading_wildcard: bool = False
+
+    @field_validator("index_read", mode="before")
+    @classmethod
+    def split_index_read(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            value = value.strip()
+            return [v.strip() for v in value.split(",") if v.strip()]
+        return value
