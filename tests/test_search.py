@@ -6,7 +6,7 @@ from ftmq.util import make_entity
 from openaleph_search.index.entities import index_bulk
 from openaleph_search.model import SearchAuth
 from openaleph_search.parse.parser import SearchQueryParser
-from openaleph_search.query.queries import EntitiesQuery
+from openaleph_search.query.queries import EntitiesQuery, GeoDistanceQuery
 from openaleph_search.transform.entity import format_entity
 
 
@@ -1103,3 +1103,30 @@ def test_synonyms_fulltext_no_false_positives(index_synonym_docs):
     """Unrelated documents don't match synonym-expanded queries."""
     ids = _syndoc_ids("Vladimir", synonyms=True)
     assert "syn-doc-unrelated" not in ids
+
+
+def test_geo_distance_query_datasets(cleanup_after):
+    def address(entity_id, lat, lon):
+        return make_entity(
+            {
+                "id": entity_id,
+                "schema": "Address",
+                "properties": {
+                    "full": [entity_id],
+                    "latitude": [str(lat)],
+                    "longitude": [str(lon)],
+                },
+            }
+        )
+
+    index_bulk("geo_a", [address("near-a", 52.52, 13.40)], sync=True)
+    index_bulk("geo_b", [address("near-b", 52.53, 13.41)], sync=True)
+    origin = address("origin", 52.50, 13.40)
+
+    def nearby(**kwargs):
+        query = GeoDistanceQuery(SearchQueryParser([], None), entity=origin, **kwargs)
+        return [hit["_id"] for hit in query.search()["hits"]["hits"]]
+
+    assert nearby() == ["near-a", "near-b"]
+    assert nearby(datasets=["geo_a"]) == ["near-a"]
+    assert nearby(datasets=["geo_a", "geo_b"]) == ["near-a", "near-b"]

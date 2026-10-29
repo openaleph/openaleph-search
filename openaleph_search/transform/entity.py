@@ -2,6 +2,7 @@
 
 import functools
 import itertools
+import random
 from datetime import datetime
 from typing import Any, Iterable, Iterator
 
@@ -16,7 +17,7 @@ from ftmq.util import SELECT_SYMBOLS, get_name_symbols
 from rigour.names import NameTypeTag, analyze_names, pick_name
 
 from openaleph_search.index.indexes import entities_write_index, schema_bucket
-from openaleph_search.index.mapping import NUMERIC_TYPES, Field
+from openaleph_search.index.mapping import MENTIONED_PROPS, NUMERIC_TYPES, Field
 from openaleph_search.settings import Settings, __version__
 from openaleph_search.transform.util import (
     get_geopoints,
@@ -66,13 +67,38 @@ def _type_values(
 
 
 def _own_names(schema: Schema, properties: dict[str, list[str]]) -> set[str]:
-    """Name values except the ones an `Analyzable` mentions."""
+    """Name values except the mentioned ones."""
     values: set[str] = set()
     for name, prop_values in properties.items():
         prop = schema.properties[name]
-        if prop.type is registry.name and prop.schema.name != "Analyzable":
+        if prop.type is registry.name and name not in MENTIONED_PROPS:
             values.update(prop_values)
     return values
+
+
+def _cap_names(
+    entity_id: str, schema: Schema, properties: dict[str, list[str]], names: set[str]
+) -> set[str]:
+    """All own names, and a random sample of the mentioned ones up to
+    `indexer_max_names`, seeded with the entity id."""
+    own = _own_names(schema, properties)
+    mentioned = sorted(names - own)  # sorted: set order is not reproducible
+    room = min(max(0, settings.indexer_max_names - len(own)), len(mentioned))
+    return own | set(random.Random(entity_id).sample(mentioned, room))
+
+
+def _cap_mentioned_names(
+    schema: Schema, properties: dict[str, list[str]], names: set[str]
+) -> None:
+    """Keep only the mentioned names in `names` in `properties`."""
+    for name in MENTIONED_PROPS.intersection(properties):
+        if schema.properties[name].type is not registry.name:
+            continue
+        kept = [value for value in properties[name] if value in names]
+        if kept:
+            properties[name] = kept
+        else:
+            del properties[name]
 
 
 def _caption(schema: Schema, properties: dict[str, list[str]]) -> str:
@@ -193,9 +219,18 @@ def _warm_rigour_taggers() -> None:
 
 
 def format_entity(dataset: str, entity: EntityLike, **kwargs) -> Action | None:
-    """Apply final denormalisations to the index. Trusted entity data (an
+    """Transform an entity into a bulk index action. Trusted entity data (an
     `EntityPayload` or a dict) is transformed without building a proxy; the
-    input is not modified."""
+    input is not modified.
+
+    Args:
+        dataset: Dataset of the entity.
+        entity: A proxy, an `EntityPayload` or a trusted entity dict.
+        **kwargs: `collection_id` to store (deprecated).
+
+    Returns:
+        The action, or `None` for an entity of an abstract schema.
+    """
     schema, data, caption = _entity_data(entity)
     properties: dict[str, list[str]] = data["properties"]
 
@@ -234,14 +269,13 @@ def format_entity(dataset: str, entity: EntityLike, **kwargs) -> Action | None:
     # all names, including mentioned ones, for lookups
     names = _type_values(schema, properties, registry.name)
     if len(names) > settings.indexer_max_names:
-        # the entity's own names first, then a stable cut of the mentioned ones
-        own = _own_names(schema, properties)
-        ordered = sorted(own) + sorted(names - own)
+        kept_names = _cap_names(data["id"], schema, properties, names)
         log.warning(
-            "Capped names to %d of %d" % (settings.indexer_max_names, len(names)),
+            "Capped names to %d of %d" % (len(kept_names), len(names)),
             entity_id=data["id"],
         )
-        names = set(ordered[: settings.indexer_max_names])
+        names = kept_names
+        _cap_mentioned_names(schema, properties, names)
     symbols = list(_get_symbols(schema, properties, names, text))
     if symbols:
         data[Field.NAME_SYMBOLS] = symbols
@@ -381,7 +415,16 @@ def format_entity(dataset: str, entity: EntityLike, **kwargs) -> Action | None:
 
 
 def format_entities(dataset: str, entities: Iterable[EntityLike], **kwargs) -> Actions:
-    """Lazily transform a stream of entities into index actions."""
+    """Lazily transform a stream of entities into index actions.
+
+    Args:
+        dataset: Dataset of the entities.
+        entities: Proxies, `EntityPayload`s or trusted entity dicts.
+        **kwargs: Passed to [`format_entity`][format_entity].
+
+    Yields:
+        Actions, skipping entities of abstract schemata.
+    """
     _warm_rigour_taggers()
     for entity in entities:
         formatted = format_entity(dataset, entity, **kwargs)
@@ -406,13 +449,16 @@ def iter_batches(
     chunk_size: int | None = None,
     batch_bytes: int | None = None,
 ) -> Iterator[list[EntityLike]]:
-    """Batch a stream of entities by entity count and payload bytes, cutting on
-    whichever limit is reached first.
+    """Batch a stream of entities by count and by payload bytes (estimated by
+    `entity_size`), cutting on whichever bound is reached first.
 
-    A count-only bound is wrong in both directions: 1000 document entities can
-    be 100MB (far past a sensible bulk request), while 1000 `Person`s can only
-    be ~100KB (far below one). `entity_size` measures roughly the entity's JSON
-    size
+    Args:
+        entities: Proxies, `EntityPayload`s or trusted entity dicts.
+        chunk_size: Entities per batch, defaults to `indexer_chunk_size`.
+        batch_bytes: Payload bytes per batch, defaults to `indexer_batch_bytes`.
+
+    Yields:
+        Lists of entities.
     """
     chunk_size = chunk_size or settings.indexer_chunk_size
     batch_bytes = batch_bytes or settings.indexer_batch_bytes

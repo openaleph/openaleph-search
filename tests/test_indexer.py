@@ -352,25 +352,72 @@ def test_format_entity_caps_index_text(monkeypatch):
     assert source["translation"] == ["hallo"]
 
 
+def _mentions_action(entity_id: str, mentioned: list[str], **properties):
+    data = {
+        "id": entity_id,
+        "schema": "Pages",
+        "properties": {"peopleMentioned": mentioned, **properties},
+    }
+    action = format_entity("test_dataset", data)
+    assert action is not None
+    return action["_source"]
+
+
 def test_format_entity_caps_names(monkeypatch):
     monkeypatch.setattr(transform_module.settings, "indexer_max_names", 3)
-    entity = make_entity(
-        {
-            "id": "pages-mentions",
-            "schema": "Pages",
-            "properties": {
-                "name": ["Zeta Holdings Report"],
-                "peopleMentioned": ["Jane Doe", "John Smith", "Maria Lopez"],
-            },
-        }
+    mentioned = ["Jane Doe", "John Smith", "Maria Lopez"]
+    source = _mentions_action(
+        "pages-mentions", mentioned, name=["Zeta Holdings Report"]
     )
-    action = format_entity("test_dataset", entity)
+    # the own name, and a sample of the mentions fills the rest
+    kept = source["properties"]["peopleMentioned"]
+    assert len(kept) == 2
+    assert set(kept) < set(mentioned)
+    assert source["properties"]["name"] == ["Zeta Holdings Report"]
+    assert len(source["name_keys"]) == 3
+    assert "holdingsreportzeta" in source["name_keys"]
+    # the same entity keeps the same sample
+    again = _mentions_action(
+        "pages-mentions", mentioned[::-1], name=["Zeta Holdings Report"]
+    )
+    assert set(again["properties"]["peopleMentioned"]) == set(kept)
+
+
+def test_format_entity_caps_names_randomly(monkeypatch):
+    monkeypatch.setattr(transform_module.settings, "indexer_max_names", 10)
+    mentioned = ["Person %03d" % i for i in range(100)]
+    kept = set()
+    for i in range(20):
+        source = _mentions_action("doc-%d" % i, mentioned)
+        assert len(source["properties"]["peopleMentioned"]) == 10
+        kept.update(source["properties"]["peopleMentioned"])
+    # not one global order that drops the same names everywhere
+    assert len(kept) > 50
+
+
+def test_format_entity_caps_names_keeps_own_names(monkeypatch):
+    monkeypatch.setattr(transform_module.settings, "indexer_max_names", 1)
+    data = {
+        "id": "pages-mentions",
+        "schema": "Pages",
+        "properties": {
+            "name": ["Zeta Holdings Report", "Alpha Report"],
+            "peopleMentioned": ["Jane Doe"],
+            "emailMentioned": ["jane@example.org"],
+        },
+    }
+    action = format_entity("test_dataset", data)
     assert action is not None
     source = action["_source"]
-    # own name first, then the first mentions in a stable order
-    assert set(source["name_keys"]) == {"holdingsreportzeta", "doejane", "johnsmith"}
-    # the properties themselves are not capped
-    assert len(source["properties"]["peopleMentioned"]) == 3
+    properties = source["properties"]
+    # own names are kept even beyond the cap
+    assert sorted(properties["name"]) == ["Alpha Report", "Zeta Holdings Report"]
+    assert set(source["name_keys"]) == {"holdingsreportzeta", "alphareport"}
+    assert "peopleMentioned" not in properties
+    # only names are capped
+    assert properties["emailMentioned"] == ["jane@example.org"]
+    # trusted input is not modified
+    assert data["properties"]["peopleMentioned"] == ["Jane Doe"]
 
 
 def test_rewrite_mapping_safe_preserves_default_immutables():

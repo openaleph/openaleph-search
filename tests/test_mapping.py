@@ -12,6 +12,7 @@ from openaleph_search.index.mapping import (
     BASE_MAPPING,
     GROUP_MAPPING,
     KEYWORD_IGNORE_ABOVE,
+    MENTIONED_PROPS,
     make_mapping,
     make_schema_mapping,
 )
@@ -93,6 +94,7 @@ def test_mappings_copy_to(es, cleanup_after):
             "properties": {
                 "fileName": ["a_document.pdf"],
                 "title": ["My document"],
+                "bodyText": ["A letter to Vladimir Putin."],
                 "peopleMentioned": ["Vladimir Putin"],
             },
             "datasets": ["test"],
@@ -122,7 +124,12 @@ def test_mappings_copy_to(es, cleanup_after):
     search_result = es.search(
         index=index, query={"bool": {"must": [{"term": {"text": "vladimir"}}]}}
     )
-    assert len(search_result["hits"]["hits"]) == 2, "Failed to match name parts on text"
+    # but not by mentioned names: they were detected in `content`
+    assert len(search_result["hits"]["hits"]) == 1, "Mentioned names copied to text"
+    search_result = es.search(
+        index=index, query={"bool": {"must": [{"match": {"content": "vladimir"}}]}}
+    )
+    assert len(search_result["hits"]["hits"]) == 1, "Failed to match name on content"
     search_result = es.search(
         index=index, query={"bool": {"must": [{"match": {"text": "my document"}}]}}
     )
@@ -138,7 +145,7 @@ def test_mappings_copy_to(es, cleanup_after):
     search_result = es.search(
         index=index, query={"bool": {"must": [{"match": {"text": "vladimir putin"}}]}}
     )
-    assert len(search_result["hits"]["hits"]) == 2, "Failed to match names on text"
+    assert len(search_result["hits"]["hits"]) == 1, "Failed to match names on text"
 
 
 def test_mapping_immense_keyword_value(es, cleanup_after):
@@ -177,8 +184,9 @@ def test_mapping_spec():
     assert BASE_MAPPING["name"]["type"] == "text"
     assert "copy_to" not in BASE_MAPPING["name"]
 
-    # normalized names keywords
+    # normalized names keywords, not stored: nothing reads them back
     assert BASE_MAPPING["names"]["type"] == "keyword"
+    assert "store" not in BASE_MAPPING["names"]
 
     # other normalized name things not
     for f in ("name_keys", "name_parts", "name_phonetic"):
@@ -195,8 +203,23 @@ def test_mapping_spec():
             or "content" in f["copy_to"]
             or "translation" in f["copy_to"]
         )
-        for f in mapping.values()
+        for name, f in mapping.items()
+        if name not in MENTIONED_PROPS
     )
+    # detected in the entity's text, which `content` holds already
+    assert MENTIONED_PROPS == {
+        "companiesMentioned",
+        "emailMentioned",
+        "ibanMentioned",
+        "ipMentioned",
+        "locationMentioned",
+        "namesMentioned",
+        "peopleMentioned",
+        "phoneMentioned",
+    }
+    assert mapping["peopleMentioned"]["copy_to"] == ["names"]
+    assert mapping["namesMentioned"]["copy_to"] == ["names"]
+    assert mapping["emailMentioned"]["copy_to"] == ["emails"]
     assert "names" in mapping["name"]["copy_to"]
     assert "dates" in mapping["birthDate"]["copy_to"]
 

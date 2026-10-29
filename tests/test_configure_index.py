@@ -295,3 +295,26 @@ def test_upgrade_bucket_created_with_term_vectors(bucket):
         assert "index_options" not in content
     finally:
         es.indices.delete(index=index)
+
+
+def test_upgrade_drops_text_from_mentioned_copy_to():
+    """`copy_to` is mutable, so upgrade takes mentioned values out of `text`
+    on indexes created before; highlighting `text` reads the live mapping."""
+    es = get_es()
+    index = "test-configure-legacy-mentioned"
+    legacy = make_schema_bucket_mapping("documents")
+    legacy["properties"]["properties"]["properties"]["peopleMentioned"]["copy_to"] = [
+        "names",
+        "text",
+    ]
+    es.options(ignore_status=404).indices.delete(index=index)
+    es.indices.create(index=index, settings=index_settings(), mappings=legacy)
+    try:
+        assert configure_index(
+            index, make_schema_bucket_mapping("documents"), index_settings()
+        )
+        live = es.indices.get_mapping(index=index)[index]["mappings"]
+        prop = live["properties"]["properties"]["properties"]["peopleMentioned"]
+        assert prop["copy_to"] == ["names"]
+    finally:
+        es.indices.delete(index=index)

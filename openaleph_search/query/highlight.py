@@ -96,14 +96,6 @@ def get_highlighter(
             # "post_tags": ["</em>"],
         }
         return highlighter
-    # Keyword names - simple exact matching
-    if field == Field.NAMES:
-        return {
-            "type": "plain",
-            "number_of_fragments": 1,
-            "pre_tags": [""],  # No markup
-            "post_tags": [""],  # No markup
-        }
     # other fields - leftovers, minimal highlighting if possible (not important)
     default = {
         "type": "unified",

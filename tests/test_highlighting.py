@@ -68,11 +68,12 @@ def test_highlighting_pages(fixture_pages, cleanup_after):
     assert "<em>useful information</em>" in highlight
     assert "<em>documentation</em>" in highlight
 
-    # Include mentioned names
+    # Mentioned names match, but `names` is not highlighted: documents mention
+    # up to hundreds of thousands of them
     highlight = _search_highlight(
         'names:"massachusetts institute of technology" "MIT license"', schema="Pages"
     )
-    assert "massachusetts institute of technology" in highlight
+    assert "massachusetts institute of technology" not in highlight
     assert "<em>MIT license</em>" in highlight
 
     # Page doesn't contain "names" but still the highlight works for the text phrase

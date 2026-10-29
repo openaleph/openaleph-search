@@ -109,6 +109,9 @@ class ExpandNameSynonymsMixin:
 
 
 class EntitiesQuery(ExpandNameSynonymsMixin, Query):
+    """Search entities by text, filters and facets, as the OpenAleph search
+    does."""
+
     TEXT_FIELDS = [
         f"{Field.NAME}^4",
         f"{Field.NAMES}^3",
@@ -295,7 +298,15 @@ class EntitiesQuery(ExpandNameSynonymsMixin, Query):
 
 
 class MatchQuery(EntitiesQuery):
-    """Given an entity, find the most similar other entities."""
+    """Given an entity, find the most similar other entities.
+
+    Args:
+        parser: Query parameters.
+        entity: The entity to match.
+        exclude: Entity IDs to leave out.
+        datasets: Only match in these datasets.
+        collection_ids: Only match in these collections.
+    """
 
     def __init__(
         self,
@@ -371,22 +382,21 @@ def _empty_search_response() -> dict[str, Any]:
 
 
 class PercolatorQuery(EntitiesQuery):
-    """Find entities mentioned in a document.
+    """Find the entities a text or a document mentions, via the percolator
+    queries stored on things-bucket entities (see the `percolation` setting).
 
-    Each entity in the things bucket carries a stored percolator query
-    built at index time from its cleaned name variants (see
-    `openaleph_search.transform.entity.format_entity`). Percolating a
-    document is then a normal entity search against the things bucket
-    with a `percolate` clause added to the bool query and an always-on
-    highlight on `Field.CONTENT` to extract the surface forms.
+    The query parameters of [`EntitiesQuery`][EntitiesQuery] apply. Each hit
+    carries the matched spans as `_source.surface_forms`.
 
-    All standard `EntitiesQuery` parser knobs apply: filters
-    (`filter:dataset`, `filter:countries`, `filter:schema`, …),
-    `dehydrate`, `limit`, `offset`, `sort`, auth.
+    Args:
+        parser: Query parameters.
+        text: The text to percolate.
+        entity_id: A `Document` or `Pages` entity whose text to percolate,
+            instead of `text`.
 
-    Each returned hit has a `surface_forms` list on its `_source` —
-    the actual `<mark>…</mark>` spans from the highlight, parsed and
-    deduped — so callers don't have to deal with the raw highlight HTML.
+    Raises:
+        ValueError: if not exactly one of `text` and `entity_id` is given, or
+            the entity has no text.
     """
 
     # Only matchable named entities live in the things bucket; this is
@@ -534,8 +544,15 @@ class PercolatorQuery(EntitiesQuery):
 
 
 class MoreLikeThisQuery(EntitiesQuery):
-    """Given an entity, find similar documents/pages based on text content using
-    elasticsearch more_like_this query."""
+    """Given a document, find documents and pages with similar text.
+
+    Args:
+        parser: Query parameters.
+        entity: The document.
+        exclude: Entity IDs to leave out.
+        datasets: Only search these datasets.
+        collection_ids: Only search these collections.
+    """
 
     def __init__(
         self,
@@ -590,8 +607,14 @@ class MoreLikeThisQuery(EntitiesQuery):
 
 
 class GeoDistanceQuery(EntitiesQuery):
-    """Given an Address entity, find the nearby Address entities via the
-    geo_point field"""
+    """Given an `Address` entity, find the nearby addresses.
+
+    Args:
+        parser: Query parameters.
+        entity: The address, with `latitude` and `longitude`.
+        exclude: Entity IDs to leave out.
+        datasets: Only search these datasets.
+    """
 
     def __init__(self, parser, entity=None, exclude=None, datasets=None):
         self.entity = entity
@@ -613,6 +636,10 @@ class GeoDistanceQuery(EntitiesQuery):
         exclude = {"ids": {"values": self.exclude + [self.entity.id]}}
         query["bool"]["must_not"].append(exclude)
         query["bool"]["must"].append({"exists": {"field": "geo_point"}})
+        if self.datasets:
+            query["bool"]["filter"].append(
+                field_filter_query(Field.DATASET, self.datasets)
+            )
         return query
 
     def get_sort(self):

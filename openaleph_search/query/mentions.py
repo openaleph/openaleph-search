@@ -323,26 +323,19 @@ class _Mentions(EntitiesQuery):
 
 
 class MentionsQuery(_Mentions):
-    """Find Document-family entities that mention a given named entity.
+    """Find documents whose text mentions one of the names of an entity, the
+    inverse of [`PercolatorQuery`][openaleph_search.query.queries.PercolatorQuery].
 
-    Inverse of `PercolatorQuery`. Given a named entity (Person, Company,
-    Organization, Vessel, …) identified by `entity_id`, returns Documents
-    (and their descendants — PlainText, HyperText, Pages, …) whose
-    indexed text contains the entity's caption or any of its matchable
-    name variants as a phrase.
+    The query parameters of [`EntitiesQuery`][EntitiesQuery] apply; search
+    text narrows the mentioning documents further.
 
-    All standard `EntitiesQuery` parser knobs apply: `filter:schema`
-    narrows within the Document hierarchy (e.g. to `Pages`),
-    `filter:dataset`, `filter:countries`, `highlight`, `highlight_count`,
-    `limit`, `offset`, `sort`, auth. `parser.text` ANDs with the mention
-    requirement (free-text narrowing of mention hits). Name-synonym
-    matching is provided by the target-side `Field.CONTENT` analyzer at
-    search time; `parser.synonyms=true` no longer adds any extra
-    clauses to the mention path.
+    Args:
+        parser: Query parameters.
+        entity_id: The named entity (`Person`, `Company`, ...).
 
-    Unlike `PercolatorQuery`, no `surface_forms` post-processing is
-    performed — the standard `EntitiesQuery` highlight block is
-    returned untouched.
+    Raises:
+        ValueError: if the entity is not indexed or has no names left after
+            `clean_matching_names`.
     """
 
     def __init__(self, parser: SearchQueryParser, entity_id: str):
@@ -384,21 +377,17 @@ class MentionsQuery(_Mentions):
 
 
 class MultiMentionsQuery(_Mentions):
-    """Find Document-family entities that mention any named entity in
-    a filtered source set.
+    """Find documents whose text mentions any of a filtered set of entities.
+    The source entities are collected on construction; each hit carries the
+    IDs of those it mentions as `_source.mention_sources`.
 
-    The source set is produced by a standard `EntitiesQuery` — any
-    filter that narrows it below `MAX_SOURCE_NAMES` works, across one
-    or multiple collections (`filter:dataset=a&filter:dataset=b` etc.).
+    Args:
+        parser: Query parameters of the documents.
+        source_parser: Query parameters selecting the source entities, with
+            at most 10,000 names (`MAX_SOURCE_NAMES`).
 
-    Construction does Stage 1 eagerly (one ES scroll) to materialize
-    the `self.source_entities` list; Stage 2 runs on `.search()`.
-
-    Each hit returned by `.search()` carries a
-    `_source.mention_sources` list — the source entity IDs whose
-    per-entity sub-bool fired on that document. Name collisions across
-    source entities (e.g. two Persons both named "John Smith") surface
-    all matching IDs.
+    Raises:
+        ValueError: if the source entities have more names.
     """
 
     def __init__(
