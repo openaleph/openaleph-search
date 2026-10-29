@@ -25,7 +25,7 @@ class QueryParser:
 
     def __init__(
         self,
-        args: MultiDict | dict[str, Any],
+        args: MultiDict | dict[str, Any] | list[tuple[str, Any]],
         auth: SearchAuth | None = None,
         limit: int | None = None,
         max_limit: int | None = MAX_PAGE,
@@ -143,13 +143,30 @@ class QueryParser:
 
 
 class SearchQueryParser(QueryParser):
-    """ElasticSearch-specific query parameters."""
+    """Query parameters of a search, see
+    [Query parameters](../parser.md).
+
+    Args:
+        args: URL-style parameters.
+        auth: Datasets the search may read, required with the `auth` setting.
+        limit: Page size, instead of the `limit` parameter.
+        max_limit: Upper bound on the `limit` parameter.
+
+    Raises:
+        RuntimeError: if `auth` is missing with the `auth` setting.
+    """
 
     # Facets with known, limited cardinality:
     SMALL_FACETS = ("schema", "schemata", "dataset", "countries", "languages")
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super(SearchQueryParser, self).__init__(*args, **kwargs)
+    def __init__(
+        self,
+        args: MultiDict | dict[str, Any] | list[tuple[str, Any]],
+        auth: SearchAuth | None = None,
+        limit: int | None = None,
+        max_limit: int | None = MAX_PAGE,
+    ) -> None:
+        super().__init__(args, auth, limit, max_limit)
         self.offset = min(MAX_PAGE, self.offset)
         if (self.limit + self.offset) > MAX_PAGE:
             self.limit = max(0, MAX_PAGE - self.offset)

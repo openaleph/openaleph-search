@@ -57,7 +57,13 @@ def query_delete(index, query, sync=False, **kwargs):
 
 
 class IndexStats(NamedTuple):
-    """Outcome of an indexing run."""
+    """Outcome of an indexing run.
+
+    Attributes:
+        indexed: Documents indexed.
+        failed: Documents rejected for good.
+        took: Duration of the run.
+    """
 
     indexed: int = 0
     failed: int = 0
@@ -309,11 +315,20 @@ async def _bulk(
 
 
 class Indexer:
-    """Transform entities and bulk-index them from a single process.
+    """Transform entities and bulk-index them from a single process: the
+    transform runs inline while the bulk requests are in flight.
 
-    The transform runs inline and each finished batch is handed to the event
-    loop as an outstanding bulk request, so CPU and network overlap without
-    any multiprocessing.
+    Args:
+        dataset: Dataset of the entities, required by [`index`][Indexer.index].
+        chunk_size: Entities per batch, defaults to `indexer_chunk_size`.
+        batch_bytes: Payload bytes per batch, defaults to `indexer_batch_bytes`.
+        concurrency: Upper bound on bulk requests in flight, defaults to
+            `indexer_concurrency`.
+        sync: Refresh, so the entities are searchable on return.
+        max_retries: Retries of a rejected batch, defaults to
+            `indexer_max_retries`.
+        **context: Passed to
+            [`format_entity`][openaleph_search.transform.entity.format_entity].
     """
 
     def __init__(
@@ -337,8 +352,18 @@ class Indexer:
         self.context = context
 
     def index(self, entities: Iterable[EntityLike]) -> IndexStats:
-        """Transform and index a stream of entities: proxies, or trusted entity
-        data that skips building one (see `format_entity`)."""
+        """Transform and index a stream of entities.
+
+        Args:
+            entities: Proxies, `EntityPayload`s or trusted entity dicts, see
+                [`format_entity`][openaleph_search.transform.entity.format_entity].
+
+        Returns:
+            Counts of the run.
+
+        Raises:
+            ValueError: if the indexer has no `dataset`.
+        """
         if self.dataset is None:
             raise ValueError("Indexer needs a `dataset` to transform entities")
         entities = logged_items(
@@ -351,7 +376,15 @@ class Indexer:
         return self._run(batches)
 
     def index_actions(self, actions: Actions) -> IndexStats:
-        """Index a stream of already formatted actions."""
+        """Index a stream of already formatted actions.
+
+        Args:
+            actions: Bulk actions, e.g. from
+                [`format_entities`][openaleph_search.transform.entity.format_entities].
+
+        Returns:
+            Counts of the run.
+        """
         actions = logged_items(actions, "Loading", 10_000, item_name="doc", logger=log)
         batches = iter_action_batches(actions, self.chunk_size)
         return self._run(batches)

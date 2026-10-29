@@ -9,7 +9,15 @@ settings = Settings()
 
 
 class SearchAuth(BaseModel):
-    """Control auth for dataset filter"""
+    """Datasets a search may read.
+
+    Attributes:
+        datasets: Readable datasets.
+        logged_in: Whether a user is logged in.
+        is_admin: Whether the user may read all datasets.
+        role: Role ID of the user.
+        collection_ids: Readable OpenAleph collections.
+    """
 
     datasets: set[str] = set()
     logged_in: bool = False
