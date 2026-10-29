@@ -247,11 +247,10 @@ class FieldType:
     NAME = {"type": "text", "similarity": "weak_length_norm", "store": True}
 
     # custom normalized name keywords (used for term aggregations et. al)
-    # this is used for registry.name.group. store for nicer highlighting
+    # this is used for registry.name.group
     NAME_KEYWORD = {
         "type": "keyword",
         "normalizer": NAME_KW_NORMALIZER,
-        "store": True,
         "ignore_above": KEYWORD_IGNORE_ABOVE,
     }
 

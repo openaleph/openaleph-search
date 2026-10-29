@@ -184,8 +184,9 @@ def test_mapping_spec():
     assert BASE_MAPPING["name"]["type"] == "text"
     assert "copy_to" not in BASE_MAPPING["name"]
 
-    # normalized names keywords
+    # normalized names keywords, not stored: nothing reads them back
     assert BASE_MAPPING["names"]["type"] == "keyword"
+    assert "store" not in BASE_MAPPING["names"]
 
     # other normalized name things not
     for f in ("name_keys", "name_parts", "name_phonetic"):
