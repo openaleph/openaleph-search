@@ -136,10 +136,10 @@ Upper bound in UTF-8 bytes for an entity's `indexText` (the `content` field); lo
 
 ### `indexer_max_names`
 
-Upper bound on the names of an entity that `name_keys`, `name_parts`, `name_phonetic` and `name_symbols` are computed for. The entity's own names come first, then the names it mentions (`namesMentioned`, `peopleMentioned`, `companiesMentioned`) in a stable order; a warning is logged. The properties themselves are indexed in full.
+Upper bound on the names of an entity. All of the entity's own names are kept, and a random sample of the names it mentions (`namesMentioned`, `peopleMentioned`, `companiesMentioned`) fills the rest; mentioned names outside the sample are dropped from the indexed properties, `name_keys`, `name_parts`, `name_phonetic` and `name_symbols` are computed for the rest, and a warning is logged. The sample is seeded with the entity id, so a reindex keeps the same names, while different documents keep different ones. The default is Elasticsearch's default `index.max_terms_count`, so all names of an entity fit one `terms` query; the transform takes about 1 second for a document at the bound.
 
 - Type: `int`
-- Default: `1000`
+- Default: `65536`
 
 ## Index structure
 
@@ -327,6 +327,20 @@ Enable function_score wrapper for scoring.
 
 When enabled, wraps queries with Elasticsearch function_score to apply a scoring that de-penalizes entity matches with many names. In practice this means, for a term "Jane Doe" Person entity results with this name are considered more relevant as mentions of that name in documents full-text. This has effect on search performance in big clusters.
 
+### `allow_leading_wildcard`
+
+Allow a leading wildcard (`*smith`) in search text. Such queries scan every term of a field.
+
+- Type: `bool`
+- Default: `false`
+
+### `eager_global_ordinals`
+
+Build global ordinals of the aggregated keyword fields at refresh instead of on the first aggregation after it: no latency spike on that aggregation, at the cost of slightly slower refreshes. Applies to indexes created or upgraded afterwards.
+
+- Type: `bool`
+- Default: `true`
+
 ## Highlighting
 
 [Read more](../highlighting.md)
@@ -450,6 +464,31 @@ export OPENALEPH_SEARCH_MATCH_NAME_PARTS=true
 export OPENALEPH_SEARCH_MATCH_PHONETIC=true
 export OPENALEPH_SEARCH_MATCH_SYMBOLS=true
 ```
+
+### `matching_single_token_min_length`
+
+Minimum length of a single-token name for it to become a query clause in the percolator and mentions queries. Single-token names are also dropped when the entity has a multi-token one. [Read more](../percolation.md)
+
+- Type: `int`
+- Default: `10`
+
+### `matching_multi_token_min_length`
+
+Minimum length that one token of a multi-token name must reach for the name to become a query clause in the percolator and mentions queries; drops initials like `"A. A."`.
+
+- Type: `int`
+- Default: `3`
+
+## Percolation
+
+[Read more](../percolation.md)
+
+### `percolation`
+
+Store a percolator query on things-bucket entities and enable `PercolatorQuery`. When false, `PercolatorQuery.search()` returns no hits. The mapping always has the `query` field, so enabling it needs a reindex, not a new mapping.
+
+- Type: `bool`
+- Default: `false`
 
 ## Authorization
 
