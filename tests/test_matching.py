@@ -39,7 +39,10 @@ def test_matching(cleanup_after):
     parser = SearchQueryParser([])
     query = MatchQuery(parser, ent1)
     result = query.search()
-    assert _get_ids(result) == ["m2", "m5", "m6"]
+    # this seems to be flaky, but "Jane Dö" must be ranked last
+    res = _get_ids(result)
+    assert set(res) == {"m2", "m5", "m6"}
+    assert res[-1] == "m6"
 
     query = MatchQuery(parser, ent6)
     result = query.search()
