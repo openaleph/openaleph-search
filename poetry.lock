@@ -1608,20 +1608,21 @@ pyflakes = ">=4.0.0,<4.1.0"
 
 [[package]]
 name = "followthemoney"
-version = "4.11.0"
+version = "4.11.2"
 description = "A data model for anti corruption data modeling and analysis."
 optional = false
 python-versions = ">=3.11"
 groups = ["main"]
 files = [
-    {file = "followthemoney-4.11.0-py3-none-any.whl", hash = "sha256:9bd561e3ce1fce7eb325c5ae7f14a19eeaf7054537ea88b699065f2830af4259"},
-    {file = "followthemoney-4.11.0.tar.gz", hash = "sha256:6a1f7e01fad3037a8c04c7973a42bd5b0591441caf9d9fe5b0b76dd9000e78f0"},
+    {file = "followthemoney-4.11.2-py3-none-any.whl", hash = "sha256:3cc259e9d9caf13e60f932d4d8c69b26d1d79beb6984513915b7eb7d025a7e46"},
+    {file = "followthemoney-4.11.2.tar.gz", hash = "sha256:cc86fdf8caf5265693a7dc0d8597a5da7ce2a0877fe8c751bef767a1ff0885e6"},
 ]
 
 [package.dependencies]
 babel = ">=2.14.0,<3.0.0"
 banal = ">=1.0.0,<1.2.0"
 click = ">=8.0,<9.0.0"
+idna = ">=3.0,<4.0"
 networkx = ">=2.5,<3.7"
 normality = ">=3.1.0,<4.0.0"
 openpyxl = ">=3.0.5,<4.0.0"
@@ -1633,7 +1634,7 @@ pyyaml = ">=5.0.0,<7.0.0"
 rdflib = ">=6.2.0,<7.7.0"
 requests = ">=2.21.0,<3.0.0"
 rich = ">=13.0.0,<16.0.0"
-rigour = ">=2.4.0,<3.0.0"
+rigour = ">=2.6.0,<3.0.0"
 sqlalchemy = {version = ">=2.0.0,<3.0.0", extras = ["mypy"]}
 
 [package.extras]
@@ -6847,7 +6848,6 @@ files = [
     {file = "zensical-0.0.71-cp311-abi3-macosx_10_12_x86_64.whl", hash = "sha256:57cad23c56a98d87a5eefa7948a98b6ecb479dc99fd7af312cd146555f55f060"},
     {file = "zensical-0.0.71-cp311-abi3-macosx_11_0_arm64.whl", hash = "sha256:81c069cc667946e0a505cc01b99d5ba44883c57f51b95bd5a38003007c5cb6cd"},
     {file = "zensical-0.0.71-cp311-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:bcae388415698cac874e662e667fc0683833cec747607c89037b7e9ad9828830"},
-    {file = "zensical-0.0.71-cp311-abi3-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:0b34f58a7f565d956651baf90389aafca5c37a407a72768f30293e415589b932"},
     {file = "zensical-0.0.71-cp311-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:fc8ed534717b61f285dc217f165f901f8b8a6142ef37cdd5544976cd99b5720c"},
     {file = "zensical-0.0.71-cp311-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:1e9e39aefdca4b3383b43014e117b27a1ca9f9ac4b25eefa9195099e5a566e2f"},
     {file = "zensical-0.0.71-cp311-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:d22b8924e5145d94bf85b81bd2a8afaeb32e78c8a1ddeb7f4201fc8902547221"},
@@ -6870,4 +6870,4 @@ tomli = ">=2.4.0"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.15"
-content-hash = "c100dcdabc19d9c384f928cb15feb804e35cb8abaffadc66467d33eac47ee746"
+content-hash = "0b6bbccdbad7c9d71d192b9c14341abb6719c673af61beb0ed5d4659d063a563"
