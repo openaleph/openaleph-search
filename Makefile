@@ -35,7 +35,7 @@ clean:
 
 documentation:
 	zensical build
-	putfs sync --delete ./site putfs://static.darc.zone/openaleph.org/docs/lib/openaleph-search
+	putfs sync --delete ./site putfs://static.darc.zone/darc.li/docs/openaleph-search
 
 SYNONYMS_URL=https://raw.githubusercontent.com/opensanctions/rigour/refs/heads/main/rust/data/names/person_names.txt
 SYNONYMS_FILE=contrib/person_name_synonyms.txt
